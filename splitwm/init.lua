@@ -1299,30 +1299,52 @@ local function setup_tabbar(c)
             table.insert(launcher_widgets, lw)
         end
 
-        awful.titlebar(c, { size = 33, position = "top" }):setup {
-            { -- Left: tab buttons
-                spacing = 2,
-                layout  = wibox.layout.fixed.horizontal,
-                table.unpack(tab_widgets),
-            },
-            nil, -- Middle: empty
-            { -- Right: launchers + split controls
-                {
+        local is_focused_leaf = (state.focused_leaf_id == leaf_id)
+        local bar_bg = is_focused_leaf
+            and (beautiful.titlebar_bg_focus  or "#000000")
+            or  (beautiful.titlebar_bg_normal or "#000000aa")
+
+        awful.titlebar(c, { size = 33, position = "top", bg = "#00000000" }):setup {
+            {
+                { -- Left: tab buttons
                     spacing = 2,
                     layout  = wibox.layout.fixed.horizontal,
-                    table.unpack(launcher_widgets),
+                    table.unpack(tab_widgets),
                 },
-                {
-                    width   = 8,
-                    widget  = wibox.container.constraint,
+                nil, -- Middle: empty
+                { -- Right: launchers + split controls
+                    {
+                        {
+                            spacing = 2,
+                            layout  = wibox.layout.fixed.horizontal,
+                            table.unpack(launcher_widgets),
+                        },
+                        {
+                            width   = 8,
+                            widget  = wibox.container.constraint,
+                        },
+                        vsplit_btn,
+                        hsplit_btn,
+                        close_split_btn,
+                        spacing = 5,
+                        layout  = wibox.layout.fixed.horizontal,
+                    },
+                    right  = 5,
+                    widget = wibox.container.margin,
                 },
-                vsplit_btn,
-                hsplit_btn,
-                close_split_btn,
-                spacing = 5,
-                layout  = wibox.layout.fixed.horizontal,
+                layout = wibox.layout.align.horizontal,
             },
-            layout = wibox.layout.align.horizontal,
+            bg     = bar_bg,
+            shape  = function(cr, w, h)
+                local r = 8
+                cr:new_sub_path()
+                cr:arc(r, r, r, math.pi, 1.5 * math.pi)
+                cr:arc(w - r, r, r, 1.5 * math.pi, 2 * math.pi)
+                cr:line_to(w, h)
+                cr:line_to(0, h)
+                cr:close_path()
+            end,
+            widget = wibox.container.background,
         }
     end
 
