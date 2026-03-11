@@ -97,6 +97,43 @@ local function make_launcher_widget(entry, size, callback)
     return w
 end
 
+--- Build a circular text button with hover highlight.
+local function make_circle_btn(label, size, callback)
+    local w = wibox.widget {
+        {
+            {
+                markup = '<span font_family="Sans">' .. label .. '</span>',
+                align  = "center",
+                valign = "center",
+                font   = beautiful.splitwm_btn_font or "monospace bold 14",
+                widget = wibox.widget.textbox,
+            },
+            halign = "center",
+            valign = "center",
+            widget = wibox.container.place,
+        },
+        bg           = "#000000",
+        fg           = "#ffffff",
+        shape        = gears.shape.circle,
+        forced_width  = size,
+        forced_height = size,
+        widget       = wibox.container.background,
+    }
+    w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
+    w:connect_signal("mouse::leave", function() w.bg = "#000000" end)
+    w:buttons(gears.table.join(awful.button({}, 1, callback)))
+    return w
+end
+
+--- Rounded-top rectangle shape (tabs + titlebars).
+local function rounded_top(cr, w, h)
+    local r = 8
+    cr:new_sub_path()
+    cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
+    cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
+    cr:line_to(w, h) cr:line_to(0, h) cr:close_path()
+end
+
 ---------------------------------------------------------------------------
 -- Split node data model
 ---------------------------------------------------------------------------
@@ -205,99 +242,45 @@ end
 -- Geometry computation: walk the tree and compute pixel rects
 ---------------------------------------------------------------------------
 
-local function compute_geometries(node, x, y, w, h, gap, out, is_root)
-    out = out or {}
-    -- On the root call, apply outer margin first
-    if is_root == nil then is_root = true end
-    if is_root then
-        x = x + gap
-        y = y + gap
-        w = w - 2 * gap
-        h = h - 2 * gap
-        return compute_geometries(node, x, y, w, h, gap, out, false)
+--- Walk the tree computing geometry rects (geos) and/or split boundaries (bounds).
+local function compute_tree(node, x, y, w, h, gap, geos, bounds, is_root)
+    if is_root ~= false then
+        return compute_tree(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, false)
     end
-
     if node.type == "leaf" then
-        out[node.id] = { x = x, y = y, width = w, height = h }
-    else
-        local dir   = node.direction
-        local ratio = node.ratio
-        local inner = gap  -- gap between splits matches outer margin
-        if dir == "h" then
-            local usable = w - inner  -- subtract one inner gap
-            local w1 = math.floor(usable * ratio)
-            local w2 = usable - w1
-            compute_geometries(node.children[1], x,              y, w1, h, gap, out, false)
-            compute_geometries(node.children[2], x + w1 + inner, y, w2, h, gap, out, false)
-        else -- "v"
-            local usable = h - inner
-            local h1 = math.floor(usable * ratio)
-            local h2 = usable - h1
-            compute_geometries(node.children[1], x, y,              w, h1, gap, out, false)
-            compute_geometries(node.children[2], x, y + h1 + inner, w, h2, gap, out, false)
-        end
+        if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
+        return
     end
-    return out
-end
-
---- Walk the tree and collect split boundaries (the edges between children
---  of branch nodes). Each boundary has a position, extent, direction,
---  and a reference to the branch node so we can adjust its ratio.
-local function compute_boundaries(node, x, y, w, h, gap, out, is_root)
-    out = out or {}
-    if is_root == nil then is_root = true end
-    if is_root then
-        x = x + gap
-        y = y + gap
-        w = w - 2 * gap
-        h = h - 2 * gap
-        return compute_boundaries(node, x, y, w, h, gap, out, false)
-    end
-
-    if node.type == "leaf" then return out end
-
-    local dir   = node.direction
-    local ratio = node.ratio
-    local inner = gap
-
+    local dir, ratio, inner = node.direction, node.ratio, gap
     if dir == "h" then
         local usable = w - inner
         local w1 = math.floor(usable * ratio)
-        local w2 = usable - w1
-        -- The divider center sits in the inner gap between children
-        local split_x = x + w1 + math.floor(inner / 2)
-        table.insert(out, {
-            branch = node,
-            dir    = "h",
-            pos    = split_x,
-            start  = y,
-            span   = h,
-            parent_x = x,
-            parent_w = w,
-            parent_gap = inner,
-        })
-        compute_boundaries(node.children[1], x,              y, w1, h, gap, out, false)
-        compute_boundaries(node.children[2], x + w1 + inner, y, w2, h, gap, out, false)
-    else -- "v"
+        if bounds then
+            table.insert(bounds, { branch = node, dir = "h",
+                pos = x + w1 + math.floor(inner / 2),
+                start = y, span = h, parent_x = x, parent_w = w, parent_gap = inner })
+        end
+        compute_tree(node.children[1], x,          y, w1,         h, gap, geos, bounds, false)
+        compute_tree(node.children[2], x+w1+inner, y, usable-w1,  h, gap, geos, bounds, false)
+    else
         local usable = h - inner
         local h1 = math.floor(usable * ratio)
-        local h2 = usable - h1
-        local split_y = y + h1 + math.floor(inner / 2)
-        table.insert(out, {
-            branch = node,
-            dir    = "v",
-            pos    = split_y,
-            start  = x,
-            span   = w,
-            parent_y = y,
-            parent_h = h,
-            parent_gap = inner,
-        })
-        compute_boundaries(node.children[1], x, y,              w, h1, gap, out, false)
-        compute_boundaries(node.children[2], x, y + h1 + inner, w, h2, gap, out, false)
+        if bounds then
+            table.insert(bounds, { branch = node, dir = "v",
+                pos = y + h1 + math.floor(inner / 2),
+                start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner })
+        end
+        compute_tree(node.children[1], x, y,          w, h1,        gap, geos, bounds, false)
+        compute_tree(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, false)
     end
+end
 
-    return out
+local function compute_geometries(node, x, y, w, h, gap)
+    local geos = {}; compute_tree(node, x, y, w, h, gap, geos, nil); return geos
+end
+
+local function compute_boundaries(node, x, y, w, h, gap)
+    local bounds = {}; compute_tree(node, x, y, w, h, gap, nil, bounds); return bounds
 end
 
 ---------------------------------------------------------------------------
@@ -706,33 +689,36 @@ local function make_indicator_widget()
 end
 
 ---------------------------------------------------------------------------
+-- Shared UI helpers
+---------------------------------------------------------------------------
+
+local function clear_wiboxes(tbl, s)
+    if tbl[s] then for _, wb in ipairs(tbl[s]) do wb.visible = false end end
+    tbl[s] = {}
+end
+
+--- Returns (tag, state) if the screen has an active splitwm tag, else (nil, nil).
+local function get_active_state(s)
+    local t = s.selected_tag
+    if not t or not t.layout or t.layout.name ~= "splitwm" then return nil, nil end
+    return t, get_state(t)
+end
+
+---------------------------------------------------------------------------
 -- Overlay wiboxes for empty splits (so you can see and click them)
 ---------------------------------------------------------------------------
 
 local overlay_wiboxes = {}
 
 local function update_overlays(s)
-    -- Clear old overlays for this screen
-    if overlay_wiboxes[s] then
-        for _, wb in ipairs(overlay_wiboxes[s]) do
-            wb.visible = false
-        end
-    end
-    overlay_wiboxes[s] = {}
-
-    local t = s.selected_tag
+    clear_wiboxes(overlay_wiboxes, s)
+    local t, state = get_active_state(s)
     if not t then return end
-    local state = get_state(t)
-    -- Check if this tag is actually using our layout
-    if not t.layout or t.layout.name ~= "splitwm" then return end
 
     local wa = s.workarea
     local gap = beautiful.splitwm_gap or 16
-    local geos = compute_geometries(state.root, wa.x, wa.y,
-                                     wa.width, wa.height, gap)
-
+    local geos = compute_geometries(state.root, wa.x, wa.y, wa.width, wa.height, gap)
     local focus_bw = beautiful.splitwm_focus_border_width or 2
-    local focus_bc = beautiful.splitwm_focus_border or "#7799dd"
 
     for _, leaf in ipairs(collect_leaves(state.root)) do
         if #leaf.tabs == 0 then
@@ -741,55 +727,19 @@ local function update_overlays(s)
                 local focused = leaf.id == state.focused_leaf_id
                 local leaf_id = leaf.id
 
-                -- Helper for overlay buttons
-                local btn_font = beautiful.splitwm_btn_font or "monospace bold 14"
-                local overlay_btn_size = 36
-                local function make_overlay_btn(label, bg_color, callback)
-                    local w = wibox.widget {
-                        {
-                            {
-                                markup = '<span font_family="Sans">' .. label .. '</span>',
-                                align  = "center",
-                                valign = "center",
-                                font   = btn_font,
-                                widget = wibox.widget.textbox,
-                            },
-                            halign = "center",
-                            valign = "center",
-                            widget = wibox.container.place,
-                        },
-                        bg            = "#000000",
-                        fg            = "#ffffff",
-                        shape         = gears.shape.circle,
-                        forced_width  = overlay_btn_size,
-                        forced_height = overlay_btn_size,
-                        widget        = wibox.container.background,
-                    }
-                    w:connect_signal("mouse::enter", function()
-                        w.bg = "#333333"
-                    end)
-                    w:connect_signal("mouse::leave", function()
-                        w.bg = "#000000"
-                    end)
-                    w:buttons(gears.table.join(
-                        awful.button({}, 1, callback)
-                    ))
-                    return w
-                end
-
-                local vsplit_btn = make_overlay_btn("│", "#444444", function()
+                local vsplit_btn = make_circle_btn("│", 36, function()
                     state.focused_leaf_id = leaf_id
                     split_leaf(t, "h")
                     awful.layout.arrange(s)
                 end)
 
-                local hsplit_btn = make_overlay_btn("─", "#444444", function()
+                local hsplit_btn = make_circle_btn("─", 36, function()
                     state.focused_leaf_id = leaf_id
                     split_leaf(t, "v")
                     awful.layout.arrange(s)
                 end)
 
-                local close_btn = make_overlay_btn("✕", "#553333", function()
+                local close_btn = make_circle_btn("✕", 36, function()
                     close_leaf(t, leaf_id)
                     awful.layout.arrange(s)
                 end)
@@ -880,18 +830,9 @@ end
 local focus_border_wiboxes = {}  -- keyed by screen
 
 local function update_focus_border(s)
-    -- Clear old
-    if focus_border_wiboxes[s] then
-        for _, wb in ipairs(focus_border_wiboxes[s]) do
-            wb.visible = false
-        end
-    end
-    focus_border_wiboxes[s] = {}
-
-    local t = s.selected_tag
+    clear_wiboxes(focus_border_wiboxes, s)
+    local t, state = get_active_state(s)
     if not t then return end
-    local state = get_state(t)
-    if not t.layout or t.layout.name ~= "splitwm" then return end
 
     local wa = s.workarea
     local gap = beautiful.splitwm_gap or 16
@@ -948,23 +889,13 @@ local HANDLE_THICKNESS = 6  -- pixels, the clickable/draggable zone
 local drag_handles = {}  -- keyed by screen
 
 local function update_drag_handles(s)
-    -- Clear old handles
-    if drag_handles[s] then
-        for _, wb in ipairs(drag_handles[s]) do
-            wb.visible = false
-        end
-    end
-    drag_handles[s] = {}
-
-    local t = s.selected_tag
+    clear_wiboxes(drag_handles, s)
+    local t, state = get_active_state(s)
     if not t then return end
-    local state = get_state(t)
-    if not t.layout or t.layout.name ~= "splitwm" then return end
 
     local wa = s.workarea
     local gap = beautiful.splitwm_gap or 16
-    local boundaries = compute_boundaries(state.root,
-        wa.x, wa.y, wa.width, wa.height, gap)
+    local boundaries = compute_boundaries(state.root, wa.x, wa.y, wa.width, wa.height, gap)
 
     -- Make handle thickness at least as wide as the gap so the entire
     -- gap zone between splits is draggable
@@ -1088,7 +1019,6 @@ local function setup_tabbar(c)
         if leaf.tabs[leaf.active_tab] ~= c then return end
 
         local leaf_id = leaf.id
-        local btn_font = beautiful.splitwm_btn_font or "monospace bold 14"
 
         -- Tab indicators with app icon, move and close buttons
         local tab_widgets = {}
@@ -1205,16 +1135,7 @@ local function setup_tabbar(c)
                     widget = wibox.container.margin,
                 },
                 bg = tab_bg,
-                shape = function(cr, w, h)
-                    -- Top-only rounded corners
-                    local r = 8
-                    cr:new_sub_path()
-                    cr:arc(r, r, r, math.pi, 1.5 * math.pi)
-                    cr:arc(w - r, r, r, 1.5 * math.pi, 2 * math.pi)
-                    cr:line_to(w, h)
-                    cr:line_to(0, h)
-                    cr:close_path()
-                end,
+                shape = rounded_top,
                 widget = wibox.container.background,
             }
             awful.tooltip {
@@ -1229,57 +1150,20 @@ local function setup_tabbar(c)
             table.insert(tab_widgets, tab_widget)
         end
 
-        -- Helper to make a titlebar button (perfect circle)
-        local btn_size = 26
-        local function make_btn(label, bg_color, callback)
-            local w = wibox.widget {
-                {
-                    {
-                        markup = '<span font_family="Sans">' .. label .. '</span>',
-                        align  = "center",
-                        valign = "center",
-                        font   = btn_font,
-                        widget = wibox.widget.textbox,
-                    },
-                    halign = "center",
-                    valign = "center",
-                    widget = wibox.container.place,
-                },
-                bg           = "#000000",
-                fg           = "#ffffff",
-                shape        = gears.shape.circle,
-                forced_width  = btn_size,
-                forced_height = btn_size,
-                widget       = wibox.container.background,
-            }
-            w:connect_signal("mouse::enter", function()
-                w.bg = "#333333"
-            end)
-            w:connect_signal("mouse::leave", function()
-                w.bg = "#000000"
-            end)
-            w:buttons(gears.table.join(
-                awful.button({}, 1, callback)
-            ))
-            return w
-        end
-
-        -- Vertical split button (split side by side)
-        local vsplit_btn = make_btn("│", "#444444", function()
+        -- Titlebar split/close buttons
+        local vsplit_btn = make_circle_btn("│", 26, function()
             state.focused_leaf_id = leaf_id
             split_leaf(t, "h")
             awful.layout.arrange(c.screen)
         end)
 
-        -- Horizontal split button (split top/bottom)
-        local hsplit_btn = make_btn("─", "#444444", function()
+        local hsplit_btn = make_circle_btn("─", 26, function()
             state.focused_leaf_id = leaf_id
             split_leaf(t, "v")
             awful.layout.arrange(c.screen)
         end)
 
-        -- Close split button
-        local close_split_btn = make_btn("✕", "#553333", function()
+        local close_split_btn = make_circle_btn("✕", 26, function()
             close_leaf(t, leaf_id)
             awful.layout.arrange(c.screen)
         end)
@@ -1335,15 +1219,7 @@ local function setup_tabbar(c)
                 layout = wibox.layout.align.horizontal,
             },
             bg     = bar_bg,
-            shape  = function(cr, w, h)
-                local r = 8
-                cr:new_sub_path()
-                cr:arc(r, r, r, math.pi, 1.5 * math.pi)
-                cr:arc(w - r, r, r, 1.5 * math.pi, 2 * math.pi)
-                cr:line_to(w, h)
-                cr:line_to(0, h)
-                cr:close_path()
-            end,
+            shape  = rounded_top,
             widget = wibox.container.background,
         }
     end
@@ -1386,63 +1262,23 @@ splitwm.layout = {
 -- Keybinding helpers
 ---------------------------------------------------------------------------
 
-function splitwm.split_horizontal()
-    local t = awful.screen.focused().selected_tag
-    if t then split_leaf(t, "h"); awful.layout.arrange(awful.screen.focused()) end
+local function with_tag(fn)
+    local s = awful.screen.focused()
+    local t = s.selected_tag
+    if t then fn(t); awful.layout.arrange(s) end
 end
 
-function splitwm.split_vertical()
-    local t = awful.screen.focused().selected_tag
-    if t then split_leaf(t, "v"); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.close_split()
-    local t = awful.screen.focused().selected_tag
-    if not t then return end
-    local state = get_state(t)
-    close_leaf(t, state.focused_leaf_id)
-    awful.layout.arrange(awful.screen.focused())
-end
-
-function splitwm.focus_next_split()
-    local t = awful.screen.focused().selected_tag
-    if t then focus_direction(t, "next"); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.focus_prev_split()
-    local t = awful.screen.focused().selected_tag
-    if t then focus_direction(t, "prev"); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.next_tab()
-    local t = awful.screen.focused().selected_tag
-    if t then cycle_tab(t, 1); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.prev_tab()
-    local t = awful.screen.focused().selected_tag
-    if t then cycle_tab(t, -1); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.move_tab_next()
-    local t = awful.screen.focused().selected_tag
-    if t then move_tab_to_direction(t, "next"); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.move_tab_prev()
-    local t = awful.screen.focused().selected_tag
-    if t then move_tab_to_direction(t, "prev"); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.resize_grow()
-    local t = awful.screen.focused().selected_tag
-    if t then resize_focused(t, 0.05); awful.layout.arrange(awful.screen.focused()) end
-end
-
-function splitwm.resize_shrink()
-    local t = awful.screen.focused().selected_tag
-    if t then resize_focused(t, -0.05); awful.layout.arrange(awful.screen.focused()) end
-end
+splitwm.split_horizontal = function() with_tag(function(t) split_leaf(t, "h") end) end
+splitwm.split_vertical   = function() with_tag(function(t) split_leaf(t, "v") end) end
+splitwm.focus_next_split = function() with_tag(function(t) focus_direction(t, "next") end) end
+splitwm.focus_prev_split = function() with_tag(function(t) focus_direction(t, "prev") end) end
+splitwm.next_tab         = function() with_tag(function(t) cycle_tab(t, 1) end) end
+splitwm.prev_tab         = function() with_tag(function(t) cycle_tab(t, -1) end) end
+splitwm.move_tab_next    = function() with_tag(function(t) move_tab_to_direction(t, "next") end) end
+splitwm.move_tab_prev    = function() with_tag(function(t) move_tab_to_direction(t, "prev") end) end
+splitwm.resize_grow      = function() with_tag(function(t) resize_focused(t, 0.05) end) end
+splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -0.05) end) end
+splitwm.close_split      = function() with_tag(function(t) close_leaf(t, get_state(t).focused_leaf_id) end) end
 
 function splitwm.cancel_pickup()
     if picked_up_client then
