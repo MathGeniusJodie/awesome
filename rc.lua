@@ -354,7 +354,7 @@ local function make_battery_widget()
     function w:fit(_, _, h) return 24, h end
 
     function w:draw(_, cr, width, height)
-        local bw, bh = 9, 15
+        local bw, bh = 9, 13
         local nub_w, nub_h = 5, 2
         local bx = math.floor((width - bw) / 2)
         local nub_top = math.floor((height - bh - nub_h) / 2)
@@ -495,7 +495,7 @@ local function make_chip_widget()
     w.ram  = 0
     w.swap = 0
 
-    local cw, ch    = 15, 15
+    local cw, ch    = 15, 13
     local pin_len   = 3
     local n_pins    = 3
 
@@ -619,6 +619,10 @@ gears.timer { timeout = 30, autostart = true, call_now = true, callback = refres
 gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume }
 gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_chip }
 
+local bar_margin     = 6
+local capsule_height = 32
+local wibar_height   = bar_margin + capsule_height  -- top_margin + capsule = 38
+
 --- Build a single tag button: circle + dots drawn via Cairo below.
 local function make_tag_widget(t)
     -- Custom dot-indicator widget: draws N white circles via Cairo directly.
@@ -673,8 +677,8 @@ local function make_tag_widget(t)
     place_c:set_widget(label)
 
     local circle = wibox.container.background()
-    circle.forced_width  = 26
-    circle.forced_height = 26
+    circle.forced_width  = capsule_height
+    circle.forced_height = capsule_height
     circle.shape         = gears.shape.circle
     circle.bg            = "#00000080"
     circle:set_widget(place_c)
@@ -683,18 +687,12 @@ local function make_tag_widget(t)
         circle.bg = t.selected and "#000000" or "#00000080"
     end
 
-    -- Vertical stack: circle on top, dots below
-    local vbox = wibox.layout.fixed.vertical()
-    vbox.spacing = 2
-    vbox:add(circle)
-    vbox:add(dots)
+    -- Circle pinned to top; dots pushed to the very bottom of the bar
+    local tag_layout = wibox.layout.stack()
+    tag_layout:add(wibox.container.margin(circle, 0, 0, bar_margin, 0))
+    tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - 7, 0))
 
-    local margin = wibox.container.margin()
-    margin:set_top(3)
-    margin:set_bottom(3)
-    margin:set_widget(vbox)
-
-    margin:buttons(gears.table.join(
+    tag_layout:buttons(gears.table.join(
         awful.button({}, 1, function() t:view_only() end)
     ))
 
@@ -704,7 +702,7 @@ local function make_tag_widget(t)
 
     update_circle()
     update_dots()
-    return margin
+    return tag_layout
 end
 
 awful.screen.connect_for_each_screen(function(s)
@@ -728,14 +726,14 @@ awful.screen.connect_for_each_screen(function(s)
     mydate.font = "monospace 12"
     local function update_date()
         local t = os.date("*t")
-        mydate.text = " " .. dow_codes[t.wday] .. " " .. mon_codes[t.month]
+        mydate.text = dow_codes[t.wday] .. " " .. mon_codes[t.month]
                       .. " " .. string.format("%02d", t.day)
-                      .. " " .. string.format("%02d", t.year % 100) .. " "
+                      .. " " .. string.format("%02d", t.year % 100)
     end
     update_date()
     gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_date }
 
-    local myclock = wibox.widget.textclock(" %I:%M %p ")
+    local myclock = wibox.widget.textclock("%I:%M %p")
     myclock.font = "monospace bold 12"
 
     local bat_widget = make_battery_widget()
@@ -747,28 +745,51 @@ awful.screen.connect_for_each_screen(function(s)
     local chip_widget = make_chip_widget()
     table.insert(chip_widgets, chip_widget)
 
+    -- Capsule helper: wraps widget(s) in a black pill-shaped background
+    local function capsule(inner, pad_l, pad_r)
+        local bg = wibox.container.background()
+        bg.bg    = "#000000"
+        bg.forced_height = capsule_height
+        bg.shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, h / 2) end
+        bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
+        return wibox.container.margin(bg, 0, 0, bar_margin, 0)
+    end
+
+    -- Status icons capsule (chip + battery + volume)
+    local icons_row = wibox.layout.fixed.horizontal()
+    icons_row.spacing = 4
+    icons_row:add(chip_widget)
+    icons_row:add(bat_widget)
+    icons_row:add(vol_widget)
+    local status_capsule = capsule(icons_row, 8, 8)
+
+    -- Date / clock capsule
+    local dt_row = wibox.layout.fixed.horizontal()
+    dt_row.spacing = 8
+    dt_row:add(mydate)
+    dt_row:add(myclock)
+    local dt_capsule = capsule(dt_row, 12, 12)
+
     s.mywibox = awful.wibar {
         position = "top",
         screen   = s,
-        height   = 42,
-        bg       = beautiful.splitwm_inactive_bg,
+        height   = wibar_height,
+        bg       = "#00000000",
     }
     s.mywibox:setup {
         layout = wibox.layout.align.horizontal,
         { -- Left
             layout = wibox.layout.fixed.horizontal,
-            s.mytaglist,
+            wibox.container.margin(s.mytaglist, bar_margin, 0, 0, 0),
             s.mypromptbox,
         },
         nil, -- Center: empty
         { -- Right
             layout = wibox.layout.fixed.horizontal,
+            spacing = bar_margin,
             wibox.widget.systray(),
-            chip_widget,
-            bat_widget,
-            vol_widget,
-            mydate,
-            myclock,
+            status_capsule,
+            wibox.container.margin(dt_capsule, 0, bar_margin, 0, 0),
         },
     }
 end)
