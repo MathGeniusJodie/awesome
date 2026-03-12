@@ -616,69 +616,6 @@ local function arrange(p)
 end
 
 ---------------------------------------------------------------------------
--- Wibar indicator widget (shows split tree + tabs)
----------------------------------------------------------------------------
-
-local function make_indicator_widget()
-    -- Returns a widget that visualizes the current split tree
-    local w = wibox.widget.textbox()
-    w.font = beautiful.splitwm_font or "monospace 14"
-
-    local function update()
-        local s = awful.screen.focused()
-        if not s then return end
-        local t = s.selected_tag
-        if not t then return end
-        local state = get_state(t)
-        local leaves = collect_leaves(state.root)
-        local parts = {}
-        for _, leaf in ipairs(leaves) do
-            local focused = leaf.id == state.focused_leaf_id
-            local prefix = focused and ">" or " "
-            local n_tabs = #leaf.tabs
-            local active = leaf.active_tab
-            local tab_str
-            if n_tabs == 0 then
-                tab_str = "empty"
-            else
-                local tab_parts = {}
-                for i = 1, n_tabs do
-                    local name = leaf.tabs[i].name or "?"
-                    -- Truncate
-                    if #name > 12 then name = name:sub(1, 11) .. "…" end
-                    if i == active then
-                        table.insert(tab_parts, "[" .. name .. "]")
-                    else
-                        table.insert(tab_parts, " " .. name .. " ")
-                    end
-                end
-                tab_str = table.concat(tab_parts, "")
-            end
-            table.insert(parts, prefix .. tab_str)
-        end
-        w:set_text(table.concat(parts, " | "))
-    end
-
-    -- Update on various signals
-    tag.connect_signal("property::selected", update)
-    tag.connect_signal("property::layout", update)
-    client.connect_signal("manage", update)
-    client.connect_signal("unmanage", update)
-    client.connect_signal("property::name", update)
-    client.connect_signal("focus", update)
-
-    -- Also update on a timer for tab switches etc.
-    gears.timer {
-        timeout   = 0.5,
-        autostart = true,
-        callback  = update,
-    }
-
-    update()
-    return w
-end
-
----------------------------------------------------------------------------
 -- Shared UI helpers
 ---------------------------------------------------------------------------
 
@@ -1462,7 +1399,6 @@ function splitwm.flush_caches()
     end
 end
 
-splitwm.indicator = make_indicator_widget
 splitwm.get_state = get_state
 splitwm.collect_leaves = collect_leaves
 
