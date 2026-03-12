@@ -1040,6 +1040,42 @@ local function setup_tabbar(c)
     -- This gets rebuilt whenever the layout arranges
     local titlebar_hovered = false
     local titlebar_btn_list = {}
+    -- Tooltip pool: reused across rebuilds to avoid leaking X windows.
+    -- Each slot: { tt = awful.tooltip, prev_obj = widget_it_is_attached_to }
+    local tooltip_pool = {}
+    local BTN_SPACING = 5
+
+    -- Button factory for titlebar controls. Defined once per client (not per rebuild).
+    -- Buttons are registered in titlebar_btn_list so hover state can be synced.
+    local function make_tb_btn(label, size, callback)
+        local w = wibox.widget {
+            {
+                {
+                    markup = '<span font_family="Sans">' .. label .. '</span>',
+                    align  = "center",
+                    valign = "center",
+                    font   = beautiful.splitwm_btn_font or "monospace bold 14",
+                    widget = wibox.widget.textbox,
+                },
+                halign = "center",
+                valign = "center",
+                widget = wibox.container.place,
+            },
+            bg           = beautiful.splitwm_inactive_bg or "#00000080",
+            fg           = "#ffffff",
+            shape        = gears.shape.circle,
+            forced_width  = size,
+            forced_height = size,
+            widget       = wibox.container.background,
+        }
+        w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
+        w:connect_signal("mouse::leave", function()
+            w.bg = titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080")
+        end)
+        w:buttons(gears.table.join(awful.button({}, 1, callback)))
+        table.insert(titlebar_btn_list, w)
+        return w
+    end
 
     local function update_titlebar()
         local t = c.first_tag
@@ -1068,36 +1104,6 @@ local function setup_tabbar(c)
 
         -- Reset titlebar button list for this rebuild
         titlebar_btn_list = {}
-        local BTN_SPACING = 5
-        local function make_tb_btn(label, size, callback)
-            local w = wibox.widget {
-                {
-                    {
-                        markup = '<span font_family="Sans">' .. label .. '</span>',
-                        align  = "center",
-                        valign = "center",
-                        font   = beautiful.splitwm_btn_font or "monospace bold 14",
-                        widget = wibox.widget.textbox,
-                    },
-                    halign = "center",
-                    valign = "center",
-                    widget = wibox.container.place,
-                },
-                bg           = beautiful.splitwm_inactive_bg or "#00000080",
-                fg           = "#ffffff",
-                shape        = gears.shape.circle,
-                forced_width  = size,
-                forced_height = size,
-                widget       = wibox.container.background,
-            }
-            w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
-            w:connect_signal("mouse::leave", function()
-                w.bg = titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080")
-            end)
-            w:buttons(gears.table.join(awful.button({}, 1, callback)))
-            table.insert(titlebar_btn_list, w)
-            return w
-        end
 
         -- Tab indicators with app icon, move and close buttons
         local tab_widgets = {}
@@ -1217,16 +1223,41 @@ local function setup_tabbar(c)
                 shape = rounded_top,
                 widget = wibox.container.background,
             }
-            awful.tooltip {
-                objects        = { tab_widget },
-                text           = name,
-                delay_show     = 0.3,
-                font           = "monospace bold 12",
-                bg             = "#000000",
-                fg             = "#ffffff",
-                border_width   = 0,
-            }
+            -- Reuse tooltip from pool to avoid leaking X windows on every rebuild
+            local slot = tooltip_pool[i]
+            if not slot then
+                slot = {
+                    tt = awful.tooltip {
+                        text         = name,
+                        delay_show   = 0.3,
+                        font         = "monospace bold 12",
+                        bg           = "#000000",
+                        fg           = "#ffffff",
+                        border_width = 0,
+                    },
+                }
+                tooltip_pool[i] = slot
+            else
+                slot.tt.text = name
+                if slot.prev_obj then
+                    slot.tt:remove_from_object(slot.prev_obj)
+                    slot.tt.visible = false
+                end
+            end
+            slot.tt:add_to_object(tab_widget)
+            slot.prev_obj = tab_widget
+
             table.insert(tab_widgets, tab_widget)
+        end
+
+        -- Detach and dismiss tooltips for slots beyond the current tab count
+        for i = #leaf.tabs + 1, #tooltip_pool do
+            local slot = tooltip_pool[i]
+            if slot and slot.prev_obj then
+                slot.tt:remove_from_object(slot.prev_obj)
+                slot.tt.visible = false
+                slot.prev_obj = nil
+            end
         end
 
         -- Menu button (right after tabs, on the left side)
