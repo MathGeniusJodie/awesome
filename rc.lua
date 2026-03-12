@@ -345,9 +345,6 @@ beautiful.fg_focus       = "#ffffff"
 local battery_widgets = {}
 local volume_widgets  = {}
 
-local icon_font = "Noto Color Emoji 16"
-local function icon(ch) return '<span font="' .. icon_font .. '">' .. ch .. '</span>' end
-
 local function make_battery_widget()
     local w = wibox.widget.base.make_widget()
     w.percentage = 0
@@ -356,7 +353,7 @@ local function make_battery_widget()
     function w:fit(_, _, h) return 24, h end
 
     function w:draw(_, cr, width, height)
-        local bw, bh = 14, 22
+        local bw, bh = 11, 18
         local nub_w, nub_h = 6, 3
         local bx = math.floor((width - bw) / 2)
         local nub_top = math.floor((height - bh - nub_h) / 2)
@@ -370,15 +367,13 @@ local function make_battery_widget()
         cr:rectangle(nub_x, nub_top, nub_w, nub_h)
         cr:fill()
 
-        -- Body outline (1px corner radius)
+        -- Body outline (subtle corner radius)
         cr:set_source_rgba(1, 1, 1, 1)
         cr:set_line_width(2)
-        local r = 1.5
-        cr:arc(bx + r,      by + r,      r, math.pi,       3*math.pi/2)
-        cr:arc(bx + bw - r, by + r,      r, 3*math.pi/2,   0)
-        cr:arc(bx + bw - r, by + bh - r, r, 0,             math.pi/2)
-        cr:arc(bx + r,      by + bh - r, r, math.pi/2,     math.pi)
-        cr:close_path()
+        cr:save()
+        cr:translate(bx, by)
+        gears.shape.rounded_rect(cr, bw, bh, 1.5)
+        cr:restore()
         cr:stroke()
 
         -- Fill (from bottom up)
@@ -430,21 +425,65 @@ local function refresh_battery()
     end
 end
 
+local function make_volume_widget()
+    local w = wibox.widget.base.make_widget()
+    w.volume = 0
+    w.muted  = false
+
+    function w:fit(_, _, h) return 28, h end
+
+    function w:draw(_, cr, _, height)
+        local cy = height / 2
+        local sx = 3  -- left edge of speaker body
+
+        cr:set_source_rgba(1, 1, 1, 1)
+
+        -- Speaker body: box + flared cone (filled polygon)
+        cr:move_to(sx,      cy + 4)
+        cr:line_to(sx,      cy - 4)
+        cr:line_to(sx + 4,  cy - 4)
+        cr:line_to(sx + 10, cy - 8)
+        cr:line_to(sx + 10, cy + 8)
+        cr:line_to(sx + 4,  cy + 4)
+        cr:close_path()
+        cr:fill()
+
+        -- Sound waves or mute X, starting just right of the cone tip
+        local ax = sx + 10
+        cr:set_line_width(1.5)
+
+        if self.muted then
+            local cx, s = ax + 7, 3.5
+            cr:set_line_width(2.5)
+            cr:set_line_cap(1)  -- ROUND
+            cr:move_to(cx - s, cy - s) cr:line_to(cx + s, cy + s) cr:stroke()
+            cr:move_to(cx + s, cy - s) cr:line_to(cx - s, cy + s) cr:stroke()
+        else
+            local waves = self.volume > 60 and 3
+                       or self.volume > 25 and 2
+                       or self.volume >  0 and 1
+                       or 0
+            for i = 1, waves do
+                cr:arc(ax, cy, i * 3.5, -math.pi / 2.8, math.pi / 2.8)
+                cr:stroke()
+            end
+        end
+    end
+
+    return w
+end
+
 local function refresh_volume()
     awful.spawn.easy_async_with_shell(
         "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null; pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null",
         function(out)
-            local markup = ""
-            if out:match("Mute: yes") then
-                markup = " " .. icon("🔇") .. " "
-            else
-                local vol = tonumber(out:match("(%d+)%%"))
-                if vol then
-                    local ic = vol > 50 and icon("🔊") or (vol > 10 and icon("🔉") or icon("🔈"))
-                    markup = " " .. ic .. " "
-                end
+            local muted = out:match("Mute: yes") ~= nil
+            local vol   = tonumber(out:match("(%d+)%%")) or 0
+            for _, w in ipairs(volume_widgets) do
+                w.volume = vol
+                w.muted  = muted
+                w:emit_signal("widget::redraw_needed")
             end
-            for _, w in ipairs(volume_widgets) do w:set_markup(markup) end
         end
     )
 end
@@ -560,8 +599,7 @@ awful.screen.connect_for_each_screen(function(s)
     local bat_widget = make_battery_widget()
     table.insert(battery_widgets, bat_widget)
 
-    local vol_widget = wibox.widget.textbox()
-    vol_widget.font  = "monospace bold 12"
+    local vol_widget = make_volume_widget()
     table.insert(volume_widgets, vol_widget)
 
     s.mywibox = awful.wibar {
