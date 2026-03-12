@@ -611,9 +611,9 @@ local function arrange(p)
                     c.border_width = 0
                     c:geometry({
                         x      = geo.x + focus_bw,
-                        y      = geo.y + focus_bw,
+                        y      = geo.y + focus_bw - math.floor(gap / 2),
                         width  = math.max(1, geo.width - 2 * focus_bw),
-                        height = math.max(1, geo.height - 2 * focus_bw),
+                        height = math.max(1, geo.height - 2 * focus_bw + math.floor(gap / 2)),
                     })
                 else
                     c.hidden = true
@@ -920,7 +920,7 @@ end
 -- Update focus border
 ---------------------------------------------------------------------------
 
-local function update_focus_border(s, state, geos)
+local function update_focus_border(s, state, geos, gap)
     local sides = get_focus_border(s)
     local t, _ = get_active_state(s)
     if not t then
@@ -935,13 +935,16 @@ local function update_focus_border(s, state, geos)
         return
     end
 
-    local bw = beautiful.splitwm_focus_border_width or 2
-    local bc = beautiful.splitwm_focus_border       or "#7799dd"
+    local bw      = beautiful.splitwm_focus_border_width or 2
+    local bc      = beautiful.splitwm_focus_border       or "#7799dd"
+    local has_win = leaf.tabs and #leaf.tabs > 0
+    local gy      = has_win and (geo.y - math.floor(gap / 2)) or geo.y
+    local gh      = has_win and (geo.height + math.floor(gap / 2)) or geo.height
     local rects = {
-        { x = geo.x,                  y = geo.y,                   width = geo.width, height = bw              },
-        { x = geo.x,                  y = geo.y + geo.height - bw, width = geo.width, height = bw              },
-        { x = geo.x,                  y = geo.y + bw,              width = bw,        height = geo.height-2*bw },
-        { x = geo.x + geo.width - bw, y = geo.y + bw,              width = bw,        height = geo.height-2*bw },
+        { x = geo.x,                  y = gy,              width = geo.width, height = bw        },
+        { x = geo.x,                  y = gy + gh - bw,    width = geo.width, height = bw        },
+        { x = geo.x,                  y = gy + bw,         width = bw,        height = gh - 2*bw },
+        { x = geo.x + geo.width - bw, y = gy + bw,         width = bw,        height = gh - 2*bw },
     }
     for i, r in ipairs(rects) do
         local wb = sides[i]
@@ -1018,7 +1021,7 @@ local function update_ui(s)
     compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
 
     update_overlays(s, t, state, geos)
-    update_focus_border(s, state, geos)
+    update_focus_border(s, state, geos, gap)
     update_drag_handles(s, state, bounds)
 
     for _, c in ipairs(s.clients) do
@@ -1252,6 +1255,8 @@ local function setup_tabbar(c)
             close_leaf(t, leaf_id)
             awful.layout.arrange(c.screen)
         end)
+        close_split_btn:connect_signal("mouse::enter", function() close_split_btn.fg = "#ff6666" end)
+        close_split_btn:connect_signal("mouse::leave", function() close_split_btn.fg = "#ffffff" end)
 
         local is_focused_leaf = (state.focused_leaf_id == leaf_id)
         local bar_bg = is_focused_leaf
