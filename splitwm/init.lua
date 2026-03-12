@@ -401,7 +401,7 @@ end
 local function split_leaf(t, direction)
     local state = get_state(t)
     local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
-    if not leaf then return end
+    if not leaf then return false end
 
     -- Create two new leaves; the old leaf's tabs stay in child_a
     local child_a = make_leaf()
@@ -425,14 +425,14 @@ end
 local function close_leaf(t, leaf_id)
     local state = get_state(t)
     local leaf = find_leaf_by_id(state.root, leaf_id)
-    if not leaf then return end
+    if not leaf then return false end
 
     -- Can't close the last leaf
     local leaves = collect_leaves(state.root)
-    if #leaves <= 1 then return end
+    if #leaves <= 1 then return false end
 
     local parent, idx = find_parent(state.root, leaf)
-    if not parent then return end
+    if not parent then return false end
 
     -- The sibling replaces the parent
     local sibling_idx = idx == 1 and 2 or 1
@@ -458,7 +458,7 @@ end
 local function resize_focused(t, delta)
     local state = get_state(t)
     local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
-    if not leaf then return end
+    if not leaf then return false end
     local parent, idx = find_parent(state.root, leaf)
     if not parent then return false end
     local new_ratio = parent.ratio
@@ -499,7 +499,7 @@ local function move_tab_to_direction(t, dir)
     for i, l in ipairs(leaves) do
         if l.id == src_leaf.id then src_idx = i; break end
     end
-    if not src_idx then return end
+    if not src_idx then return false end
 
     -- For now, "next"/"prev" based on tree order
     local dst_idx
@@ -532,7 +532,7 @@ local function focus_direction(t, dir)
     for i, l in ipairs(leaves) do
         if l.id == state.focused_leaf_id then cur_idx = i; break end
     end
-    if not cur_idx then return end
+    if not cur_idx then return false end
 
     local new_idx
     if dir == "next" then
@@ -1289,6 +1289,8 @@ splitwm.layout = {
 -- Keybinding helpers
 ---------------------------------------------------------------------------
 
+-- Convention: fn(t) should return false (not nil) to indicate "did nothing,
+-- skip the arrange call". Any other return value (including nil) triggers arrange.
 local function with_tag(fn)
     local s = awful.screen.focused()
     local t = s.selected_tag
