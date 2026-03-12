@@ -136,7 +136,7 @@ menu_gen.generate(function(entries)
         table.insert(categories[cat], {
             entry.name,
             entry.cmdline,
-            entry.icon or nil,
+            entry.icon,
         })
     end
     table.sort(cat_names)
