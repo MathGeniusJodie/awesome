@@ -354,8 +354,8 @@ local function make_battery_widget()
     function w:fit(_, _, h) return 24, h end
 
     function w:draw(_, cr, width, height)
-        local bw, bh = 11, 18
-        local nub_w, nub_h = 6, 3
+        local bw, bh = 9, 15
+        local nub_w, nub_h = 5, 2
         local bx = math.floor((width - bw) / 2)
         local nub_top = math.floor((height - bh - nub_h) / 2)
         local by = nub_top + nub_h
@@ -495,7 +495,7 @@ local function make_chip_widget()
     w.ram  = 0
     w.swap = 0
 
-    local cw, ch    = 18, 18
+    local cw, ch    = 15, 15
     local pin_len   = 3
     local n_pins    = 3
 
