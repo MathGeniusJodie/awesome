@@ -589,13 +589,16 @@ local function arrange(p)
     -- Compute geometries for each leaf
     local geos = compute_geometries(root, wa.x, wa.y, wa.width, wa.height, gap)
 
-    -- Apply geometries: only the active tab in each leaf is visible
-    -- Inset content by focus_bw so the focus border sits outside the content
-    local focus_bw = beautiful.splitwm_focus_border_width or 2
+    -- Apply geometries: only the active tab in each leaf is visible.
+    -- Windows are shifted up by gap/2 so the tab bar (TITLEBAR_HEIGHT tall)
+    -- floats into the gap above, sitting between splits rather than consuming
+    -- space inside the split. Height is increased by the same amount to compensate.
+    -- focus_bw insets the content so the focus border renders outside it.
+    local focus_bw  = beautiful.splitwm_focus_border_width or 2
+    local tab_raise = math.floor(gap / 2)
 
     for _, leaf in ipairs(collect_leaves(root)) do
         local geo = geos[leaf.id]
-        local is_focused = (leaf.id == state.focused_leaf_id)
         if geo then
             for i, c in ipairs(leaf.tabs) do
                 if i == leaf.active_tab then
@@ -603,9 +606,9 @@ local function arrange(p)
                     c.border_width = 0
                     c:geometry({
                         x      = geo.x + focus_bw,
-                        y      = geo.y + focus_bw - math.floor(gap / 2),
-                        width  = math.max(1, geo.width - 2 * focus_bw),
-                        height = math.max(1, geo.height - 2 * focus_bw + math.floor(gap / 2)),
+                        y      = geo.y + focus_bw - tab_raise,
+                        width  = math.max(1, geo.width  - 2 * focus_bw),
+                        height = math.max(1, geo.height - 2 * focus_bw + tab_raise),
                     })
                 else
                     c.hidden = true
@@ -654,6 +657,10 @@ end
 
 -- Drag handles: growable pool per screen; buttons/signals wired once at creation
 local HANDLE_THICKNESS = 6
+-- Height of the tab bar / titlebar drawn at the top of each client.
+-- The tab bar floats upward by gap/2, sitting in the gap above the split,
+-- so this should be >= gap/2 to ensure it's fully visible.
+local TITLEBAR_HEIGHT  = 33
 
 local drag_handle_pool = {}  -- drag_handle_pool[s] = array of { wb, ref }
 
@@ -1223,7 +1230,7 @@ local function setup_tabbar(c)
             and (beautiful.titlebar_bg_focus  or "#000000")
             or  (beautiful.titlebar_bg_normal or "#000000aa")
 
-        awful.titlebar(c, { size = 33, position = "top", bg = "#00000000" }):setup {
+        awful.titlebar(c, { size = TITLEBAR_HEIGHT, position = "top", bg = "#00000000" }):setup {
             {
                 { -- Left: tab buttons
                     spacing = BTN_SPACING,
@@ -1255,7 +1262,7 @@ local function setup_tabbar(c)
     gears.timer.delayed_call(update_titlebar)
 
     -- Titlebar hover: make buttons solid when mouse is over the bar
-    local tb = awful.titlebar(c, { size = 33, position = "top" })
+    local tb = awful.titlebar(c, { size = TITLEBAR_HEIGHT, position = "top" })
     tb:connect_signal("mouse::enter", function()
         titlebar_hovered = true
         for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#000000" end
