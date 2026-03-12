@@ -1065,6 +1065,7 @@ local function setup_tabbar(c)
 
         -- Reset titlebar button list for this rebuild
         titlebar_btn_list = {}
+        local BTN_SPACING = 5
         local function make_tb_btn(label, size, callback)
             local w = wibox.widget {
                 {
@@ -1260,7 +1261,7 @@ local function setup_tabbar(c)
         awful.titlebar(c, { size = 33, position = "top", bg = "#00000000" }):setup {
             {
                 { -- Left: tab buttons
-                    spacing = 2,
+                    spacing = BTN_SPACING,
                     layout  = wibox.layout.fixed.horizontal,
                     table.unpack(tab_widgets),
                 },
@@ -1270,10 +1271,10 @@ local function setup_tabbar(c)
                         vsplit_btn,
                         hsplit_btn,
                         close_split_btn,
-                        spacing = 5,
+                        spacing = BTN_SPACING,
                         layout  = wibox.layout.fixed.horizontal,
                     },
-                    right  = 5,
+                    right  = 0,
                     widget = wibox.container.margin,
                 },
                 layout = wibox.layout.align.horizontal,

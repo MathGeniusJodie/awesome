@@ -58,7 +58,7 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 -- The actual gap size is splitwm_gap.
 beautiful.useless_gap        = 0
 beautiful.border_width       = 0
-beautiful.splitwm_gap        = 24
+beautiful.splitwm_gap        = 28
 beautiful.splitwm_inactive_bg  = "#00000080"
 beautiful.splitwm_empty_bg   = "#00000080"
 beautiful.splitwm_focus_border = "#7799dd"
