@@ -721,8 +721,19 @@ awful.screen.connect_for_each_screen(function(s)
     end
     s.mytaglist = taglist_layout
 
-    local mydate = wibox.widget.textclock(" %A, %B %e, %Y ")
+    local dow_codes = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" }
+    local mon_codes = { "Ja", "Fe", "Mr", "Ap", "My", "Jn", "Jl", "Au", "Se", "Oc", "Nv", "De" }
+
+    local mydate = wibox.widget.textbox()
     mydate.font = "monospace 12"
+    local function update_date()
+        local t = os.date("*t")
+        mydate.text = " " .. dow_codes[t.wday] .. " " .. mon_codes[t.month]
+                      .. " " .. string.format("%02d", t.day)
+                      .. " " .. string.format("%02d", t.year % 100) .. " "
+    end
+    update_date()
+    gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_date }
 
     local myclock = wibox.widget.textclock(" %I:%M %p ")
     myclock.font = "monospace bold 12"
