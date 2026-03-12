@@ -119,7 +119,7 @@ local function make_circle_btn(label, size, callback)
         forced_height = size,
         widget       = wibox.container.background,
     }
-    w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
+    w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
     w:connect_signal("mouse::leave", function() w.bg = "#000000" end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
@@ -817,14 +817,15 @@ local function update_overlays(s, t, state, geos)
             local y  = geo.y + focus_bw
             local w  = math.max(1, geo.width  - 2 * focus_bw)
             local h  = math.max(1, geo.height - 2 * focus_bw)
-            local bg = focused and (beautiful.splitwm_focus_bg  or "#333344cc")
-                                or (beautiful.splitwm_empty_bg  or "#222222aa")
+            local bg     = beautiful.splitwm_focus_bg
+            local border = "#00000066"
 
             if overlay_cache[s][leaf_id] then
                 -- Reuse: just update geometry and focus color
                 local wb = overlay_cache[s][leaf_id]
                 wb.x = x; wb.y = y; wb.width = w; wb.height = h
-                wb.bg      = bg
+                wb._bg_widget.bg                 = bg
+                wb._bg_widget.shape_border_color = border
                 wb.visible = true
             else
                 -- First time we've seen this leaf_id: build and cache the overlay
@@ -853,45 +854,51 @@ local function update_overlays(s, t, state, geos)
                     end))
                 end
 
+                local bg_widget = wibox.widget {
+                    {
+                        {
+                            {
+                                {
+                                    spacing = 6,
+                                    layout  = wibox.layout.fixed.horizontal,
+                                    table.unpack(launcher_ws),
+                                },
+                                halign = "center",
+                                widget = wibox.container.place,
+                            },
+                            {
+                                {
+                                    vsplit_btn, hsplit_btn, close_btn,
+                                    spacing = 6,
+                                    layout  = wibox.layout.fixed.horizontal,
+                                },
+                                halign = "center",
+                                widget = wibox.container.place,
+                            },
+                            spacing = 15,
+                            layout  = wibox.layout.fixed.vertical,
+                        },
+                        halign = "center",
+                        valign = "center",
+                        widget = wibox.container.place,
+                    },
+                    bg                 = bg,
+                    shape              = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 8) end,
+                    shape_border_width = 2,
+                    shape_border_color = border,
+                    widget             = wibox.container.background,
+                }
                 local wb = wibox {
                     screen       = s,
                     x = x, y = y, width = w, height = h,
-                    bg           = bg,
+                    bg           = "#00000000",
                     border_width = 0,
                     visible      = true,
                     ontop        = false,
                     type         = "utility",
-                    widget       = wibox.widget {
-                        {
-                            {
-                                {
-                                    {
-                                        spacing = 6,
-                                        layout  = wibox.layout.fixed.horizontal,
-                                        table.unpack(launcher_ws),
-                                    },
-                                    halign = "center",
-                                    widget = wibox.container.place,
-                                },
-                                {
-                                    {
-                                        vsplit_btn, hsplit_btn, close_btn,
-                                        spacing = 6,
-                                        layout  = wibox.layout.fixed.horizontal,
-                                    },
-                                    halign = "center",
-                                    widget = wibox.container.place,
-                                },
-                                spacing = 15,
-                                layout  = wibox.layout.fixed.vertical,
-                            },
-                            halign = "center",
-                            valign = "center",
-                            widget = wibox.container.place,
-                        },
-                        layout = wibox.layout.stack,
-                    },
+                    widget       = bg_widget,
                 }
+                wb._bg_widget = bg_widget
                 wb:buttons(gears.table.join(
                     awful.button({}, 1, function()
                         if picked_up_client then
