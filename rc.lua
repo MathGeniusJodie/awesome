@@ -628,11 +628,14 @@ local function make_tag_widget(t)
     -- Custom dot-indicator widget: draws N white circles via Cairo directly.
     -- This avoids all container/layout sizing issues.
     local dots = wibox.widget.base.make_widget()
-    dots.n = 0
+    dots.n        = 0
+    dots.selected = false
     dots.forced_height = 7
 
     function dots:fit(_, w, h)
-        return 26, h
+        if self.n == 0 then return 0, 7 end
+        local show = math.min(self.n, 3)
+        return math.ceil(show * 5 + (show - 1) * 3), 7
     end
 
     function dots:draw(_, cr, w, h)
@@ -640,12 +643,24 @@ local function make_tag_widget(t)
         local show  = math.min(self.n, 3)
         local r     = 2.5
         local gap   = 3
+        local pad   = 2
         local total = show * (r * 2) + (show - 1) * gap
-        local x0    = (w - total) / 2 + r
+        local cap_w = total + pad * 2
+        local cap_x = (w - cap_w) / 2
+
+        -- Capsule background: match button opacity (selected = opaque, else semi-transparent)
+        cr:set_source_rgba(0, 0, 0, self.selected and 1 or 0.5)
+        cr:save()
+        cr:translate(cap_x, 0)
+        gears.shape.rounded_rect(cr, cap_w, h, h / 2)
+        cr:restore()
+        cr:fill()
+
+        -- Dots centered inside capsule
+        local x0 = cap_x + pad + r
         cr:set_source_rgba(1, 1, 1, 1)
         for i = 1, show do
             if i == 3 and self.n > 3 then
-                -- draw a "+" instead of the third dot
                 local cx = x0 + (i - 1) * (r * 2 + gap)
                 local cy = h / 2
                 local arm = r + 0.5
@@ -661,6 +676,7 @@ local function make_tag_widget(t)
 
     local function update_dots()
         dots.n = #t:clients()
+        dots:emit_signal("widget::layout_changed")
         dots:emit_signal("widget::redraw_needed")
     end
 
@@ -684,13 +700,15 @@ local function make_tag_widget(t)
     circle:set_widget(place_c)
 
     local function update_circle()
-        circle.bg = t.selected and "#000000" or "#00000080"
+        circle.bg     = t.selected and "#000000" or "#00000080"
+        dots.selected = t.selected
+        dots:emit_signal("widget::redraw_needed")
     end
 
-    -- Circle pinned to top; dots pushed to the very bottom of the bar
+    -- Circle pinned to top; dots (self-drawing capsule) pushed to the very bottom
     local tag_layout = wibox.layout.stack()
     tag_layout:add(wibox.container.margin(circle, 0, 0, bar_margin, 0))
-    tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - 7, 0))
+    tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - dots.forced_height, 0))
 
     tag_layout:buttons(gears.table.join(
         awful.button({}, 1, function() t:view_only() end)
