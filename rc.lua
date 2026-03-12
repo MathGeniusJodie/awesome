@@ -220,7 +220,7 @@ splitwm.launchers = {
         label      = "B",
         icon_name  = "internet-web-browser",
         icon_names = {"internet-web-browser", "web-browser", "firefox", "firefox-esr",
-                      "chromium", "google-chrome", "brave-browser", "librewolf"},
+                      "librewolf", "brave-browser", "chromium", "google-chrome"},
         cmd        = browser,
     },
     {
