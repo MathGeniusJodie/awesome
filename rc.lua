@@ -240,8 +240,11 @@ splitwm.launchers = {
     },
 }
 
+local menu_poll_timer  -- assigned below, after the timer is constructed
+
 splitwm.on_menu_request = function()
     app_menu:toggle()
+    menu_poll_timer:start()
 end
 
 -- Close menu on any client focus change
@@ -260,20 +263,22 @@ splitwm.on_background_click = function()
     app_menu:hide()
 end
 
--- Poll: if menu is visible and a mouse button is pressed outside it, close
+-- Poll: if menu is visible and a mouse button is pressed outside it, close.
+-- The timer only runs while the menu is open; it self-stops when the menu hides.
 do
     local was_visible = false
     local was_pressed = false
     local skip_count = 0
-    gears.timer {
+    menu_poll_timer = gears.timer {
         timeout   = 0.05,
-        autostart = true,
+        autostart = false,
         callback  = function()
             local visible = app_menu.wibox and app_menu.wibox.visible
             if not visible then
                 was_visible = false
                 was_pressed = false
                 skip_count = 0
+                menu_poll_timer:stop()
                 return
             end
 
