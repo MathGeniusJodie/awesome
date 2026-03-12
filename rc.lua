@@ -58,7 +58,7 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 -- The actual gap size is splitwm_gap.
 beautiful.useless_gap        = 0
 beautiful.border_width       = 0
-beautiful.splitwm_gap        = 28
+beautiful.splitwm_gap        = 32
 beautiful.splitwm_inactive_bg  = "#00000080"
 beautiful.splitwm_empty_bg   = "#00000080"
 beautiful.splitwm_focus_border = "#7799dd"
@@ -434,14 +434,14 @@ local function make_volume_widget()
     w.muted  = false
 
     function w:fit(_, _, h)
-        return math.ceil(28 * h / 32), h
+        return math.ceil(26 * h / 32), h
     end
 
     function w:draw(_, cr, _, height)
         -- Scale all coordinates proportionally to height (designed for 32px)
         local s  = height / 32.0
         local cy = height / 2
-        local sx = 3 * s
+        local sx = 1 * s
 
         cr:set_source_rgba(1, 1, 1, 1)
 
@@ -511,7 +511,7 @@ local function make_chip_widget()
         local cx = math.floor(width / 2)
         local cy = math.floor(height / 2)
         local bx = cx - math.floor(cw / 2)
-        local by = cy - math.floor(ch / 2) - 1
+        local by = cy - math.floor(ch / 2)
 
         -- Pins (left and right sides)
         cr:set_source_rgba(1, 1, 1, 1)
@@ -621,9 +621,9 @@ gears.timer { timeout = 30, autostart = true, call_now = true, callback = refres
 gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume }
 gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_chip }
 
-local bar_margin     = 6
-local capsule_height = 28
-local wibar_height   = bar_margin + capsule_height  -- top_margin + capsule = 38
+local bar_margin     = 3
+local capsule_height = 24
+local wibar_height   = bar_margin * 2 + capsule_height  -- equal top + bottom padding
 
 --- Build a single tag button: circle + dots drawn via Cairo below.
 local function make_tag_widget(t)
@@ -709,8 +709,8 @@ local function make_tag_widget(t)
 
     -- Circle pinned to top; dots (self-drawing capsule) pushed to the very bottom
     local tag_layout = wibox.layout.stack()
-    tag_layout:add(wibox.container.margin(circle, 0, 0, bar_margin, 0))
-    tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - dots.forced_height, 0))
+    tag_layout:add(wibox.container.margin(circle, 0, 0, bar_margin, bar_margin))
+    tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - bar_margin - dots.forced_height, 0))
 
     tag_layout:buttons(gears.table.join(
         awful.button({}, 1, function() t:view_only() end)
@@ -769,8 +769,9 @@ awful.screen.connect_for_each_screen(function(s)
     local function capsule(inner, pad_l, pad_r)
         local bg = wibox.container.background()
         bg.bg    = "#000000"
-        bg.forced_height = capsule_height
-        bg.shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, h / 2) end
+        bg.shape = function(cr, w, h)
+            gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
+        end
         bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
         return wibox.container.margin(bg, 0, 0, bar_margin, 0)
     end
@@ -790,12 +791,18 @@ awful.screen.connect_for_each_screen(function(s)
     dt_row:add(myclock)
     local dt_capsule = capsule(dt_row, 12, 12)
 
-    s.mywibox = awful.wibar {
-        position = "top",
-        screen   = s,
-        height   = wibar_height,
-        bg       = "#00000000",
-    }
+    local sg = beautiful.splitwm_gap or 16
+    s.mywibox = wibox({
+        x       = s.geometry.x + sg,
+        y       = s.geometry.y + s.geometry.height - wibar_height,
+        width   = s.geometry.width - sg * 2,
+        height  = wibar_height,
+        bg      = "#00000000",
+        ontop   = true,
+        screen  = s,
+        visible = true,
+        type    = "dock",
+    })
     s.mywibox:setup {
         layout = wibox.layout.align.horizontal,
         { -- Left
