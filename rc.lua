@@ -401,6 +401,10 @@ local globalkeys = gears.table.join(
         function() awful.screen.focused().mypromptbox:run() end,
         { description = "run prompt", group = "launcher" }),
 
+    awful.key({ modkey }, "space",
+        function() awful.spawn("rofi -show combi") end,
+        { description = "rofi combi launcher", group = "launcher" }),
+
     ---------------------------------------------------------------------------
     -- SPLITWM: Split management
     ---------------------------------------------------------------------------
