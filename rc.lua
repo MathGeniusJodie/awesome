@@ -338,6 +338,120 @@ beautiful.font           = "monospace bold 12"
 beautiful.fg_normal      = "#ffffff"
 beautiful.fg_focus       = "#ffffff"
 
+---------------------------------------------------------------------------
+-- Status widgets: battery + volume
+---------------------------------------------------------------------------
+
+local battery_widgets = {}
+local volume_widgets  = {}
+
+local icon_font = "Noto Color Emoji 16"
+local function icon(ch) return '<span font="' .. icon_font .. '">' .. ch .. '</span>' end
+
+local function make_battery_widget()
+    local w = wibox.widget.base.make_widget()
+    w.percentage = 0
+    w.charging   = false
+
+    function w:fit(_, _, h) return 24, h end
+
+    function w:draw(_, cr, width, height)
+        local bw, bh = 14, 22
+        local nub_w, nub_h = 6, 3
+        local bx = math.floor((width - bw) / 2)
+        local nub_top = math.floor((height - bh - nub_h) / 2)
+        local by = nub_top + nub_h
+        local nub_x = bx + math.floor((bw - nub_w) / 2)
+
+        local pct = math.max(0, math.min(100, self.percentage))
+
+        -- Nub
+        cr:set_source_rgba(1, 1, 1, 1)
+        cr:rectangle(nub_x, nub_top, nub_w, nub_h)
+        cr:fill()
+
+        -- Body outline (1px corner radius)
+        cr:set_source_rgba(1, 1, 1, 1)
+        cr:set_line_width(2)
+        local r = 1.5
+        cr:arc(bx + r,      by + r,      r, math.pi,       3*math.pi/2)
+        cr:arc(bx + bw - r, by + r,      r, 3*math.pi/2,   0)
+        cr:arc(bx + bw - r, by + bh - r, r, 0,             math.pi/2)
+        cr:arc(bx + r,      by + bh - r, r, math.pi/2,     math.pi)
+        cr:close_path()
+        cr:stroke()
+
+        -- Fill (from bottom up)
+        if pct <= 20 then
+            cr:set_source_rgba(1, 0.3, 0.3, 1)
+        elseif pct <= 40 then
+            cr:set_source_rgba(1, 0.65, 0.15, 1)
+        else
+            cr:set_source_rgba(1, 1, 1, 1)
+        end
+        local fill_h = math.max(0, math.floor((bh - 4) * pct / 100))
+        if fill_h > 0 then
+            cr:rectangle(bx + 2, by + bh - 2 - fill_h, bw - 4, fill_h)
+            cr:fill()
+        end
+
+        -- Lightning bolt when charging
+        if self.charging then
+            cr:set_source_rgba(1, 1, 0, 1)
+            cr:set_line_width(1.5)
+            local cx = bx + bw / 2
+            local t, m, b = by + 3, by + bh / 2, by + bh - 3
+            cr:move_to(cx + 3, t)
+            cr:line_to(cx - 2, m)
+            cr:line_to(cx + 2, m)
+            cr:line_to(cx - 3, b)
+            cr:stroke()
+        end
+    end
+
+    return w
+end
+
+local function refresh_battery()
+    for _, name in ipairs({ "BAT0", "BAT1", "BAT" }) do
+        local fc = io.open("/sys/class/power_supply/" .. name .. "/capacity", "r")
+        if fc then
+            local cap = tonumber(fc:read("*l")); fc:close()
+            local fs = io.open("/sys/class/power_supply/" .. name .. "/status", "r")
+            local status = fs and fs:read("*l") or ""
+            if fs then fs:close() end
+            for _, w in ipairs(battery_widgets) do
+                w.percentage = cap or 0
+                w.charging   = (status == "Charging")
+                w:emit_signal("widget::redraw_needed")
+            end
+            return
+        end
+    end
+end
+
+local function refresh_volume()
+    awful.spawn.easy_async_with_shell(
+        "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null; pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null",
+        function(out)
+            local markup = ""
+            if out:match("Mute: yes") then
+                markup = " " .. icon("🔇") .. " "
+            else
+                local vol = tonumber(out:match("(%d+)%%"))
+                if vol then
+                    local ic = vol > 50 and icon("🔊") or (vol > 10 and icon("🔉") or icon("🔈"))
+                    markup = " " .. ic .. " "
+                end
+            end
+            for _, w in ipairs(volume_widgets) do w:set_markup(markup) end
+        end
+    )
+end
+
+gears.timer { timeout = 30, autostart = true, call_now = true, callback = refresh_battery }
+gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume }
+
 --- Build a single tag button: circle + dots drawn via Cairo below.
 local function make_tag_widget(t)
     -- Custom dot-indicator widget: draws N white circles via Cairo directly.
@@ -443,6 +557,13 @@ awful.screen.connect_for_each_screen(function(s)
     local myclock = wibox.widget.textclock(" %I:%M %p ")
     myclock.font = "monospace bold 12"
 
+    local bat_widget = make_battery_widget()
+    table.insert(battery_widgets, bat_widget)
+
+    local vol_widget = wibox.widget.textbox()
+    vol_widget.font  = "monospace bold 12"
+    table.insert(volume_widgets, vol_widget)
+
     s.mywibox = awful.wibar {
         position = "top",
         screen   = s,
@@ -460,6 +581,8 @@ awful.screen.connect_for_each_screen(function(s)
         { -- Right
             layout = wibox.layout.fixed.horizontal,
             wibox.widget.systray(),
+            bat_widget,
+            vol_widget,
             myclock,
         },
     }
@@ -553,7 +676,23 @@ local globalkeys = gears.table.join(
     awful.key({ modkey }, "Left",  awful.tag.viewprev,
         { description = "view previous", group = "tag" }),
     awful.key({ modkey }, "Right", awful.tag.viewnext,
-        { description = "view next", group = "tag" })
+        { description = "view next", group = "tag" }),
+
+    ---------------------------------------------------------------------------
+    -- Media / volume
+    ---------------------------------------------------------------------------
+
+    awful.key({}, "XF86AudioRaiseVolume", function()
+        awful.spawn.easy_async("pactl set-sink-volume @DEFAULT_SINK@ +5%", refresh_volume)
+    end, { description = "raise volume", group = "media" }),
+
+    awful.key({}, "XF86AudioLowerVolume", function()
+        awful.spawn.easy_async("pactl set-sink-volume @DEFAULT_SINK@ -5%", refresh_volume)
+    end, { description = "lower volume", group = "media" }),
+
+    awful.key({}, "XF86AudioMute", function()
+        awful.spawn.easy_async("pactl set-sink-mute @DEFAULT_SINK@ toggle", refresh_volume)
+    end, { description = "toggle mute", group = "media" })
 )
 
 -- Bind number keys to tags
