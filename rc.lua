@@ -593,6 +593,9 @@ awful.screen.connect_for_each_screen(function(s)
     end
     s.mytaglist = taglist_layout
 
+    local mydate = wibox.widget.textclock(" %A, %B %e, %Y ")
+    mydate.font = "monospace 12"
+
     local myclock = wibox.widget.textclock(" %I:%M %p ")
     myclock.font = "monospace bold 12"
 
@@ -621,6 +624,7 @@ awful.screen.connect_for_each_screen(function(s)
             wibox.widget.systray(),
             bat_widget,
             vol_widget,
+            mydate,
             myclock,
         },
     }
