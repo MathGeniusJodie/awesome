@@ -858,12 +858,6 @@ end
 
 local function update_focus_border(s, state, geos, gap)
     local sides = get_focus_border(s)
-    local t, _ = get_active_state(s)
-    if not t then
-        for _, wb in ipairs(sides) do wb.visible = false end
-        return
-    end
-
     local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
     local geo  = leaf and geos[leaf.id]
     if not geo then
