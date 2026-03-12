@@ -1028,6 +1028,9 @@ end
 local function setup_tabbar(c)
     -- We'll put a small titlebar at the top showing tab position
     -- This gets rebuilt whenever the layout arranges
+    local titlebar_hovered = false
+    local titlebar_btn_list = {}
+
     local function update_titlebar()
         local t = c.first_tag
         if not t then return end
@@ -1052,6 +1055,38 @@ local function setup_tabbar(c)
         c._splitwm_tb_fp = fp
 
         local leaf_id = leaf.id
+
+        -- Reset titlebar button list for this rebuild
+        titlebar_btn_list = {}
+        local function make_tb_btn(label, size, callback)
+            local w = wibox.widget {
+                {
+                    {
+                        markup = '<span font_family="Sans">' .. label .. '</span>',
+                        align  = "center",
+                        valign = "center",
+                        font   = beautiful.splitwm_btn_font or "monospace bold 14",
+                        widget = wibox.widget.textbox,
+                    },
+                    halign = "center",
+                    valign = "center",
+                    widget = wibox.container.place,
+                },
+                bg           = "#00000099",
+                fg           = "#ffffff",
+                shape        = gears.shape.circle,
+                forced_width  = size,
+                forced_height = size,
+                widget       = wibox.container.background,
+            }
+            w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
+            w:connect_signal("mouse::leave", function()
+                w.bg = titlebar_hovered and "#000000" or "#00000099"
+            end)
+            w:buttons(gears.table.join(awful.button({}, 1, callback)))
+            table.insert(titlebar_btn_list, w)
+            return w
+        end
 
         -- Tab indicators with app icon, move and close buttons
         local tab_widgets = {}
@@ -1184,7 +1219,7 @@ local function setup_tabbar(c)
         end
 
         -- Menu button (right after tabs, on the left side)
-        local menu_btn = make_circle_btn("+", 26, function()
+        local menu_btn = make_tb_btn("+", 26, function()
             state.focused_leaf_id = leaf_id
             if splitwm.on_menu_request then
                 splitwm.on_menu_request()
@@ -1193,37 +1228,22 @@ local function setup_tabbar(c)
         table.insert(tab_widgets, menu_btn)
 
         -- Titlebar split/close buttons
-        local vsplit_btn = make_circle_btn("│", 26, function()
+        local vsplit_btn = make_tb_btn("│", 26, function()
             state.focused_leaf_id = leaf_id
             split_leaf(t, "h")
             awful.layout.arrange(c.screen)
         end)
 
-        local hsplit_btn = make_circle_btn("─", 26, function()
+        local hsplit_btn = make_tb_btn("─", 26, function()
             state.focused_leaf_id = leaf_id
             split_leaf(t, "v")
             awful.layout.arrange(c.screen)
         end)
 
-        local close_split_btn = make_circle_btn("✕", 26, function()
+        local close_split_btn = make_tb_btn("✕", 26, function()
             close_leaf(t, leaf_id)
             awful.layout.arrange(c.screen)
         end)
-
-        -- App launcher buttons (titlebar size)
-        local launcher_widgets = {}
-        for _, entry in ipairs(splitwm.launchers) do
-            local lw = make_launcher_widget(entry, 21, function()
-                -- Focus this split first so the new app lands here
-                state.focused_leaf_id = leaf_id
-                if entry.action then
-                    entry.action()
-                elseif entry.cmd then
-                    awful.spawn(entry.cmd)
-                end
-            end)
-            table.insert(launcher_widgets, lw)
-        end
 
         local is_focused_leaf = (state.focused_leaf_id == leaf_id)
         local bar_bg = is_focused_leaf
@@ -1238,17 +1258,8 @@ local function setup_tabbar(c)
                     table.unpack(tab_widgets),
                 },
                 nil, -- Middle: empty
-                { -- Right: launchers + split controls
+                { -- Right: split controls
                     {
-                        {
-                            spacing = 2,
-                            layout  = wibox.layout.fixed.horizontal,
-                            table.unpack(launcher_widgets),
-                        },
-                        {
-                            width   = 8,
-                            widget  = wibox.container.constraint,
-                        },
                         vsplit_btn,
                         hsplit_btn,
                         close_split_btn,
@@ -1269,6 +1280,17 @@ local function setup_tabbar(c)
     c:connect_signal("property::name", update_titlebar)
     -- We call it once on setup; it will also be triggered by arrange
     gears.timer.delayed_call(update_titlebar)
+
+    -- Titlebar hover: make buttons solid when mouse is over the bar
+    local tb = awful.titlebar(c, { size = 33, position = "top" })
+    tb:connect_signal("mouse::enter", function()
+        titlebar_hovered = true
+        for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#000000" end
+    end)
+    tb:connect_signal("mouse::leave", function()
+        titlebar_hovered = false
+        for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#00000099" end
+    end)
 
     -- Store the updater so arrange can call it
     c._splitwm_update_titlebar = update_titlebar
