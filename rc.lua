@@ -198,7 +198,8 @@ menu_gen.generate(function(entries)
         end
     end
 
-    -- Force a re-arrange to rebuild overlays with new icons
+    -- Flush render caches so overlays and titlebars rebuild with the new icons
+    splitwm.flush_caches()
     local s = awful.screen.focused()
     if s then awful.layout.arrange(s) end
 end)

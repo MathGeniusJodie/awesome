@@ -279,9 +279,6 @@ local function compute_geometries(node, x, y, w, h, gap)
     local geos = {}; compute_tree(node, x, y, w, h, gap, geos, nil); return geos
 end
 
-local function compute_boundaries(node, x, y, w, h, gap)
-    local bounds = {}; compute_tree(node, x, y, w, h, gap, nil, bounds); return bounds
-end
 
 ---------------------------------------------------------------------------
 -- Per-tag state
@@ -471,7 +468,7 @@ local function resize_focused(t, delta)
     local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
     if not leaf then return end
     local parent, idx = find_parent(state.root, leaf)
-    if not parent then return end
+    if not parent then return false end
     local new_ratio = parent.ratio
     if idx == 1 then
         new_ratio = new_ratio + delta
@@ -488,7 +485,7 @@ end
 local function cycle_tab(t, offset)
     local state = get_state(t)
     local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
-    if not leaf or #leaf.tabs == 0 then return end
+    if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
 end
 
@@ -503,7 +500,7 @@ end
 local function move_tab_to_direction(t, dir)
     local state = get_state(t)
     local src_leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
-    if not src_leaf or #src_leaf.tabs == 0 then return end
+    if not src_leaf or #src_leaf.tabs == 0 then return false end
 
     local leaves = collect_leaves(state.root)
     local src_idx
@@ -537,7 +534,7 @@ end
 local function focus_direction(t, dir)
     local state = get_state(t)
     local leaves = collect_leaves(state.root)
-    if #leaves < 2 then return end
+    if #leaves < 2 then return false end
 
     local cur_idx
     for i, l in ipairs(leaves) do
@@ -560,7 +557,8 @@ end
 ---------------------------------------------------------------------------
 
 local function arrange(p)
-    local tag   = p.tag or awful.screen.focused().selected_tag
+    local tag = p.tag or awful.screen.focused().selected_tag
+    if not tag then return end
     local state = get_state(tag)
     local wa    = p.workarea
     local cls   = p.clients
@@ -692,11 +690,6 @@ end
 -- Shared UI helpers
 ---------------------------------------------------------------------------
 
-local function clear_wiboxes(tbl, s)
-    if tbl[s] then for _, wb in ipairs(tbl[s]) do wb.visible = false end end
-    tbl[s] = {}
-end
-
 --- Returns (tag, state) if the screen has an active splitwm tag, else (nil, nil).
 local function get_active_state(s)
     local t = s.selected_tag
@@ -705,90 +698,184 @@ local function get_active_state(s)
 end
 
 ---------------------------------------------------------------------------
--- Overlay wiboxes for empty splits (so you can see and click them)
+-- Persistent wibox pools (avoid X window churn on every arrange)
 ---------------------------------------------------------------------------
 
-local overlay_wiboxes = {}
+-- Focus border: 4 permanent wiboxes per screen, repositioned each update
+local focus_border_pool = {}
 
-local function update_overlays(s)
-    clear_wiboxes(overlay_wiboxes, s)
-    local t, state = get_active_state(s)
-    if not t then return end
+local function get_focus_border(s)
+    if focus_border_pool[s] then return focus_border_pool[s] end
+    local sides = {}
+    for _ = 1, 4 do
+        table.insert(sides, wibox {
+            screen            = s,
+            x = 0, y = 0, width = 1, height = 1,
+            bg                = beautiful.splitwm_focus_border or "#7799dd",
+            border_width      = 0,
+            visible           = false,
+            ontop             = true,
+            type              = "utility",
+            input_passthrough = true,
+        })
+    end
+    focus_border_pool[s] = sides
+    return sides
+end
 
-    local wa = s.workarea
-    local gap = beautiful.splitwm_gap or 16
-    local geos = compute_geometries(state.root, wa.x, wa.y, wa.width, wa.height, gap)
+-- Drag handles: growable pool per screen; buttons/signals wired once at creation
+local HANDLE_THICKNESS = 6
+
+local drag_handle_pool = {}  -- drag_handle_pool[s] = array of { wb, ref }
+
+local function get_drag_handle(s, i)
+    if not drag_handle_pool[s] then drag_handle_pool[s] = {} end
+    if drag_handle_pool[s][i] then return drag_handle_pool[s][i] end
+
+    -- Mutable ref updated each arrange; the already-wired closures read from here
+    local ref = { b = nil, handle_w = 1, dragging = false }
+    local wb  = wibox {
+        x = 0, y = 0, width = 1, height = 1,
+        bg      = "#00000000",
+        visible = false,
+        ontop   = true,
+        type    = "utility",
+    }
+
+    wb:buttons(gears.table.join(
+        awful.button({}, 1, function()
+            if not ref.b then return end
+            ref.dragging = true
+            wb.bg = beautiful.splitwm_handle_drag_bg or "#7799dd44"
+            local b  = ref.b
+            local hw = ref.handle_w
+            mousegrabber.run(function(mouse)
+                if not mouse.buttons[1] then
+                    ref.dragging = false
+                    wb.bg = "#00000000"
+                    awful.layout.arrange(s)
+                    return false
+                end
+                local igap = b.parent_gap or 0
+                if b.dir == "h" then
+                    b.branch.ratio = math.max(0.1, math.min(0.9,
+                        (mouse.x - b.parent_x) / (b.parent_w - igap)))
+                    wb.x = mouse.x - math.floor(hw / 2)
+                else
+                    b.branch.ratio = math.max(0.1, math.min(0.9,
+                        (mouse.y - b.parent_y) / (b.parent_h - igap)))
+                    wb.y = mouse.y - math.floor(hw / 2)
+                end
+                awful.layout.arrange(s)
+                return true
+            end, b.dir == "h" and "sb_h_double_arrow" or "sb_v_double_arrow")
+        end)
+    ))
+    wb:connect_signal("mouse::enter", function()
+        if not ref.dragging then
+            wb.bg = beautiful.splitwm_handle_hover_bg or "#7799dd22"
+        end
+    end)
+    wb:connect_signal("mouse::leave", function()
+        if not ref.dragging then wb.bg = "#00000000" end
+    end)
+
+    local entry = { wb = wb, ref = ref }
+    drag_handle_pool[s][i] = entry
+    return entry
+end
+
+-- Overlay wiboxes: cached by screen + leaf_id; recreated only when a new
+-- leaf_id is first seen (i.e. on split, not on every focus change)
+local overlay_cache = {}  -- overlay_cache[s][leaf_id] = wibox
+
+---------------------------------------------------------------------------
+-- Update overlays (empty split placeholders)
+---------------------------------------------------------------------------
+
+local function update_overlays(s, t, state, geos)
     local focus_bw = beautiful.splitwm_focus_border_width or 2
+    if not overlay_cache[s] then overlay_cache[s] = {} end
 
+    -- Determine which leaf_ids need an overlay this frame
+    local needed = {}
     for _, leaf in ipairs(collect_leaves(state.root)) do
-        if #leaf.tabs == 0 then
-            local geo = geos[leaf.id]
-            if geo then
-                local focused = leaf.id == state.focused_leaf_id
-                local leaf_id = leaf.id
+        if #leaf.tabs == 0 then needed[leaf.id] = leaf end
+    end
 
+    -- Hide overlays whose leaf is no longer empty or no longer exists
+    for leaf_id, wb in pairs(overlay_cache[s]) do
+        if not needed[leaf_id] then wb.visible = false end
+    end
+
+    -- Show or create overlays for empty leaves
+    for leaf_id, leaf in pairs(needed) do
+        local geo = geos[leaf_id]
+        if geo then
+            local focused = leaf.id == state.focused_leaf_id
+            local x  = geo.x + focus_bw
+            local y  = geo.y + focus_bw
+            local w  = math.max(1, geo.width  - 2 * focus_bw)
+            local h  = math.max(1, geo.height - 2 * focus_bw)
+            local bg = focused and (beautiful.splitwm_focus_bg  or "#333344cc")
+                                or (beautiful.splitwm_empty_bg  or "#222222aa")
+
+            if overlay_cache[s][leaf_id] then
+                -- Reuse: just update geometry and focus color
+                local wb = overlay_cache[s][leaf_id]
+                wb.x = x; wb.y = y; wb.width = w; wb.height = h
+                wb.bg      = bg
+                wb.visible = true
+            else
+                -- First time we've seen this leaf_id: build and cache the overlay
                 local vsplit_btn = make_circle_btn("│", 36, function()
                     state.focused_leaf_id = leaf_id
                     split_leaf(t, "h")
                     awful.layout.arrange(s)
                 end)
-
                 local hsplit_btn = make_circle_btn("─", 36, function()
                     state.focused_leaf_id = leaf_id
                     split_leaf(t, "v")
                     awful.layout.arrange(s)
                 end)
-
                 local close_btn = make_circle_btn("✕", 36, function()
                     close_leaf(t, leaf_id)
                     awful.layout.arrange(s)
                 end)
 
-                -- App launcher buttons for empty splits (larger)
-                local overlay_launchers = {}
+                local launcher_ws = {}
                 for _, entry in ipairs(splitwm.launchers) do
-                    local lw = make_launcher_widget(entry, 30, function()
+                    table.insert(launcher_ws, make_launcher_widget(entry, 30, function()
                         state.focused_leaf_id = leaf_id
-                        if entry.action then
-                            entry.action()
-                        elseif entry.cmd then
-                            awful.spawn(entry.cmd)
+                        if entry.action then entry.action()
+                        elseif entry.cmd then awful.spawn(entry.cmd)
                         end
-                    end)
-                    table.insert(overlay_launchers, lw)
+                    end))
                 end
 
                 local wb = wibox {
-                    screen  = s,
-                    x       = geo.x + focus_bw,
-                    y       = geo.y + focus_bw,
-                    width   = math.max(1, geo.width - 2 * focus_bw),
-                    height  = math.max(1, geo.height - 2 * focus_bw),
-                    bg      = focused and (beautiful.splitwm_focus_bg or "#333344cc")
-                                       or (beautiful.splitwm_empty_bg or "#222222aa"),
+                    screen       = s,
+                    x = x, y = y, width = w, height = h,
+                    bg           = bg,
                     border_width = 0,
-                    visible = true,
-                    ontop   = false,
-                    type    = "utility",
-                    widget  = wibox.widget {
+                    visible      = true,
+                    ontop        = false,
+                    type         = "utility",
+                    widget       = wibox.widget {
                         {
                             {
-                                -- Top row: app launchers (centered)
                                 {
                                     {
                                         spacing = 6,
                                         layout  = wibox.layout.fixed.horizontal,
-                                        table.unpack(overlay_launchers),
+                                        table.unpack(launcher_ws),
                                     },
                                     halign = "center",
                                     widget = wibox.container.place,
                                 },
-                                -- Bottom row: split controls (centered)
                                 {
                                     {
-                                        vsplit_btn,
-                                        hsplit_btn,
-                                        close_btn,
+                                        vsplit_btn, hsplit_btn, close_btn,
                                         spacing = 6,
                                         layout  = wibox.layout.fixed.horizontal,
                                     },
@@ -805,7 +892,6 @@ local function update_overlays(s)
                         layout = wibox.layout.stack,
                     },
                 }
-                -- Click background to focus this leaf (or drop a picked-up tab)
                 wb:buttons(gears.table.join(
                     awful.button({}, 1, function()
                         if picked_up_client then
@@ -817,186 +903,121 @@ local function update_overlays(s)
                         awful.layout.arrange(s)
                     end)
                 ))
-                table.insert(overlay_wiboxes[s], wb)
+                overlay_cache[s][leaf_id] = wb
             end
         end
     end
 end
 
 ---------------------------------------------------------------------------
--- Focus border: a wibox drawn around the focused leaf
+-- Update focus border
 ---------------------------------------------------------------------------
 
-local focus_border_wiboxes = {}  -- keyed by screen
-
-local function update_focus_border(s)
-    clear_wiboxes(focus_border_wiboxes, s)
-    local t, state = get_active_state(s)
-    if not t then return end
-
-    local wa = s.workarea
-    local gap = beautiful.splitwm_gap or 16
-    local geos = compute_geometries(state.root, wa.x, wa.y, wa.width, wa.height, gap)
+local function update_focus_border(s, state, geos)
+    local sides = get_focus_border(s)
+    local t, _ = get_active_state(s)
+    if not t then
+        for _, wb in ipairs(sides) do wb.visible = false end
+        return
+    end
 
     local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
-    if not leaf then return end
-    local geo = geos[leaf.id]
-    if not geo then return end
+    local geo  = leaf and geos[leaf.id]
+    if not geo then
+        for _, wb in ipairs(sides) do wb.visible = false end
+        return
+    end
 
     local bw = beautiful.splitwm_focus_border_width or 2
-    local bc = beautiful.splitwm_focus_border or "#7799dd"
-
-    -- Draw 4 thin wiboxes forming a border around the focused leaf
-    local sides = {
-        { -- top
-            x = geo.x, y = geo.y,
-            width = geo.width, height = bw,
-        },
-        { -- bottom
-            x = geo.x, y = geo.y + geo.height - bw,
-            width = geo.width, height = bw,
-        },
-        { -- left
-            x = geo.x, y = geo.y + bw,
-            width = bw, height = geo.height - 2 * bw,
-        },
-        { -- right
-            x = geo.x + geo.width - bw, y = geo.y + bw,
-            width = bw, height = geo.height - 2 * bw,
-        },
+    local bc = beautiful.splitwm_focus_border       or "#7799dd"
+    local rects = {
+        { x = geo.x,                  y = geo.y,                   width = geo.width, height = bw              },
+        { x = geo.x,                  y = geo.y + geo.height - bw, width = geo.width, height = bw              },
+        { x = geo.x,                  y = geo.y + bw,              width = bw,        height = geo.height-2*bw },
+        { x = geo.x + geo.width - bw, y = geo.y + bw,              width = bw,        height = geo.height-2*bw },
     }
-
-    for _, side in ipairs(sides) do
-        local wb = wibox {
-            screen  = s,
-            x       = side.x,
-            y       = side.y,
-            width   = math.max(1, side.width),
-            height  = math.max(1, side.height),
-            bg      = bc,
-            border_width = 0,
-            visible = true,
-            ontop   = true,
-            type    = "utility",
-            input_passthrough = true,
-        }
-        table.insert(focus_border_wiboxes[s], wb)
+    for i, r in ipairs(rects) do
+        local wb = sides[i]
+        wb.bg      = bc
+        wb.x       = r.x
+        wb.y       = r.y
+        wb.width   = math.max(1, r.width)
+        wb.height  = math.max(1, r.height)
+        wb.visible = true
     end
 end
 
-local HANDLE_THICKNESS = 6  -- pixels, the clickable/draggable zone
+---------------------------------------------------------------------------
+-- Update drag handles
+---------------------------------------------------------------------------
 
-local drag_handles = {}  -- keyed by screen
-
-local function update_drag_handles(s)
-    clear_wiboxes(drag_handles, s)
-    local t, state = get_active_state(s)
-    if not t then return end
-
-    local wa = s.workarea
-    local gap = beautiful.splitwm_gap or 16
-    local boundaries = compute_boundaries(state.root, wa.x, wa.y, wa.width, wa.height, gap)
-
-    -- Make handle thickness at least as wide as the gap so the entire
-    -- gap zone between splits is draggable
+local function update_drag_handles(s, state, bounds)
+    local gap      = beautiful.splitwm_gap or 16
     local handle_w = math.max(HANDLE_THICKNESS, gap)
+    local n        = #bounds
 
-    for _, b in ipairs(boundaries) do
-        local wb
+    for i, b in ipairs(bounds) do
+        local entry    = get_drag_handle(s, i)
+        local wb, ref  = entry.wb, entry.ref
+        -- Update the mutable ref so the already-wired closure sees fresh data
+        ref.b        = b
+        ref.handle_w = handle_w
+
         if b.dir == "h" then
-            -- Vertical divider line (horizontal split) → drag left/right
-            wb = wibox {
-                x       = b.pos - math.floor(handle_w / 2),
-                y       = b.start,
-                width   = handle_w,
-                height  = math.max(1, b.span),
-                bg      = "#00000000",  -- transparent
-                visible = true,
-                ontop   = true,
-                type    = "utility",
-                cursor  = "sb_h_double_arrow",
-            }
+            wb.x      = b.pos - math.floor(handle_w / 2)
+            wb.y      = b.start
+            wb.width  = handle_w
+            wb.height = math.max(1, b.span)
+            wb.cursor = "sb_h_double_arrow"
         else
-            -- Horizontal divider line (vertical split) → drag up/down
-            wb = wibox {
-                x       = b.start,
-                y       = b.pos - math.floor(handle_w / 2),
-                width   = math.max(1, b.span),
-                height  = handle_w,
-                bg      = "#00000000",
-                visible = true,
-                ontop   = true,
-                type    = "utility",
-                cursor  = "sb_v_double_arrow",
-            }
+            wb.x      = b.start
+            wb.y      = b.pos - math.floor(handle_w / 2)
+            wb.width  = math.max(1, b.span)
+            wb.height = handle_w
+            wb.cursor = "sb_v_double_arrow"
         end
+        if not ref.dragging then wb.bg = "#00000000" end
+        wb.visible = true
+    end
 
-        -- Drag logic: on press, start tracking mouse; on release, stop.
-        local dragging = false
-        local branch = b.branch
+    -- Hide unused handles beyond current boundary count
+    local pool = drag_handle_pool[s]
+    if pool then
+        for i = n + 1, #pool do pool[i].wb.visible = false end
+    end
+end
 
-        wb:buttons(gears.table.join(
-            awful.button({}, 1, function()
-                dragging = true
+---------------------------------------------------------------------------
+-- Unified UI update: single tree traversal feeds all three subsystems
+---------------------------------------------------------------------------
 
-                -- Highlight the handle while dragging
-                wb.bg = beautiful.splitwm_handle_drag_bg or "#7799dd44"
+local function update_ui(s)
+    local t, state = get_active_state(s)
+    if not t then
+        local sides = focus_border_pool[s]
+        if sides then for _, wb in ipairs(sides) do wb.visible = false end end
+        local pool = drag_handle_pool[s]
+        if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
+        if overlay_cache[s] then
+            for _, wb in pairs(overlay_cache[s]) do wb.visible = false end
+        end
+        return
+    end
 
-                mousegrabber.run(function(mouse)
-                    if not mouse.buttons[1] then
-                        -- Released: stop dragging
-                        dragging = false
-                        wb.bg = "#00000000"
-                        awful.layout.arrange(s)
-                        gears.timer.delayed_call(function()
-                            update_drag_handles(s)
-                        end)
-                        return false  -- stop grabbing
-                    end
+    local wa     = s.workarea
+    local gap    = beautiful.splitwm_gap or 16
+    local geos   = {}
+    local bounds = {}
+    compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
 
-                    -- Compute new ratio from mouse position
-                    -- parent_w/parent_h include the inner gap, so we need
-                    -- to compute ratio over the usable space
-                    local igap = b.parent_gap or 0
-                    if b.dir == "h" then
-                        local usable = b.parent_w - igap
-                        local new_ratio = (mouse.x - b.parent_x) / usable
-                        branch.ratio = math.max(0.1, math.min(0.9, new_ratio))
-                    else
-                        local usable = b.parent_h - igap
-                        local new_ratio = (mouse.y - b.parent_y) / usable
-                        branch.ratio = math.max(0.1, math.min(0.9, new_ratio))
-                    end
+    update_overlays(s, t, state, geos)
+    update_focus_border(s, state, geos)
+    update_drag_handles(s, state, bounds)
 
-                    -- Re-arrange live while dragging
-                    awful.layout.arrange(s)
-
-                    -- Update handle position to follow the mouse
-                    if b.dir == "h" then
-                        wb.x = mouse.x - math.floor(handle_w / 2)
-                    else
-                        wb.y = mouse.y - math.floor(handle_w / 2)
-                    end
-
-                    return true  -- keep grabbing
-                end, b.dir == "h" and "sb_h_double_arrow"
-                                   or "sb_v_double_arrow")
-            end)
-        ))
-
-        -- Hover highlight
-        wb:connect_signal("mouse::enter", function()
-            if not dragging then
-                wb.bg = beautiful.splitwm_handle_hover_bg or "#7799dd22"
-            end
-        end)
-        wb:connect_signal("mouse::leave", function()
-            if not dragging then
-                wb.bg = "#00000000"
-            end
-        end)
-
-        table.insert(drag_handles[s], wb)
+    for _, c in ipairs(s.clients) do
+        if c._splitwm_update_titlebar then
+            c._splitwm_update_titlebar()
+        end
     end
 end
 
@@ -1017,6 +1038,18 @@ local function setup_tabbar(c)
 
         -- Only show titlebar on the active tab
         if leaf.tabs[leaf.active_tab] ~= c then return end
+
+        -- Skip rebuild if nothing visible has changed
+        local fp_parts = { leaf.id, leaf.active_tab,
+                           state.focused_leaf_id == leaf.id and 1 or 0 }
+        for _, tc in ipairs(leaf.tabs) do
+            fp_parts[#fp_parts+1] = tostring(tc.window)
+            fp_parts[#fp_parts+1] = tc.name or "?"
+            if tc == picked_up_client then fp_parts[#fp_parts+1] = "P" end
+        end
+        local fp = table.concat(fp_parts, "\0")
+        if c._splitwm_tb_fp == fp then return end
+        c._splitwm_tb_fp = fp
 
         local leaf_id = leaf.id
 
@@ -1240,21 +1273,10 @@ splitwm.layout = {
     name    = "splitwm",
     arrange = function(p)
         arrange(p)
-        -- Update overlays, drag handles, and titlebars after arranging
         local s = p.screen
         if type(s) == "number" then s = screen[s] end
-        if not s then s = awful.screen.focused() end
-        gears.timer.delayed_call(function()
-            update_overlays(s)
-            update_focus_border(s)
-            update_drag_handles(s)
-            -- Update all titlebars on this screen
-            for _, c in ipairs(s.clients) do
-                if c._splitwm_update_titlebar then
-                    c._splitwm_update_titlebar()
-                end
-            end
-        end)
+        if not s then return end
+        gears.timer.delayed_call(function() update_ui(s) end)
     end,
 }
 
@@ -1265,7 +1287,7 @@ splitwm.layout = {
 local function with_tag(fn)
     local s = awful.screen.focused()
     local t = s.selected_tag
-    if t then fn(t); awful.layout.arrange(s) end
+    if t and fn(t) ~= false then awful.layout.arrange(s) end
 end
 
 splitwm.split_horizontal = function() with_tag(function(t) split_leaf(t, "h") end) end
@@ -1347,23 +1369,31 @@ function splitwm.setup()
         end
     end)
 
-    -- Update overlays when tag selection changes
+    -- Update UI when tag selection changes
     tag.connect_signal("property::selected", function(t)
         local s = t.screen
         if type(s) == "number" then s = screen[s] end
-        if s then
-            gears.timer.delayed_call(function()
-                update_overlays(s)
-                update_focus_border(s)
-                update_drag_handles(s)
-            end)
-        end
+        if s then gears.timer.delayed_call(function() update_ui(s) end) end
     end)
 end
 
 ---------------------------------------------------------------------------
 -- Widget exports
 ---------------------------------------------------------------------------
+
+-- Call this after launcher icons are resolved to force a full UI rebuild.
+-- Without it, the icon-less first render is cached and icons never appear.
+function splitwm.flush_caches()
+    -- Hide orphaned overlay wiboxes before dropping the cache references,
+    -- otherwise the old (icon-less) wiboxes stay visible under the new ones.
+    for _, screen_cache in pairs(overlay_cache) do
+        for _, wb in pairs(screen_cache) do wb.visible = false end
+    end
+    overlay_cache = {}
+    for _, c in ipairs(client.get()) do
+        c._splitwm_tb_fp = nil
+    end
+end
 
 splitwm.indicator = make_indicator_widget
 splitwm.get_state = get_state
