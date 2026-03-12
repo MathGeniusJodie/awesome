@@ -380,15 +380,7 @@ local function try_drop_picked_up(t, leaf_id)
         c:move_to_tag(t)
     end
 
-    -- Add to target leaf (avoid double-add)
-    local already = false
-    for _, tc in ipairs(target.tabs) do
-        if tc == c then already = true; break end
-    end
-    if not already then
-        table.insert(target.tabs, c)
-    end
-    target.active_tab = #target.tabs
+    move_client_to_leaf(state.root, c, target)
 
     state.focused_leaf_id = leaf_id
     picked_up_client = nil
