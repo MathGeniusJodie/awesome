@@ -191,10 +191,15 @@ menu_gen.generate(function(entries)
     end
 
     -- Prepend quick-launch items at the top (icons now resolved above)
+    local function launcher_icon(cmd)
+        for _, l in ipairs(splitwm.launchers) do
+            if l.cmd == cmd then return l.icon end
+        end
+    end
     local quick_items = {
-        { "Terminal",     function() awful.spawn(terminal)     end, splitwm.launchers[1].icon },
-        { "Browser",      function() awful.spawn(browser)      end, splitwm.launchers[2].icon },
-        { "File Manager", function() awful.spawn(filemanager)  end, splitwm.launchers[3].icon },
+        { "Terminal",     function() awful.spawn(terminal)     end, launcher_icon(terminal)     },
+        { "Browser",      function() awful.spawn(browser)      end, launcher_icon(browser)      },
+        { "File Manager", function() awful.spawn(filemanager)  end, launcher_icon(filemanager)  },
         { "─────────────" },
     }
     for i = #quick_items, 1, -1 do
