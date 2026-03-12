@@ -59,13 +59,12 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 beautiful.useless_gap        = 0
 beautiful.border_width       = 0
 beautiful.splitwm_gap        = 24
-beautiful.splitwm_focus_bg   = "#00000080"
+beautiful.splitwm_inactive_bg  = "#00000080"
 beautiful.splitwm_empty_bg   = "#00000080"
 beautiful.splitwm_focus_border = "#7799dd"
 beautiful.splitwm_empty_border = "#555555"
 beautiful.splitwm_tab_active_bg = "#000000"
 beautiful.splitwm_tab_active_fg = "#ffffff"
-beautiful.splitwm_tab_bg     = "#00000099"
 beautiful.splitwm_tab_fg     = "#888888"
 beautiful.splitwm_handle_hover_bg = "#7799dd22"
 beautiful.splitwm_handle_drag_bg  = "#7799dd44"
@@ -363,7 +362,7 @@ awful.screen.connect_for_each_screen(function(s)
         position = "top",
         screen   = s,
         height   = 30,
-        bg       = "#000000aa",
+        bg       = beautiful.splitwm_inactive_bg,
     }
     s.mywibox:setup {
         layout = wibox.layout.align.horizontal,

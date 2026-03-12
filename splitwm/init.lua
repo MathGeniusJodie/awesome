@@ -112,7 +112,7 @@ local function make_circle_btn(label, size, callback)
             valign = "center",
             widget = wibox.container.place,
         },
-        bg           = "#000000",
+        bg           = beautiful.splitwm_inactive_bg or "#00000080",
         fg           = "#ffffff",
         shape        = gears.shape.circle,
         forced_width  = size,
@@ -120,7 +120,7 @@ local function make_circle_btn(label, size, callback)
         widget       = wibox.container.background,
     }
     w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
-    w:connect_signal("mouse::leave", function() w.bg = "#000000" end)
+    w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
 end
@@ -817,7 +817,7 @@ local function update_overlays(s, t, state, geos)
             local y  = geo.y + focus_bw
             local w  = math.max(1, geo.width  - 2 * focus_bw)
             local h  = math.max(1, geo.height - 2 * focus_bw)
-            local bg     = beautiful.splitwm_focus_bg
+            local bg     = beautiful.splitwm_inactive_bg
             local border = "#00000066"
 
             if overlay_cache[s][leaf_id] then
@@ -1079,7 +1079,7 @@ local function setup_tabbar(c)
                     valign = "center",
                     widget = wibox.container.place,
                 },
-                bg           = "#00000099",
+                bg           = beautiful.splitwm_inactive_bg or "#00000080",
                 fg           = "#ffffff",
                 shape        = gears.shape.circle,
                 forced_width  = size,
@@ -1088,7 +1088,7 @@ local function setup_tabbar(c)
             }
             w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
             w:connect_signal("mouse::leave", function()
-                w.bg = titlebar_hovered and "#000000" or "#00000099"
+                w.bg = titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080")
             end)
             w:buttons(gears.table.join(awful.button({}, 1, callback)))
             table.insert(titlebar_btn_list, w)
@@ -1187,7 +1187,7 @@ local function setup_tabbar(c)
             -- The tab: [icon] [↗] [✕]
             local tab_bg = is_picked and "#445566"
                 or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
-                              or  (beautiful.splitwm_tab_bg or "#333333"))
+                              or  (beautiful.splitwm_inactive_bg or "#00000080"))
 
             -- Tooltip showing the window title (attached to whole tab)
             -- Created after tab_widget, added below
