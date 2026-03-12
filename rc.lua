@@ -335,25 +335,110 @@ awful.layout.layouts = {
 
 -- Wibar font and color overrides (must be before wibar creation)
 beautiful.font           = "monospace bold 12"
-beautiful.taglist_font   = "monospace bold 12"
 beautiful.fg_normal      = "#ffffff"
 beautiful.fg_focus       = "#ffffff"
-beautiful.taglist_fg_focus    = "#ffffff"
-beautiful.taglist_fg_occupied = "#ffffff"
-beautiful.taglist_fg_empty    = "#888888"
-beautiful.taglist_fg_urgent   = "#ff6666"
+
+--- Build a single tag button: circle + dots drawn via Cairo below.
+local function make_tag_widget(t)
+    -- Custom dot-indicator widget: draws N white circles via Cairo directly.
+    -- This avoids all container/layout sizing issues.
+    local dots = wibox.widget.base.make_widget()
+    dots.n = 0
+    dots.forced_height = 7
+
+    function dots:fit(_, w, h)
+        return 26, h
+    end
+
+    function dots:draw(_, cr, w, h)
+        if self.n == 0 then return end
+        local show  = math.min(self.n, 3)
+        local r     = 2.5
+        local gap   = 3
+        local total = show * (r * 2) + (show - 1) * gap
+        local x0    = (w - total) / 2 + r
+        cr:set_source_rgba(1, 1, 1, 1)
+        for i = 1, show do
+            if i == 3 and self.n > 3 then
+                -- draw a "+" instead of the third dot
+                local cx = x0 + (i - 1) * (r * 2 + gap)
+                local cy = h / 2
+                local arm = r + 0.5
+                cr:set_line_width(1.5)
+                cr:move_to(cx - arm, cy) cr:line_to(cx + arm, cy) cr:stroke()
+                cr:move_to(cx, cy - arm) cr:line_to(cx, cy + arm) cr:stroke()
+            else
+                cr:arc(x0 + (i - 1) * (r * 2 + gap), h / 2, r, 0, math.pi * 2)
+                cr:fill()
+            end
+        end
+    end
+
+    local function update_dots()
+        dots.n = #t:clients()
+        dots:emit_signal("widget::redraw_needed")
+    end
+
+    -- Label
+    local label = wibox.widget.textbox(t.name)
+    label.align  = "center"
+    label.valign = "center"
+    label.font   = "monospace bold 12"
+
+    -- Circle button
+    local place_c = wibox.container.place()
+    place_c.halign = "center"
+    place_c.valign = "center"
+    place_c:set_widget(label)
+
+    local circle = wibox.container.background()
+    circle.forced_width  = 26
+    circle.forced_height = 26
+    circle.shape         = gears.shape.circle
+    circle.bg            = "#00000080"
+    circle:set_widget(place_c)
+
+    local function update_circle()
+        circle.bg = t.selected and "#000000" or "#00000080"
+    end
+
+    -- Vertical stack: circle on top, dots below
+    local vbox = wibox.layout.fixed.vertical()
+    vbox.spacing = 2
+    vbox:add(circle)
+    vbox:add(dots)
+
+    local margin = wibox.container.margin()
+    margin:set_top(3)
+    margin:set_bottom(3)
+    margin:set_widget(vbox)
+
+    margin:buttons(gears.table.join(
+        awful.button({}, 1, function() t:view_only() end)
+    ))
+
+    t:connect_signal("property::selected", function() update_circle() end)
+    t:connect_signal("tagged",             function() update_circle(); update_dots() end)
+    t:connect_signal("untagged",           function() update_circle(); update_dots() end)
+
+    update_circle()
+    update_dots()
+    return margin
+end
 
 awful.screen.connect_for_each_screen(function(s)
     awful.tag({ "1", "2", "3", "4", "5" }, s, splitwm.layout)
 
     s.mypromptbox = awful.widget.prompt()
-    s.mytaglist   = awful.widget.taglist {
-        screen  = s,
-        filter  = awful.widget.taglist.filter.all,
-        buttons = gears.table.join(
-            awful.button({}, 1, function(t) t:view_only() end)
-        ),
-    }
+
+    -- Build taglist manually so we have direct widget references (no
+    -- get_children_by_id indirection that proved unreliable).
+    local taglist_layout = wibox.layout.fixed.horizontal()
+    taglist_layout.spacing = 4
+    for _, t in ipairs(s.tags) do
+        taglist_layout:add(make_tag_widget(t))
+    end
+    s.mytaglist = taglist_layout
 
     local myclock = wibox.widget.textclock(" %I:%M %p ")
     myclock.font = "monospace bold 12"
@@ -361,7 +446,7 @@ awful.screen.connect_for_each_screen(function(s)
     s.mywibox = awful.wibar {
         position = "top",
         screen   = s,
-        height   = 30,
+        height   = 42,
         bg       = beautiful.splitwm_inactive_bg,
     }
     s.mywibox:setup {
