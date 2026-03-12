@@ -411,6 +411,8 @@ local function make_battery_widget()
 end
 
 local function refresh_battery()
+    -- Synchronous io.open is intentional: sysfs files are kernel virtual
+    -- files with no disk I/O. Spawning a subprocess would be heavier.
     for _, name in ipairs({ "BAT0", "BAT1", "BAT" }) do
         local fc = io.open("/sys/class/power_supply/" .. name .. "/capacity", "r")
         if fc then
@@ -570,6 +572,8 @@ end
 local _cpu_prev_idle, _cpu_prev_total = 0, 0
 
 local function refresh_chip()
+    -- Synchronous io.open is intentional: /proc/stat and /proc/meminfo are
+    -- kernel virtual files with no disk I/O. Spawning subprocesses would be heavier.
     -- CPU: read /proc/stat
     local f = io.open("/proc/stat", "r")
     local cpu_pct = 0
