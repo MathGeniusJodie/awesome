@@ -339,11 +339,12 @@ beautiful.fg_normal      = "#ffffff"
 beautiful.fg_focus       = "#ffffff"
 
 ---------------------------------------------------------------------------
--- Status widgets: battery + volume
+-- Status widgets: battery + volume + chip (cpu/ram/swap)
 ---------------------------------------------------------------------------
 
 local battery_widgets = {}
 local volume_widgets  = {}
+local chip_widgets    = {}
 
 local function make_battery_widget()
     local w = wibox.widget.base.make_widget()
@@ -488,8 +489,135 @@ local function refresh_volume()
     )
 end
 
+local function make_chip_widget()
+    local w = wibox.widget.base.make_widget()
+    w.cpu  = 0
+    w.ram  = 0
+    w.swap = 0
+
+    local cw, ch    = 18, 18
+    local pin_len   = 3
+    local n_pins    = 3
+
+    function w:fit(_, _, h) return cw + pin_len * 2 + 6, h end
+
+    function w:draw(_, cr, width, height)
+        local cx = math.floor(width / 2)
+        local cy = math.floor(height / 2)
+        local bx = cx - math.floor(cw / 2)
+        local by = cy - math.floor(ch / 2)
+
+        -- Pins (top and bottom), same line_width as battery outline
+        cr:set_source_rgba(1, 1, 1, 1)
+        cr:set_line_width(2)
+        local pin_spacing = cw / (n_pins + 1)
+        for i = 1, n_pins do
+            local px = bx + i * pin_spacing
+            cr:move_to(px, by)
+            cr:line_to(px, by - pin_len)
+            cr:stroke()
+            cr:move_to(px, by + ch)
+            cr:line_to(px, by + ch + pin_len)
+            cr:stroke()
+        end
+
+        -- Body outline: identical to battery (line_width 2, radius 1.5)
+        cr:set_source_rgba(1, 1, 1, 1)
+        cr:set_line_width(2)
+        cr:save()
+        cr:translate(bx, by)
+        gears.shape.rounded_rect(cr, cw, ch, 1.5)
+        cr:restore()
+        cr:stroke()
+
+        -- 3 vertical gauges inside body, 1px gap between them
+        -- Inner area matches battery fill inset: 2px from each edge
+        local pad = 2
+        local gap = 1
+        local n   = 3
+        local gh  = ch - pad * 2
+        local gw  = math.floor((cw - pad * 2 - gap * (n - 1)) / n)
+        local gy  = by + pad
+
+        local gauges = {
+            { pct = self.cpu,  r = 1,   g = 1,   b = 1   },
+            { pct = self.ram,  r = 1,   g = 1,   b = 1   },
+            { pct = self.swap, r = 1,   g = 0.3, b = 0.3 },
+        }
+
+        for i, gauge in ipairs(gauges) do
+            local gx = bx + pad + (i - 1) * (gw + gap)
+
+            cr:set_source_rgba(1, 1, 1, 0.2)
+            cr:rectangle(gx, gy, gw, gh)
+            cr:fill()
+
+            local fill_h = math.floor(gh * math.max(0, math.min(1, gauge.pct)))
+            if fill_h > 0 then
+                cr:set_source_rgba(gauge.r, gauge.g, gauge.b, 0.9)
+                cr:rectangle(gx, gy + gh - fill_h, gw, fill_h)
+                cr:fill()
+            end
+        end
+    end
+
+    return w
+end
+
+-- prev_cpu_idle/total for delta calculation
+local _cpu_prev_idle, _cpu_prev_total = 0, 0
+
+local function refresh_chip()
+    -- CPU: read /proc/stat
+    local f = io.open("/proc/stat", "r")
+    local cpu_pct = 0
+    if f then
+        local line = f:read("*l"); f:close()
+        local vals = {}
+        for v in line:gmatch("%d+") do vals[#vals+1] = tonumber(v) end
+        local idle  = (vals[4] or 0) + (vals[5] or 0)
+        local total = 0
+        for _, v in ipairs(vals) do total = total + v end
+        local d_idle  = idle  - _cpu_prev_idle
+        local d_total = total - _cpu_prev_total
+        if d_total > 0 then
+            cpu_pct = 1 - d_idle / d_total
+        end
+        _cpu_prev_idle, _cpu_prev_total = idle, total
+    end
+
+    -- RAM + swap: read /proc/meminfo
+    local ram_pct, swap_pct = 0, 0
+    local mf = io.open("/proc/meminfo", "r")
+    if mf then
+        local mem = {}
+        for line in mf:lines() do
+            local k, v = line:match("^(%w+):%s+(%d+)")
+            if k then mem[k] = tonumber(v) end
+        end
+        mf:close()
+        local total_mem = mem["MemTotal"] or 1
+        local avail_mem = mem["MemAvailable"] or total_mem
+        ram_pct = 1 - avail_mem / total_mem
+
+        local swap_total = mem["SwapTotal"] or 0
+        local swap_free  = mem["SwapFree"]  or swap_total
+        if swap_total > 0 then
+            swap_pct = 1 - swap_free / swap_total
+        end
+    end
+
+    for _, w in ipairs(chip_widgets) do
+        w.cpu  = cpu_pct
+        w.ram  = ram_pct
+        w.swap = swap_pct
+        w:emit_signal("widget::redraw_needed")
+    end
+end
+
 gears.timer { timeout = 30, autostart = true, call_now = true, callback = refresh_battery }
 gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume }
+gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_chip }
 
 --- Build a single tag button: circle + dots drawn via Cairo below.
 local function make_tag_widget(t)
@@ -605,6 +733,9 @@ awful.screen.connect_for_each_screen(function(s)
     local vol_widget = make_volume_widget()
     table.insert(volume_widgets, vol_widget)
 
+    local chip_widget = make_chip_widget()
+    table.insert(chip_widgets, chip_widget)
+
     s.mywibox = awful.wibar {
         position = "top",
         screen   = s,
@@ -622,6 +753,7 @@ awful.screen.connect_for_each_screen(function(s)
         { -- Right
             layout = wibox.layout.fixed.horizontal,
             wibox.widget.systray(),
+            chip_widget,
             bat_widget,
             vol_widget,
             mydate,
