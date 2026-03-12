@@ -1183,6 +1183,15 @@ local function setup_tabbar(c)
             table.insert(tab_widgets, tab_widget)
         end
 
+        -- Menu button (right after tabs, on the left side)
+        local menu_btn = make_circle_btn("+", 26, function()
+            state.focused_leaf_id = leaf_id
+            if splitwm.on_menu_request then
+                splitwm.on_menu_request()
+            end
+        end)
+        table.insert(tab_widgets, menu_btn)
+
         -- Titlebar split/close buttons
         local vsplit_btn = make_circle_btn("│", 26, function()
             state.focused_leaf_id = leaf_id

@@ -174,12 +174,6 @@ menu_gen.generate(function(entries)
         awful.screen.focused().mypromptbox:run()
     end })
 
-    -- Replace the placeholder menu
-    app_menu = awful.menu {
-        items = menu_items,
-        theme = { width = 200, height = 24 },
-    }
-
     -- NOW the icon theme is ready — resolve launcher icons
     for _, launcher in ipairs(splitwm.launchers) do
         if not launcher.icon then
@@ -197,6 +191,23 @@ menu_gen.generate(function(entries)
             end
         end
     end
+
+    -- Prepend quick-launch items at the top (icons now resolved above)
+    local quick_items = {
+        { "Terminal",     function() awful.spawn(terminal)     end, splitwm.launchers[1].icon },
+        { "Browser",      function() awful.spawn(browser)      end, splitwm.launchers[2].icon },
+        { "File Manager", function() awful.spawn(filemanager)  end, splitwm.launchers[3].icon },
+        { "─────────────" },
+    }
+    for i = #quick_items, 1, -1 do
+        table.insert(menu_items, 1, quick_items[i])
+    end
+
+    -- Replace the placeholder menu
+    app_menu = awful.menu {
+        items = menu_items,
+        theme = { width = 200, height = 24 },
+    }
 
     -- Flush render caches so overlays and titlebars rebuild with the new icons
     splitwm.flush_caches()
@@ -228,17 +239,11 @@ splitwm.launchers = {
         icon       = "/usr/share/icons/Adwaita/scalable/places/folder.svg",
         cmd        = filemanager,
     },
-    {
-        label      = "M",
-        icon_name  = "application-menu",
-        icon_names = {"org.xfce.panel.whiskermenu", "app-launcher", "application-menu",
-                      "start-here", "start-here-symbolic",
-                      "view-app-grid-symbolic", "apps", "system-run"},
-        action    = function()
-            app_menu:toggle()
-        end,
-    },
 }
+
+splitwm.on_menu_request = function()
+    app_menu:toggle()
+end
 
 -- Close menu on any client focus change
 client.connect_signal("focus", function()
