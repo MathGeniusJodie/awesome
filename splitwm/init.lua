@@ -241,11 +241,8 @@ end
 -- Geometry computation: walk the tree and compute pixel rects
 ---------------------------------------------------------------------------
 
---- Walk the tree computing geometry rects (geos) and/or split boundaries (bounds).
-local function compute_tree(node, x, y, w, h, gap, geos, bounds, is_root)
-    if is_root ~= false then
-        return compute_tree(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, false)
-    end
+--- Inner recursive walk: x/y/w/h are already inset by the root gap.
+local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds)
     if node.type == "leaf" then
         if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
         return
@@ -259,8 +256,8 @@ local function compute_tree(node, x, y, w, h, gap, geos, bounds, is_root)
                 pos = x + w1 + math.floor(inner / 2),
                 start = y, span = h, parent_x = x, parent_w = w, parent_gap = inner })
         end
-        compute_tree(node.children[1], x,          y, w1,         h, gap, geos, bounds, false)
-        compute_tree(node.children[2], x+w1+inner, y, usable-w1,  h, gap, geos, bounds, false)
+        compute_tree_inner(node.children[1], x,          y, w1,        h, gap, geos, bounds)
+        compute_tree_inner(node.children[2], x+w1+inner, y, usable-w1, h, gap, geos, bounds)
     else
         local usable = h - inner
         local h1 = math.floor(usable * ratio)
@@ -269,9 +266,15 @@ local function compute_tree(node, x, y, w, h, gap, geos, bounds, is_root)
                 pos = y + h1 + math.floor(inner / 2),
                 start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner })
         end
-        compute_tree(node.children[1], x, y,          w, h1,        gap, geos, bounds, false)
-        compute_tree(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, false)
+        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds)
+        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds)
     end
+end
+
+--- Walk the tree computing geometry rects (geos) and/or split boundaries (bounds).
+--- Applies the outer gap inset before recursing.
+local function compute_tree(node, x, y, w, h, gap, geos, bounds)
+    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds)
 end
 
 local function compute_geometries(node, x, y, w, h, gap)
