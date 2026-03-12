@@ -568,27 +568,12 @@ local function arrange(p)
         end
     end
 
-    -- Clean out clients that are no longer alive
-    -- NOTE: we do NOT use p.clients here because awesome filters out
-    -- minimized/hidden clients from that list, and we hide inactive tabs.
-    for _, leaf in ipairs(collect_leaves(root)) do
-        local new_tabs = {}
-        for _, tc in ipairs(leaf.tabs) do
-            if tc.valid then
-                table.insert(new_tabs, tc)
-            end
-        end
-        leaf.tabs = new_tabs
-        if leaf.active_tab > #leaf.tabs then
-            leaf.active_tab = math.max(0, #leaf.tabs)
-        end
-        if #leaf.tabs == 0 then leaf.active_tab = 0 end
-    end
-
     -- Compute geometries for each leaf
     local geos = compute_geometries(root, wa.x, wa.y, wa.width, wa.height, gap)
 
-    -- Apply geometries: only the active tab in each leaf is visible.
+    -- Clean out dead clients and apply geometries in one pass.
+    -- NOTE: we do NOT use p.clients here because awesome filters out
+    -- minimized/hidden clients from that list, and we hide inactive tabs.
     -- Windows are shifted up by gap/2 so the tab bar (TITLEBAR_HEIGHT tall)
     -- floats into the gap above, sitting between splits rather than consuming
     -- space inside the split. Height is increased by the same amount to compensate.
@@ -597,6 +582,18 @@ local function arrange(p)
     local tab_raise = math.floor(gap / 2)
 
     for _, leaf in ipairs(collect_leaves(root)) do
+        -- Clean dead clients
+        local new_tabs = {}
+        for _, tc in ipairs(leaf.tabs) do
+            if tc.valid then table.insert(new_tabs, tc) end
+        end
+        leaf.tabs = new_tabs
+        if leaf.active_tab > #leaf.tabs then
+            leaf.active_tab = math.max(0, #leaf.tabs)
+        end
+        if #leaf.tabs == 0 then leaf.active_tab = 0 end
+
+        -- Apply geometry
         local geo = geos[leaf.id]
         if geo then
             for i, c in ipairs(leaf.tabs) do
