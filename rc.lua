@@ -105,8 +105,7 @@ local modkey   = "Mod4"
 
 -- Browser detection: try common browsers
 local browser = os.getenv("BROWSER") or "xdg-open http://"
--- File manager detection
-local filemanager = "thunar"  -- XFCE default; change to your preference
+local filemanager = os.getenv("FILEMANAGER") or "thunar"
 
 ---------------------------------------------------------------------------
 -- Freedesktop app menu (auto-generated from .desktop files)
