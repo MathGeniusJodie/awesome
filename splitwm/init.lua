@@ -477,28 +477,32 @@ local function focus_tab_n(t, n)
     leaf.active_tab = n
 end
 
+--- Return the leaf adjacent to leaf_id in direction "next"|"prev", or nil.
+local function adjacent_leaf(state, leaf_id, dir)
+    local leaves = collect_leaves(state.root)
+    if #leaves < 2 then return nil end
+    local cur_idx
+    for i, l in ipairs(leaves) do
+        if l.id == leaf_id then cur_idx = i; break end
+    end
+    if not cur_idx then return nil end
+    local new_idx
+    if dir == "next" then
+        new_idx = cur_idx < #leaves and cur_idx + 1 or 1
+    else
+        new_idx = cur_idx > 1 and cur_idx - 1 or #leaves
+    end
+    return leaves[new_idx]
+end
+
 --- Move the currently active tab in the focused leaf to an adjacent leaf
 local function move_tab_to_direction(t, dir)
-    local state = get_state(t)
+    local state    = get_state(t)
     local src_leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
     if not src_leaf or #src_leaf.tabs == 0 then return false end
+    local dst_leaf = adjacent_leaf(state, src_leaf.id, dir)
+    if not dst_leaf then return false end
 
-    local leaves = collect_leaves(state.root)
-    local src_idx
-    for i, l in ipairs(leaves) do
-        if l.id == src_leaf.id then src_idx = i; break end
-    end
-    if not src_idx then return false end
-
-    -- For now, "next"/"prev" based on tree order
-    local dst_idx
-    if dir == "next" then
-        dst_idx = src_idx < #leaves and src_idx + 1 or 1
-    else
-        dst_idx = src_idx > 1 and src_idx - 1 or #leaves
-    end
-
-    local dst_leaf = leaves[dst_idx]
     local c = src_leaf.tabs[src_leaf.active_tab]
     table.remove(src_leaf.tabs, src_leaf.active_tab)
     if src_leaf.active_tab > #src_leaf.tabs then
@@ -514,23 +518,9 @@ end
 
 local function focus_direction(t, dir)
     local state = get_state(t)
-    local leaves = collect_leaves(state.root)
-    if #leaves < 2 then return false end
-
-    local cur_idx
-    for i, l in ipairs(leaves) do
-        if l.id == state.focused_leaf_id then cur_idx = i; break end
-    end
-    if not cur_idx then return false end
-
-    local new_idx
-    if dir == "next" then
-        new_idx = cur_idx < #leaves and cur_idx + 1 or 1
-    else
-        new_idx = cur_idx > 1 and cur_idx - 1 or #leaves
-    end
-
-    state.focused_leaf_id = leaves[new_idx].id
+    local leaf  = adjacent_leaf(state, state.focused_leaf_id, dir)
+    if not leaf then return false end
+    state.focused_leaf_id = leaf.id
 end
 
 ---------------------------------------------------------------------------
@@ -546,16 +536,17 @@ local function arrange(p)
     -- Use our own gap variable, NOT useless_gap (awesome auto-applies that)
     local gap   = beautiful.splitwm_gap or 16
 
-    -- Make sure every client in the tag is pinned somewhere
+    -- Make sure every client in the tag is pinned somewhere.
+    -- Build a set of already-pinned clients from the tree in one pass to avoid
+    -- an O(n*m) find_leaf_for_client call per client.
     local root = state.root
+    local pinned = {}
+    for _, leaf in ipairs(collect_leaves(root)) do
+        for _, tc in ipairs(leaf.tabs) do pinned[tc] = true end
+    end
     for _, c in ipairs(cls) do
-        if not find_leaf_for_client(root, c) then
-            pin_client(tag, c)
-        end
-        -- Ensure titlebar is set up
-        if not c._splitwm_update_titlebar then
-            setup_tabbar(c)
-        end
+        if not pinned[c] then pin_client(tag, c) end
+        if not c._splitwm_update_titlebar then setup_tabbar(c) end
     end
 
     -- Compute geometries for each leaf
