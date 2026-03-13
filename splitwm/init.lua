@@ -981,6 +981,7 @@ local function setup_tabbar(c)
     -- This gets rebuilt whenever the layout arranges
     local titlebar_hovered = false
     local titlebar_btn_list = {}
+    local tb  -- declared here so update_titlebar's closure can reference it
     -- Tooltip pool: reused across rebuilds to avoid leaking X windows.
     -- Each slot: { tt = awful.tooltip, prev_obj = widget_it_is_attached_to }
     local tooltip_pool = {}
@@ -1216,7 +1217,7 @@ local function setup_tabbar(c)
             and (beautiful.titlebar_bg_focus  or "#000000")
             or  (beautiful.titlebar_bg_normal or "#000000aa")
 
-        awful.titlebar(c, { size = TITLEBAR_HEIGHT, position = "top", bg = "#00000000" }):setup {
+        tb:setup {
             {
                 { -- Left: tab buttons
                     spacing = BTN_SPACING,
@@ -1243,12 +1244,8 @@ local function setup_tabbar(c)
         }
     end
 
-    c:connect_signal("property::name", update_titlebar)
-    -- We call it once on setup; it will also be triggered by arrange
-    gears.timer.delayed_call(update_titlebar)
-
-    -- Titlebar hover: make buttons solid when mouse is over the bar
-    local tb = awful.titlebar(c, { size = TITLEBAR_HEIGHT, position = "top" })
+    -- Create the titlebar once; hover signals attached here, content rebuilt by update_titlebar
+    tb = awful.titlebar(c, { size = TITLEBAR_HEIGHT, position = "top", bg = "#00000000" })
     tb:connect_signal("mouse::enter", function()
         titlebar_hovered = true
         for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#000000" end
@@ -1257,6 +1254,10 @@ local function setup_tabbar(c)
         titlebar_hovered = false
         for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#00000099" end
     end)
+
+    c:connect_signal("property::name", update_titlebar)
+    -- We call it once on setup; it will also be triggered by arrange
+    gears.timer.delayed_call(update_titlebar)
 
     -- Store the updater so arrange can call it
     c._splitwm_update_titlebar = update_titlebar
