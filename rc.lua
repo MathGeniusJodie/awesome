@@ -403,16 +403,19 @@ local function refresh_battery()
         local fc = io.open("/sys/class/power_supply/" .. name .. "/capacity", "r")
         if fc then
             local cap = tonumber(fc:read("*l")); fc:close()
+            -- Skip phantom batteries that exist in sysfs but report no capacity
+            if not cap then goto continue end
             local fs = io.open("/sys/class/power_supply/" .. name .. "/status", "r")
             local status = fs and fs:read("*l") or ""
             if fs then fs:close() end
             for _, w in ipairs(battery_widgets) do
-                w.percentage = cap or 0
+                w.percentage = cap
                 w.charging   = (status == "Charging")
                 w:emit_signal("widget::redraw_needed")
             end
             return
         end
+        ::continue::
     end
 end
 
