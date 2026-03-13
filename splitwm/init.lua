@@ -96,9 +96,9 @@ local function make_launcher_widget(entry, size, callback)
     return w
 end
 
---- Build a circular text button with hover highlight.
-local function make_circle_btn(label, size, callback)
-    local w = wibox.widget {
+--- Shared widget skeleton for circular text buttons.
+local function make_circle_btn_widget(label, size)
+    return wibox.widget {
         {
             {
                 markup = '<span font_family="Sans">' .. label .. '</span>',
@@ -118,6 +118,11 @@ local function make_circle_btn(label, size, callback)
         forced_height = size,
         widget       = wibox.container.background,
     }
+end
+
+--- Build a circular text button with hover highlight (for overlays).
+local function make_circle_btn(label, size, callback)
+    local w = make_circle_btn_widget(label, size)
     w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
     w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
@@ -984,26 +989,7 @@ local function setup_tabbar(c)
     -- Button factory for titlebar controls. Defined once per client (not per rebuild).
     -- Buttons are registered in titlebar_btn_list so hover state can be synced.
     local function make_tb_btn(label, size, callback)
-        local w = wibox.widget {
-            {
-                {
-                    markup = '<span font_family="Sans">' .. label .. '</span>',
-                    align  = "center",
-                    valign = "center",
-                    font   = beautiful.splitwm_btn_font or "monospace bold 14",
-                    widget = wibox.widget.textbox,
-                },
-                halign = "center",
-                valign = "center",
-                widget = wibox.container.place,
-            },
-            bg           = beautiful.splitwm_inactive_bg or "#00000080",
-            fg           = "#ffffff",
-            shape        = gears.shape.circle,
-            forced_width  = size,
-            forced_height = size,
-            widget       = wibox.container.background,
-        }
+        local w = make_circle_btn_widget(label, size)
         w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
         w:connect_signal("mouse::leave", function()
             w.bg = titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080")
