@@ -732,15 +732,22 @@ local function update_overlays(s, t, state, geos)
     local focus_bw = beautiful.splitwm_focus_border_width or 2
     if not overlay_cache[s] then overlay_cache[s] = {} end
 
-    -- Determine which leaf_ids need an overlay this frame
-    local needed = {}
+    -- Determine which leaf_ids need an overlay this frame, and which exist at all
+    local needed  = {}
+    local alive   = {}
     for _, leaf in ipairs(collect_leaves(state.root)) do
+        alive[leaf.id] = true
         if #leaf.tabs == 0 then needed[leaf.id] = leaf end
     end
 
-    -- Hide overlays whose leaf is no longer empty or no longer exists
+    -- Destroy overlays whose leaf no longer exists; hide ones that are now occupied
     for leaf_id, wb in pairs(overlay_cache[s]) do
-        if not needed[leaf_id] then wb.visible = false end
+        if not alive[leaf_id] then
+            wb.visible = false
+            overlay_cache[s][leaf_id] = nil
+        elseif not needed[leaf_id] then
+            wb.visible = false
+        end
     end
 
     -- Show or create overlays for empty leaves
