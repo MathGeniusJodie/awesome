@@ -641,7 +641,7 @@ end
 
 -- Drag handles: growable pool per screen; buttons/signals wired once at creation
 local HANDLE_THICKNESS = 6
--- Base height of the tab bar. The actual titlebar size is TITLEBAR_HEIGHT + floor(gap/2)
+-- Base height of the tab bar. The actual titlebar size is max(gap, TITLEBAR_HEIGHT)
 -- so the bar fills the entire gap above the split (windows are raised by the full gap).
 local TITLEBAR_HEIGHT  = 33
 
@@ -1265,8 +1265,9 @@ local function setup_tabbar(c)
         end
 
         -- Top padding pushes the buttons/tabs down into the base-height portion of the bar,
-        -- keeping them at the same visual position as before the gap/2 height increase.
-        local top_pad = math.floor((beautiful.splitwm_gap or 16) / 2)
+        -- keeping them at the same visual position regardless of gap size.
+        local tb_gap_inner = beautiful.splitwm_gap or 16
+        local top_pad = math.max(tb_gap_inner, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT
         tb:setup {
             {
                 {
@@ -1299,9 +1300,9 @@ local function setup_tabbar(c)
     end
 
     -- Create the titlebar once; hover signals attached here, content rebuilt by update_titlebar
-    -- Height extends by gap/2 beyond the base so the bar fills the entire gap above the split.
+    -- Height is max(gap, TITLEBAR_HEIGHT) so the bar fills the entire gap above the split.
     local tb_gap = beautiful.splitwm_gap or 16
-    tb = awful.titlebar(c, { size = TITLEBAR_HEIGHT + math.floor(tb_gap / 2), position = "top", bg = "#00000000" })
+    tb = awful.titlebar(c, { size = math.max(TITLEBAR_HEIGHT, tb_gap), position = "top", bg = "#00000000" })
     tb:connect_signal("mouse::enter", function()
         titlebar_hovered = true
         for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#000000" end
