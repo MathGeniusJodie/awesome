@@ -114,6 +114,32 @@ local filemanager = os.getenv("FILEMANAGER") or "thunar"
 local menubar_utils = require("menubar.utils")
 local menu_gen      = require("menubar.menu_gen")
 
+---------------------------------------------------------------------------
+-- App launchers shown in splits (icon with text fallback)
+-- icon_name = XDG name, resolved after icon theme loads
+---------------------------------------------------------------------------
+
+splitwm.launchers = {
+    {
+        label      = "$",
+        icon_name  = "utilities-terminal",
+        icon_names = {"utilities-terminal", "terminal", "xterm", "org.xfce.terminal"},
+        cmd        = terminal,
+    },
+    {
+        label      = "B",
+        icon_name  = "internet-web-browser",
+        icon_names = {"internet-web-browser", "web-browser", "firefox", "firefox-esr",
+                      "librewolf", "brave-browser", "chromium", "google-chrome"},
+        cmd        = browser,
+    },
+    {
+        label      = "F",
+        icon       = "/usr/share/icons/Adwaita/scalable/places/folder.svg",
+        cmd        = filemanager,
+    },
+}
+
 -- Build the app menu asynchronously from .desktop files
 -- We start with a placeholder and replace it once generation completes.
 local app_menu = awful.menu {
@@ -217,32 +243,6 @@ menu_gen.generate(function(entries)
     local s = awful.screen.focused()
     if s then awful.layout.arrange(s) end
 end)
-
----------------------------------------------------------------------------
--- App launchers shown in splits (icon with text fallback)
--- icon_name = XDG name, resolved after icon theme loads
----------------------------------------------------------------------------
-
-splitwm.launchers = {
-    {
-        label      = "$",
-        icon_name  = "utilities-terminal",
-        icon_names = {"utilities-terminal", "terminal", "xterm", "org.xfce.terminal"},
-        cmd        = terminal,
-    },
-    {
-        label      = "B",
-        icon_name  = "internet-web-browser",
-        icon_names = {"internet-web-browser", "web-browser", "firefox", "firefox-esr",
-                      "librewolf", "brave-browser", "chromium", "google-chrome"},
-        cmd        = browser,
-    },
-    {
-        label      = "F",
-        icon       = "/usr/share/icons/Adwaita/scalable/places/folder.svg",
-        cmd        = filemanager,
-    },
-}
 
 -- Close menu on any client focus change
 client.connect_signal("focus", function()
