@@ -10,7 +10,6 @@ local awful     = require("awful")
 local gears     = require("gears")
 local wibox     = require("wibox")
 local beautiful = require("beautiful")
-local menubar_utils = require("menubar.utils")
 
 local splitwm = {}
 
@@ -27,29 +26,11 @@ splitwm.launchers = {}  -- set from rc.lua before calling setup()
 -- When set, the next split click will move this client there
 local picked_up_client = nil
 
---- Resolve an icon: accepts an XDG name, a file path, or nil.
---- Returns a usable path string or nil.
-local function resolve_icon(icon_input)
-    if not icon_input then return nil end
-    if type(icon_input) ~= "string" then return nil end
-    -- If it looks like an absolute path and exists, use it directly
-    if icon_input:sub(1, 1) == "/" then
-        return icon_input
-    end
-    -- Otherwise treat as XDG icon name
-    local result = menubar_utils.lookup_icon(icon_input)
-    if result and result ~= false and type(result) == "string" then
-        return result
-    end
-    return nil
-end
-
 --- Build a launcher widget (icon if available, text fallback).
 --- `size` is the icon/font size to target; `callback` is the click action.
+--- entry.icon must already be a resolved path (set by rc.lua after icon theme loads).
 local function make_launcher_widget(entry, size, callback)
-    -- entry.icon = resolved path (set after icon theme loads)
-    -- entry.icon_name = XDG name (for deferred resolution)
-    local icon_path = resolve_icon(entry.icon) or resolve_icon(entry.icon_name)
+    local icon_path = entry.icon
 
     local inner
     if icon_path then
