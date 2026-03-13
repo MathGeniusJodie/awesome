@@ -229,9 +229,12 @@ end
 ---------------------------------------------------------------------------
 
 --- Inner recursive walk: x/y/w/h are already inset by the root gap.
-local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds)
+local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above)
     if node.type == "leaf" then
         if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
+        -- Store the nearest vertical boundary above this leaf so the titlebar
+        -- can use it as a drag handle. Only updated during full traversals.
+        if bounds ~= nil then node.v_bound_above = v_bound_above end
         return
     end
     local dir, ratio, inner = node.direction, node.ratio, gap
@@ -243,25 +246,29 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds)
                 pos = x + w1 + math.floor(inner / 2),
                 start = y, span = h, parent_x = x, parent_w = w, parent_gap = inner })
         end
-        compute_tree_inner(node.children[1], x,          y, w1,        h, gap, geos, bounds)
-        compute_tree_inner(node.children[2], x+w1+inner, y, usable-w1, h, gap, geos, bounds)
+        compute_tree_inner(node.children[1], x,          y, w1,        h, gap, geos, bounds, v_bound_above)
+        compute_tree_inner(node.children[2], x+w1+inner, y, usable-w1, h, gap, geos, bounds, v_bound_above)
     else
         local usable = h - inner
         local h1 = math.floor(usable * ratio)
+        local bnd
         if bounds then
-            table.insert(bounds, { branch = node, dir = "v",
+            bnd = { branch = node, dir = "v",
                 pos = y + h1 + math.floor(inner / 2),
-                start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner })
+                start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner }
+            table.insert(bounds, bnd)
         end
-        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds)
-        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds)
+        -- children[1] (top) inherits the same v_bound_above as this node
+        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds, v_bound_above)
+        -- children[2] (bottom) has this boundary directly above its titlebar
+        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, bnd)
     end
 end
 
 --- Walk the tree computing geometry rects (geos) and/or split boundaries (bounds).
 --- Applies the outer gap inset before recursing.
 local function compute_tree(node, x, y, w, h, gap, geos, bounds)
-    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds)
+    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil)
 end
 
 local function compute_geometries(node, x, y, w, h, gap)
@@ -555,12 +562,12 @@ local function arrange(p)
     -- Clean out dead clients and apply geometries in one pass.
     -- NOTE: we do NOT use p.clients here because awesome filters out
     -- minimized/hidden clients from that list, and we hide inactive tabs.
-    -- Windows are shifted up by gap/2 so the tab bar (TITLEBAR_HEIGHT tall)
-    -- floats into the gap above, sitting between splits rather than consuming
-    -- space inside the split. Height is increased by the same amount to compensate.
+    -- Windows are shifted up by the full gap so the titlebar fills the entire
+    -- gap above, covering the space between splits completely.
+    -- Height is increased by the same amount to compensate.
     -- focus_bw insets the content so the focus border renders outside it.
     local focus_bw  = beautiful.splitwm_focus_border_width or 2
-    local tab_raise = math.floor(gap / 2)
+    local tab_raise = gap
 
     for _, leaf in ipairs(collect_leaves(root)) do
         -- Clean dead clients
@@ -634,9 +641,8 @@ end
 
 -- Drag handles: growable pool per screen; buttons/signals wired once at creation
 local HANDLE_THICKNESS = 6
--- Height of the tab bar / titlebar drawn at the top of each client.
--- The tab bar floats upward by gap/2, sitting in the gap above the split,
--- so this should be >= gap/2 to ensure it's fully visible.
+-- Base height of the tab bar. The actual titlebar size is TITLEBAR_HEIGHT + floor(gap/2)
+-- so the bar fills the entire gap above the split (windows are raised by the full gap).
 local TITLEBAR_HEIGHT  = 33
 
 local drag_handle_pool = {}  -- drag_handle_pool[s] = array of { wb, ref }
@@ -708,6 +714,7 @@ local overlay_cache = {}  -- overlay_cache[s][leaf_id] = wibox
 
 local function update_overlays(s, t, state, geos)
     local focus_bw = beautiful.splitwm_focus_border_width or 2
+    local gap      = beautiful.splitwm_gap or 16
     if not overlay_cache[s] then overlay_cache[s] = {} end
 
     -- Determine which leaf_ids need an overlay this frame, and which exist at all
@@ -733,19 +740,25 @@ local function update_overlays(s, t, state, geos)
         local geo = geos[leaf_id]
         if geo then
             local focused = leaf.id == state.focused_leaf_id
-            local x  = geo.x + focus_bw
-            local y  = geo.y + focus_bw
-            local w  = math.max(1, geo.width  - 2 * focus_bw)
-            local h  = math.max(1, geo.height - 2 * focus_bw)
+            local x       = geo.x + focus_bw
+            local w       = math.max(1, geo.width - 2 * focus_bw)
+            -- Extend upward by the full gap when there is a vertical boundary above,
+            -- so the top strip of the overlay covers that gap and can be dragged.
+            local raise   = leaf.v_bound_above and gap or 0
+            local y       = geo.y + focus_bw - raise
+            local h       = math.max(1, geo.height - 2 * focus_bw + raise)
             local bg     = beautiful.splitwm_inactive_bg
             local border = "#00000066"
 
             if overlay_cache[s][leaf_id] then
-                -- Reuse: just update geometry and focus color
+                -- Reuse: update geometry, colors, drag ref, and drag strip height
                 local wb = overlay_cache[s][leaf_id]
                 wb.x = x; wb.y = y; wb.width = w; wb.height = h
                 wb._bg_widget.bg                 = bg
                 wb._bg_widget.shape_border_color = border
+                wb._v_drag_ref.b                 = leaf.v_bound_above
+                wb._drag_strip.forced_height     = raise
+                wb._drag_strip.cursor            = raise > 0 and "sb_v_double_arrow" or nil
                 wb.visible = true
             else
                 -- First time we've seen this leaf_id: build and cache the overlay
@@ -773,6 +786,34 @@ local function update_overlays(s, t, state, geos)
                         end
                     end))
                 end
+
+                -- Mutable ref so the drag strip can always read the current boundary
+                local v_drag_ref = { b = leaf.v_bound_above }
+
+                -- Drag strip at the top: covers the gap above and allows vertical resize.
+                -- Height is set to `raise` (gap when v_bound exists, 0 otherwise) each frame.
+                local drag_strip = wibox.widget {
+                    forced_height = raise,
+                    cursor        = raise > 0 and "sb_v_double_arrow" or nil,
+                    widget        = wibox.container.background,
+                }
+                drag_strip:buttons(gears.table.join(
+                    awful.button({}, 1, function()
+                        local b = v_drag_ref.b
+                        if not b then return end
+                        mousegrabber.run(function(mouse)
+                            if not mouse.buttons[1] then
+                                awful.layout.arrange(s)
+                                return false
+                            end
+                            local igap = b.parent_gap or 0
+                            b.branch.ratio = math.max(0.1, math.min(0.9,
+                                (mouse.y - b.parent_y) / (b.parent_h - igap)))
+                            awful.layout.arrange(s)
+                            return true
+                        end, "sb_v_double_arrow")
+                    end)
+                ))
 
                 local bg_widget = wibox.widget {
                     {
@@ -816,9 +857,15 @@ local function update_overlays(s, t, state, geos)
                     visible      = true,
                     ontop        = false,
                     type         = "utility",
-                    widget       = bg_widget,
+                    widget       = wibox.widget {
+                        drag_strip,   -- top: fixed height (gap when v_bound exists, else 0)
+                        bg_widget,    -- middle: fills remaining height
+                        layout = wibox.layout.align.vertical,
+                    },
                 }
-                wb._bg_widget = bg_widget
+                wb._bg_widget  = bg_widget
+                wb._drag_strip = drag_strip
+                wb._v_drag_ref = v_drag_ref
                 wb:buttons(gears.table.join(
                     awful.button({}, 1, function()
                         if picked_up_client then
@@ -852,8 +899,8 @@ local function update_focus_border(s, state, geos, gap)
     local bw      = beautiful.splitwm_focus_border_width or 2
     local bc      = beautiful.splitwm_focus_border       or "#7799dd"
     local has_win = leaf.tabs and #leaf.tabs > 0
-    local gy      = has_win and (geo.y - math.floor(gap / 2)) or geo.y
-    local gh      = has_win and (geo.height + math.floor(gap / 2)) or geo.height
+    local gy      = has_win and (geo.y - gap) or geo.y
+    local gh      = has_win and (geo.height + gap) or geo.height
     local rects = {
         { x = geo.x,                  y = gy,              width = geo.width, height = bw        },
         { x = geo.x,                  y = gy + gh - bw,    width = geo.width, height = bw        },
@@ -878,36 +925,31 @@ end
 local function update_drag_handles(s, state, bounds)
     local gap      = beautiful.splitwm_gap or 16
     local handle_w = math.max(HANDLE_THICKNESS, gap)
-    local n        = #bounds
+    local hi       = 0  -- index only for h-direction handles
 
-    for i, b in ipairs(bounds) do
-        local entry    = get_drag_handle(s, i)
-        local wb, ref  = entry.wb, entry.ref
-        -- Update the mutable ref so the already-wired closure sees fresh data
-        ref.b        = b
-        ref.handle_w = handle_w
-
+    for _, b in ipairs(bounds) do
+        -- Vertical boundaries (horizontal bars) are handled by titlebar dragging;
+        -- only show dedicated wibox handles for horizontal boundaries (vertical bars).
         if b.dir == "h" then
+            hi = hi + 1
+            local entry    = get_drag_handle(s, hi)
+            local wb, ref  = entry.wb, entry.ref
+            ref.b        = b
+            ref.handle_w = handle_w
             wb.x      = b.pos - math.floor(handle_w / 2)
             wb.y      = b.start
             wb.width  = handle_w
             wb.height = math.max(1, b.span)
             wb.cursor = "sb_h_double_arrow"
-        else
-            wb.x      = b.start
-            wb.y      = b.pos - math.floor(handle_w / 2)
-            wb.width  = math.max(1, b.span)
-            wb.height = handle_w
-            wb.cursor = "sb_v_double_arrow"
+            if not ref.dragging then wb.bg = "#00000000" end
+            wb.visible = true
         end
-        if not ref.dragging then wb.bg = "#00000000" end
-        wb.visible = true
     end
 
-    -- Hide unused handles beyond current boundary count
+    -- Hide pool entries beyond the number of h-direction handles used
     local pool = drag_handle_pool[s]
     if pool then
-        for i = n + 1, #pool do pool[i].wb.visible = false end
+        for i = hi + 1, #pool do pool[i].wb.visible = false end
     end
 end
 
@@ -955,6 +997,8 @@ local function setup_tabbar(c)
     local titlebar_hovered = false
     local titlebar_btn_list = {}
     local tb  -- declared here so update_titlebar's closure can reference it
+    -- Mutable ref for titlebar vertical-resize drag; updated each rebuild.
+    local tb_drag_ref = { b = nil }
     -- Tooltip pool: reused across rebuilds to avoid leaking X windows.
     -- Each slot: { tt = awful.tooltip, prev_obj = widget_it_is_attached_to }
     local tooltip_pool = {}
@@ -984,9 +1028,13 @@ local function setup_tabbar(c)
         -- Only show titlebar on the active tab
         if leaf.tabs[leaf.active_tab] ~= c then return end
 
+        -- Update vertical-resize drag ref before fingerprint check
+        tb_drag_ref.b = leaf.v_bound_above
+
         -- Skip rebuild if nothing visible has changed
         local fp_parts = { leaf.id, leaf.active_tab,
-                           state.focused_leaf_id == leaf.id and 1 or 0 }
+                           state.focused_leaf_id == leaf.id and 1 or 0,
+                           tostring(leaf.v_bound_above) }
         for _, tc in ipairs(leaf.tabs) do
             fp_parts[#fp_parts+1] = tostring(tc.window)
             fp_parts[#fp_parts+1] = tc.name or "?"
@@ -1190,26 +1238,59 @@ local function setup_tabbar(c)
             and (beautiful.titlebar_bg_focus  or "#000000")
             or  (beautiful.titlebar_bg_normal or "#000000aa")
 
+        -- Middle drag area: transparent, drags vertical boundary above this split
+        local middle_drag
+        if tb_drag_ref.b then
+            middle_drag = wibox.widget {
+                cursor = "sb_v_double_arrow",
+                widget = wibox.container.background,
+            }
+            middle_drag:buttons(gears.table.join(
+                awful.button({}, 1, function()
+                    local b = tb_drag_ref.b
+                    if not b then return end
+                    mousegrabber.run(function(mouse)
+                        if not mouse.buttons[1] then
+                            awful.layout.arrange(c.screen)
+                            return false
+                        end
+                        local igap = b.parent_gap or 0
+                        b.branch.ratio = math.max(0.1, math.min(0.9,
+                            (mouse.y - b.parent_y) / (b.parent_h - igap)))
+                        awful.layout.arrange(c.screen)
+                        return true
+                    end, "sb_v_double_arrow")
+                end)
+            ))
+        end
+
+        -- Top padding pushes the buttons/tabs down into the base-height portion of the bar,
+        -- keeping them at the same visual position as before the gap/2 height increase.
+        local top_pad = math.floor((beautiful.splitwm_gap or 16) / 2)
         tb:setup {
             {
-                { -- Left: tab buttons
-                    spacing = BTN_SPACING,
-                    layout  = wibox.layout.fixed.horizontal,
-                    table.unpack(tab_widgets),
-                },
-                nil, -- Middle: empty
-                { -- Right: split controls
-                    {
-                        vsplit_btn,
-                        hsplit_btn,
-                        close_split_btn,
+                {
+                    { -- Left: tab buttons
                         spacing = BTN_SPACING,
                         layout  = wibox.layout.fixed.horizontal,
+                        table.unpack(tab_widgets),
                     },
-                    right  = 0,
-                    widget = wibox.container.margin,
+                    middle_drag, -- Middle: drag to resize vertical boundary above
+                    { -- Right: split controls
+                        {
+                            vsplit_btn,
+                            hsplit_btn,
+                            close_split_btn,
+                            spacing = BTN_SPACING,
+                            layout  = wibox.layout.fixed.horizontal,
+                        },
+                        right  = 0,
+                        widget = wibox.container.margin,
+                    },
+                    layout = wibox.layout.align.horizontal,
                 },
-                layout = wibox.layout.align.horizontal,
+                top    = top_pad,
+                widget = wibox.container.margin,
             },
             bg     = bar_bg,
             shape  = rounded_top,
@@ -1218,7 +1299,9 @@ local function setup_tabbar(c)
     end
 
     -- Create the titlebar once; hover signals attached here, content rebuilt by update_titlebar
-    tb = awful.titlebar(c, { size = TITLEBAR_HEIGHT, position = "top", bg = "#00000000" })
+    -- Height extends by gap/2 beyond the base so the bar fills the entire gap above the split.
+    local tb_gap = beautiful.splitwm_gap or 16
+    tb = awful.titlebar(c, { size = TITLEBAR_HEIGHT + math.floor(tb_gap / 2), position = "top", bg = "#00000000" })
     tb:connect_signal("mouse::enter", function()
         titlebar_hovered = true
         for _, btn in ipairs(titlebar_btn_list) do btn.bg = "#000000" end
