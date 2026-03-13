@@ -244,13 +244,6 @@ splitwm.launchers = {
     },
 }
 
-local menu_poll_timer  -- assigned below, after the timer is constructed
-
-splitwm.on_menu_request = function()
-    app_menu:toggle()
-    menu_poll_timer:start()
-end
-
 -- Close menu on any client focus change
 client.connect_signal("focus", function()
     app_menu:hide()
@@ -267,64 +260,48 @@ splitwm.on_background_click = function()
     app_menu:hide()
 end
 
--- Poll: if menu is visible and a mouse button is pressed outside it, close.
--- The timer only runs while the menu is open; it self-stops when the menu hides.
+-- Poll: close the menu if the user clicks outside it.
+-- `ready` stays false until all buttons are released after opening, so the
+-- opening click itself doesn't immediately re-close the menu.
+local menu_poll_timer
 do
-    local was_visible = false
-    local was_pressed = false
-    local skip_count = 0
+    local ready = false
     menu_poll_timer = gears.timer {
         timeout   = 0.05,
         autostart = false,
         callback  = function()
-            local visible = app_menu.wibox and app_menu.wibox.visible
-            if not visible then
-                was_visible = false
-                was_pressed = false
-                skip_count = 0
+            if not (app_menu.wibox and app_menu.wibox.visible) then
+                ready = false
                 menu_poll_timer:stop()
                 return
             end
 
-            local m = mouse.coords()
+            local m       = mouse.coords()
             local pressed = (m.buttons[1] or m.buttons[3]) and true or false
 
-            -- Menu just became visible: set was_pressed to current state
-            -- and skip a few ticks to let the opening click fully release
-            if not was_visible then
-                was_visible = true
-                was_pressed = pressed
-                skip_count = 5  -- skip 5 ticks (250ms at 50ms interval)
+            -- Wait for all buttons to be released before arming
+            if not ready then
+                if not pressed then ready = true end
                 return
             end
 
-            if skip_count > 0 then
-                skip_count = skip_count - 1
-                was_pressed = pressed
-                return
-            end
-
-            -- Detect fresh press (was not pressed, now is)
-            if pressed and not was_pressed then
-                local dominated = false
-                local function check(menu)
-                    if menu and menu.wibox and menu.wibox.visible then
-                        local g = menu.wibox:geometry()
-                        if m.x >= g.x and m.x <= g.x + g.width
-                           and m.y >= g.y and m.y <= g.y + g.height then
-                            dominated = true
-                        end
-                        if menu.active_child then check(menu.active_child) end
-                    end
+            if pressed then
+                local function inside(menu)
+                    if not (menu and menu.wibox and menu.wibox.visible) then return false end
+                    local g = menu.wibox:geometry()
+                    if m.x >= g.x and m.x <= g.x + g.width
+                       and m.y >= g.y and m.y <= g.y + g.height then return true end
+                    return menu.active_child and inside(menu.active_child) or false
                 end
-                check(app_menu)
-                if not dominated then
-                    app_menu:hide()
-                end
+                if not inside(app_menu) then app_menu:hide() end
             end
-            was_pressed = pressed
         end,
     }
+end
+
+splitwm.on_menu_request = function()
+    app_menu:toggle()
+    menu_poll_timer:start()
 end
 
 splitwm.setup()
