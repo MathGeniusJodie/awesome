@@ -1323,7 +1323,9 @@ function splitwm.setup()
         if not find_leaf_for_client(state.root, c) then
             pin_client(t, c)
         end
-        setup_tabbar(c)
+        if not c._splitwm_update_titlebar then
+            setup_tabbar(c)
+        end
     end)
 
     -- When a client is removed, unpin it
