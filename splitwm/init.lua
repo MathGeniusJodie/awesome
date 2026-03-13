@@ -23,7 +23,8 @@ local splitwm = {}
 splitwm.launchers = {}  -- set from rc.lua before calling setup()
 
 -- "Pick up" state for moving tabs between splits
--- When set, the next split click will move this client there
+-- When set, the next split click will move this client there.
+-- Stored as { client = c, tag = src_tag } so the source tag is known at drop time.
 local picked_up_client = nil
 
 --- Build a launcher widget (icon if available, text fallback).
@@ -341,7 +342,7 @@ end
 --- Returns true if a drop happened.
 local function try_drop_picked_up(t, leaf_id)
     if not picked_up_client then return false end
-    if not picked_up_client.valid then
+    if not picked_up_client.client.valid then
         picked_up_client = nil
         return false
     end
@@ -352,8 +353,8 @@ local function try_drop_picked_up(t, leaf_id)
         return false
     end
 
-    local c = picked_up_client
-    local src_tag = c.first_tag
+    local c       = picked_up_client.client
+    local src_tag = picked_up_client.tag
 
     -- Remove from source tag's tree
     if src_tag then
@@ -998,7 +999,7 @@ local function setup_tabbar(c)
         for _, tc in ipairs(leaf.tabs) do
             fp_parts[#fp_parts+1] = tostring(tc.window)
             fp_parts[#fp_parts+1] = tc.name or "?"
-            if tc == picked_up_client then fp_parts[#fp_parts+1] = "P" end
+            if picked_up_client and picked_up_client.client == tc then fp_parts[#fp_parts+1] = "P" end
         end
         local fp = table.concat(fp_parts, "\0")
         if c._splitwm_tb_fp == fp then return end
@@ -1021,7 +1022,7 @@ local function setup_tabbar(c)
             local tab_idx = i
 
             -- Is this tab currently picked up?
-            local is_picked = (picked_up_client == tc)
+            local is_picked = (picked_up_client and picked_up_client.client == tc)
 
             -- App icon for the tab
             local tab_icon = awful.widget.clienticon(tc)
@@ -1031,7 +1032,7 @@ local function setup_tabbar(c)
             -- Click the icon to switch to this tab (or drop a picked-up tab)
             tab_icon:buttons(gears.table.join(
                 awful.button({}, 1, function()
-                    if picked_up_client and picked_up_client ~= tc then
+                    if picked_up_client and picked_up_client.client ~= tc then
                         try_drop_picked_up(t, leaf_id)
                         awful.layout.arrange(c.screen)
                         return
@@ -1063,10 +1064,10 @@ local function setup_tabbar(c)
             end)
             move_btn:buttons(gears.table.join(
                 awful.button({}, 1, function()
-                    if picked_up_client == tab_client then
+                    if picked_up_client and picked_up_client.client == tab_client then
                         picked_up_client = nil
                     else
-                        picked_up_client = tab_client
+                        picked_up_client = { client = tab_client, tag = t }
                     end
                     awful.layout.arrange(c.screen)
                 end)
@@ -1337,7 +1338,7 @@ function splitwm.setup()
         local state = tag_state[t]
         if not state then return end
         -- Handle drop of picked-up client
-        if picked_up_client and picked_up_client.valid and picked_up_client ~= c then
+        if picked_up_client and picked_up_client.client.valid and picked_up_client.client ~= c then
             local target_leaf = find_leaf_for_client(state.root, c)
             if target_leaf then
                 try_drop_picked_up(t, target_leaf.id)
