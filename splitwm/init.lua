@@ -96,6 +96,8 @@ local function make_circle_btn_widget(label, size)
         bg           = beautiful.splitwm_inactive_bg or "#00000080",
         fg           = "#ffffff",
         shape        = gears.shape.circle,
+        shape_border_width  = 2,
+        shape_border_color  = beautiful.splitwm_widget_border or "#ffffff30",
         forced_width  = size,
         forced_height = size,
         widget       = wibox.container.background,
@@ -118,6 +120,17 @@ local function rounded_top(cr, w, h)
     cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
     cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
     cr:line_to(w, h) cr:line_to(0, h) cr:close_path()
+end
+
+--- Draw only the left+top+right border of a rounded-top tab (no bottom edge).
+local function draw_tab_border(cr, w, h)
+    local r   = 6
+    local pad = 1  -- inset path 1px so full 2px stroke stays inside widget bounds
+    cr:move_to(pad, h)
+    cr:line_to(pad, r + pad)
+    cr:arc(r + pad,     r + pad, r, math.pi,       1.5 * math.pi)
+    cr:arc(w - r - pad, r + pad, r, 1.5 * math.pi, 2   * math.pi)
+    cr:line_to(w - pad, h)
 end
 
 ---------------------------------------------------------------------------
@@ -901,20 +914,29 @@ local function update_focus_border(s, state, geos, gap)
     local has_win = leaf.tabs and #leaf.tabs > 0
     local gy      = has_win and (geo.y - gap) or geo.y
     local gh      = has_win and (geo.height + gap) or geo.height
+    -- For splits with windows, sides start below the titlebar
+    local tb_h    = has_win and math.max(TITLEBAR_HEIGHT, gap) or 0
+    local side_y  = gy + bw + tb_h
+    local side_h  = gh - 2*bw - tb_h
     local rects = {
-        { x = geo.x,                  y = gy,              width = geo.width, height = bw        },
-        { x = geo.x,                  y = gy + gh - bw,    width = geo.width, height = bw        },
-        { x = geo.x,                  y = gy + bw,         width = bw,        height = gh - 2*bw },
-        { x = geo.x + geo.width - bw, y = gy + bw,         width = bw,        height = gh - 2*bw },
+        { x = geo.x,                  y = gy,     width = geo.width, height = bw     },
+        { x = geo.x,                  y = gy + gh - bw, width = geo.width, height = bw },
+        { x = geo.x,                  y = side_y, width = bw,        height = side_h },
+        { x = geo.x + geo.width - bw, y = side_y, width = bw,        height = side_h },
     }
     for i, r in ipairs(rects) do
         local wb = sides[i]
-        wb.bg      = bc
-        wb.x       = r.x
-        wb.y       = r.y
-        wb.width   = math.max(1, r.width)
-        wb.height  = math.max(1, r.height)
-        wb.visible = true
+        -- Hide the top border (index 1) for splits that have windows
+        if i == 1 and has_win then
+            wb.visible = false
+        else
+            wb.bg      = bc
+            wb.x       = r.x
+            wb.y       = r.y
+            wb.width   = math.max(1, r.width)
+            wb.height  = math.max(1, r.height)
+            wb.visible = true
+        end
     end
 end
 
@@ -1089,9 +1111,9 @@ local function setup_tabbar(c)
                     font   = tab_btn_font,
                     widget = wibox.widget.textbox,
                 },
-                bg     = is_picked and "#7799dd" or "#00000000",
-                fg     = "#ffffff",
-                shape  = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 2) end,
+                bg           = is_picked and "#7799dd" or "#00000000",
+                fg           = "#ffffff",
+                shape        = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 4) end,
                 forced_width = 24,
                 widget = wibox.container.background,
             }
@@ -1120,9 +1142,9 @@ local function setup_tabbar(c)
                     font   = tab_btn_font,
                     widget = wibox.widget.textbox,
                 },
-                bg     = "#00000000",
-                fg     = "#ffffff",
-                shape  = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 2) end,
+                bg           = "#00000000",
+                fg           = "#ffffff",
+                shape        = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 4) end,
                 forced_width = 24,
                 widget = wibox.container.background,
             }
@@ -1146,7 +1168,7 @@ local function setup_tabbar(c)
             -- Tooltip showing the window title (attached to whole tab)
             -- Created after tab_widget, added below
 
-            local tab_widget = wibox.widget {
+            local tab_bg_widget = wibox.widget {
                 {
                     {
                         {
@@ -1163,9 +1185,22 @@ local function setup_tabbar(c)
                     left = 4, right = 2, top = 3, bottom = 3,
                     widget = wibox.container.margin,
                 },
-                bg = tab_bg,
-                shape = rounded_top,
+                bg     = tab_bg,
+                shape  = rounded_top,
                 widget = wibox.container.background,
+            }
+            local tab_border_widget = wibox.widget.base.make_widget()
+            function tab_border_widget:draw(_, cr, w, h)
+                draw_tab_border(cr, w, h)
+                cr:set_source(gears.color(beautiful.splitwm_widget_border or "#ffffff30"))
+                cr:set_line_width(2)
+                cr:stroke()
+            end
+            function tab_border_widget:fit(_, _, _) return 0, 0 end
+            local tab_widget = wibox.widget {
+                tab_bg_widget,
+                tab_border_widget,
+                layout = wibox.layout.stack,
             }
             -- Reuse tooltip from pool to avoid leaking X windows on every rebuild
             local slot = tooltip_pool[i]

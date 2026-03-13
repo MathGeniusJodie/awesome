@@ -71,6 +71,7 @@ beautiful.splitwm_handle_drag_bg  = "#7799dd44"
 beautiful.splitwm_launcher_bg       = "#3a3a3a"
 beautiful.splitwm_launcher_hover_bg  = "#555555"
 beautiful.splitwm_focus_border_width = 2
+beautiful.splitwm_widget_border      = "#fffffff0"
 beautiful.splitwm_font           = "monospace 12"
 beautiful.splitwm_btn_font       = "monospace bold 14"
 beautiful.titlebar_bg_normal     = "#00000000"
