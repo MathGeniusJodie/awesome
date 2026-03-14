@@ -645,6 +645,7 @@ local function update_titlebars(s, t, state, geos)
 
     local gap      = beautiful.splitwm_gap or 16
     local tb_h     = math.max(TITLEBAR_HEIGHT, gap)
+    local bw       = beautiful.splitwm_focus_border_width or 2
     local alive    = {}
     local BTN_SPACING = 5
 
@@ -683,9 +684,7 @@ local function update_titlebars(s, t, state, geos)
                 wb.y      = geo.y - gap
                 wb.width  = geo.width
                 wb.height = geo.height + gap
-                wb.bg     = (state.focused_leaf_id == leaf.id)
-                    and (beautiful.splitwm_focus_border or "#7799dd")
-                    or  "#00000000"
+                wb.bg     = "#00000000"
                 wb.visible = true
 
                 -- Fingerprint check to prevent unneeded heavy redraws
@@ -861,22 +860,52 @@ local function update_titlebars(s, t, state, geos)
                     end
 
                     local top_pad = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT
+
+                    local is_focused = state.focused_leaf_id == leaf.id
+                    local border_color = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or nil
+                    local border_draw = wibox.widget.base.make_widget()
+                    border_draw._bc   = border_color
+                    border_draw._tb_h = tb_h
+                    border_draw._bw   = bw
+                    function border_draw:draw(_, cr, width, height)
+                        if not self._bc then return end
+                        cr:set_source(gears.color(self._bc))
+                        cr:set_line_width(self._bw)
+                        local half = self._bw / 2
+                        local x    = half
+                        local y    = self._tb_h - half
+                        local w    = width - self._bw
+                        local h    = height - self._tb_h + half
+                        local r    = beautiful.splitwm_focus_border_radius or 2
+                        cr:new_sub_path()
+                        cr:arc(x + w - r, y + r,     r, -math.pi / 2, 0)
+                        cr:arc(x + w - r, y + h - r, r,  0,           math.pi / 2)
+                        cr:arc(x + r,     y + h - r, r,  math.pi / 2, math.pi)
+                        cr:arc(x + r,     y + r,     r,  math.pi,     3 * math.pi / 2)
+                        cr:close_path()
+                        cr:stroke()
+                    end
+                    function border_draw:fit(_, w, h) return w, h end
+
                     entry.wb:setup {
+                        border_draw,
                         {
                             {
                                 {
-                                    { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(tab_widgets) },
-                                    middle_drag,
-                                    { { vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
-                                    layout = wibox.layout.align.horizontal,
+                                    {
+                                        { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(tab_widgets) },
+                                        middle_drag,
+                                        { { vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
+                                        layout = wibox.layout.align.horizontal,
+                                    },
+                                    top    = top_pad,
+                                    widget = wibox.container.margin,
                                 },
-                                top    = top_pad,
-                                widget = wibox.container.margin,
+                                bg     = bar_bg, shape  = rounded_top, forced_height = tb_h, widget = wibox.container.background,
                             },
-                            bg     = bar_bg, shape  = rounded_top, forced_height = tb_h, widget = wibox.container.background,
+                            layout = wibox.layout.fixed.vertical,
                         },
-                        nil, nil,
-                        layout = wibox.layout.align.vertical,
+                        layout = wibox.layout.stack,
                     }
                 end
             end
