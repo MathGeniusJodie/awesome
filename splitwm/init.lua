@@ -89,6 +89,27 @@ local function make_circle_btn_widget(label, size)
     }
 end
 
+local function make_circle_icon_btn_widget(draw_fn, size)
+    local icon = wibox.widget.base.make_widget()
+    function icon:draw(_, cr, w, h)
+        cr:set_source_rgba(1, 1, 1, 0.85)
+        cr:set_line_width(2)
+        cr:set_line_cap(1) -- ROUND
+        draw_fn(cr, w, h)
+    end
+    function icon:fit(_, w, h) return w, h end
+    return wibox.widget {
+        icon,
+        bg                 = beautiful.splitwm_inactive_bg or "#00000080",
+        shape              = gears.shape.circle,
+        shape_border_width = 2,
+        shape_border_color = beautiful.splitwm_widget_border or "#ffffff30",
+        forced_width       = size,
+        forced_height      = size,
+        widget             = wibox.container.background,
+    }
+end
+
 local function make_circle_btn(label, size, callback)
     local w = make_circle_btn_widget(label, size)
     w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
@@ -103,6 +124,44 @@ local function rounded_top(cr, w, h)
     cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
     cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
     cr:line_to(w, h) cr:line_to(0, h) cr:close_path()
+end
+
+local function icon_plus(cr, w, h)
+    local cx, cy, s = w/2, h/2, 4
+    cr:move_to(cx-s, cy); cr:line_to(cx+s, cy); cr:stroke()
+    cr:move_to(cx, cy-s); cr:line_to(cx, cy+s); cr:stroke()
+end
+
+local function icon_vsplit(cr, w, h)
+    local cx, cy, bw, bh, br = w/2, h/2, 10, 8, 1
+    local bx, by = cx-bw/2, cy-bh/2
+    cr:new_sub_path()
+    cr:arc(bx+bw-br, by+br,    br, -math.pi/2, 0)
+    cr:arc(bx+bw-br, by+bh-br, br,  0,         math.pi/2)
+    cr:arc(bx+br,    by+bh-br, br,  math.pi/2, math.pi)
+    cr:arc(bx+br,    by+br,    br,  math.pi,   3*math.pi/2)
+    cr:close_path()
+    cr:stroke()
+    cr:move_to(cx, by+1); cr:line_to(cx, by+bh-1); cr:stroke()
+end
+
+local function icon_hsplit(cr, w, h)
+    local cx, cy, bw, bh, br = w/2, h/2, 10, 8, 1
+    local bx, by = cx-bw/2, cy-bh/2
+    cr:new_sub_path()
+    cr:arc(bx+bw-br, by+br,    br, -math.pi/2, 0)
+    cr:arc(bx+bw-br, by+bh-br, br,  0,         math.pi/2)
+    cr:arc(bx+br,    by+bh-br, br,  math.pi/2, math.pi)
+    cr:arc(bx+br,    by+br,    br,  math.pi,   3*math.pi/2)
+    cr:close_path()
+    cr:stroke()
+    cr:move_to(bx+1, cy); cr:line_to(bx+bw-1, cy); cr:stroke()
+end
+
+local function icon_close(cr, w, h)
+    local cx, cy, s = w/2, h/2, 4
+    cr:move_to(cx-s, cy-s); cr:line_to(cx+s, cy+s); cr:stroke()
+    cr:move_to(cx+s, cy-s); cr:line_to(cx-s, cy+s); cr:stroke()
 end
 
 local function draw_tab_border(cr, w, h)
@@ -703,8 +762,8 @@ local function update_titlebars(s, t, state, geos)
                     local is_focused   = state.focused_leaf_id == leaf.id
                     local widget_bc    = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or "#00000000"
 
-                    local function make_tb_btn(label, size, callback)
-                        local w = make_circle_btn_widget(label, size)
+                    local function make_tb_btn(draw_fn, size, callback)
+                        local w = make_circle_icon_btn_widget(draw_fn, size)
                         w.shape_border_color = widget_bc
                         w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
                         w:connect_signal("mouse::leave", function()
@@ -843,12 +902,12 @@ local function update_titlebars(s, t, state, geos)
                         end
                     end
 
-                    local menu_btn = make_tb_btn("+", 26, function() state.focused_leaf_id = leaf.id; if splitwm.on_menu_request then splitwm.on_menu_request() end end)
+                    local menu_btn = make_tb_btn(icon_plus, 26, function() state.focused_leaf_id = leaf.id; if splitwm.on_menu_request then splitwm.on_menu_request() end end)
                     table.insert(tab_widgets, menu_btn)
 
-                    local vsplit_btn = make_tb_btn("│", 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "h"); awful.layout.arrange(s) end)
-                    local hsplit_btn = make_tb_btn("─", 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "v"); awful.layout.arrange(s) end)
-                    local close_split_btn = make_tb_btn("✕", 26, function() close_leaf(t, leaf.id); awful.layout.arrange(s) end)
+                    local vsplit_btn = make_tb_btn(icon_vsplit, 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "h"); awful.layout.arrange(s) end)
+                    local hsplit_btn = make_tb_btn(icon_hsplit, 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "v"); awful.layout.arrange(s) end)
+                    local close_split_btn = make_tb_btn(icon_close, 26, function() close_leaf(t, leaf.id); awful.layout.arrange(s) end)
                     close_split_btn:connect_signal("mouse::enter", function() close_split_btn.fg = "#ff6666" end)
                     close_split_btn:connect_signal("mouse::leave", function() close_split_btn.fg = "#ffffff" end)
 
