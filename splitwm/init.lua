@@ -102,8 +102,6 @@ local function make_circle_icon_btn_widget(draw_fn, size)
         icon,
         bg                 = beautiful.splitwm_inactive_bg or "#00000080",
         shape              = gears.shape.circle,
-        shape_border_width = 2,
-        shape_border_color = beautiful.splitwm_widget_border or "#ffffff30",
         forced_width       = size,
         forced_height      = size,
         widget             = wibox.container.background,
@@ -863,10 +861,12 @@ local function update_titlebars(s, t, state, geos)
                             cr:close_path()
                             cr:set_source(gears.color(tab_bg))
                             cr:fill()
-                            draw_tab_border(cr, w2, h2)
-                            cr:set_source(gears.color(widget_bc))
-                            cr:set_line_width(lw)
-                            cr:stroke()
+                            if is_active then
+                                draw_tab_border(cr, w2, h2)
+                                cr:set_source(gears.color(widget_bc))
+                                cr:set_line_width(lw)
+                                cr:stroke()
+                            end
                         end
                         function tab_draw:fit(_, _, _) return 0, 0 end
                         local tab_widget = wibox.widget {
