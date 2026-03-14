@@ -601,10 +601,11 @@ local function arrange(p)
                 if i == leaf.active_tab then
                     c.hidden = false
                     c.border_width = 0
+                    local tb_hang = 4  -- titlebar overhangs each side by this many px (focus_bw + 2)
                     c:geometry({
-                        x      = geo.x + focus_bw,
+                        x      = geo.x + focus_bw - tb_hang,
                         y      = geo.y + focus_bw - tab_raise,
-                        width  = math.max(1, geo.width  - 2 * focus_bw),
+                        width  = math.max(1, geo.width  - 2 * focus_bw + 2 * tb_hang),
                         height = math.max(1, geo.height - 2 * focus_bw + tab_raise),
                     })
                 else
@@ -918,11 +919,18 @@ local function update_focus_border(s, state, geos, gap)
     local tb_h    = has_win and math.max(TITLEBAR_HEIGHT, gap) or 0
     local side_y  = gy + bw + tb_h
     local side_h  = gh - 2*bw - tb_h
+    -- Titlebar hangs 2px past focus border on each side; gx/gw match window edges
+    local hang    = has_win and 2 or 0
+    local gx      = geo.x - hang
+    local gw      = geo.width + 2 * hang
+    -- For splits with windows the left border is placed outside the window;
+    -- right and bottom stay at the original (inner-edge) positions.
+    local left_x  = gx - (has_win and bw or 0)
     local rects = {
-        { x = geo.x,                  y = gy,     width = geo.width, height = bw     },
-        { x = geo.x,                  y = gy + gh - bw, width = geo.width, height = bw },
-        { x = geo.x,                  y = side_y, width = bw,        height = side_h },
-        { x = geo.x + geo.width - bw, y = side_y, width = bw,        height = side_h },
+        { x = left_x,       y = gy,           width = gx + gw - left_x, height = bw },
+        { x = left_x,       y = gy + gh - bw, width = gx + gw - left_x, height = bw },
+        { x = left_x,       y = side_y,       width = bw, height = side_h },
+        { x = gx + gw - bw, y = side_y,       width = bw, height = side_h },
     }
     for i, r in ipairs(rects) do
         local wb = sides[i]
