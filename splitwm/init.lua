@@ -775,7 +775,7 @@ local function update_titlebars(s, t, state, geos)
                     end
 
                     local tab_widgets = {}
-                    local tab_btn_font = "monospace bold 14"
+                    local tab_btn_font = "monospace bold 18"
                     local icon_size = 20
 
                     for i, tc in ipairs(leaf.tabs) do
@@ -802,15 +802,18 @@ local function update_titlebars(s, t, state, geos)
 
                         local move_btn = wibox.widget {
                             {
-                                text   = is_picked and "▼" or "↗",
-                                align  = "center",
-                                font   = tab_btn_font,
-                                widget = wibox.widget.textbox,
+                                {
+                                    text   = is_picked and "▼" or "↗",
+                                    align  = "center",
+                                    font   = tab_btn_font,
+                                    widget = wibox.widget.textbox,
+                                },
+                                bottom = 2, widget = wibox.container.margin,
                             },
                             bg           = is_picked and "#7799dd" or "#00000000",
                             fg           = "#ffffff",
                             shape        = function(cr, bw2, bh) gears.shape.rounded_rect(cr, bw2, bh, 4) end,
-                            forced_width = 24,
+                            forced_width = 26,
                             widget = wibox.container.background,
                         }
                         move_btn:connect_signal("mouse::enter", function() if not is_picked then move_btn.bg = "#ffffff22" end end)
@@ -836,7 +839,7 @@ local function update_titlebars(s, t, state, geos)
                             bg           = "#00000000",
                             fg           = "#ffffff",
                             shape        = function(cr, bw2, bh) gears.shape.rounded_rect(cr, bw2, bh, 4) end,
-                            forced_width = 24,
+                            forced_width = 26,
                             widget = wibox.container.background,
                         }
                         close_btn:connect_signal("mouse::enter", function() close_btn.fg = "#ff6666" end)
@@ -870,10 +873,10 @@ local function update_titlebars(s, t, state, geos)
                             tab_draw,
                             {
                                 {
-                                    { tab_icon, halign = "center", valign = "center", widget = wibox.container.place },
+                                    { { tab_icon, halign = "center", valign = "center", widget = wibox.container.place }, right = 3, widget = wibox.container.margin },
                                     move_btn, close_btn, spacing = 2, layout  = wibox.layout.fixed.horizontal,
                                 },
-                                left = 4, right = 2, top = 3, bottom = 3,
+                                left = 8, right = 6, top = 3, bottom = 3,
                                 widget = wibox.container.margin,
                             },
                             layout = wibox.layout.stack,
