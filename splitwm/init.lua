@@ -682,7 +682,10 @@ local function update_titlebars(s, t, state, geos)
                 wb.x      = geo.x
                 wb.y      = geo.y - gap
                 wb.width  = geo.width
-                wb.height = tb_h
+                wb.height = geo.height + gap
+                wb.bg     = (state.focused_leaf_id == leaf.id)
+                    and (beautiful.splitwm_focus_border or "#7799dd")
+                    or  "#00000000"
                 wb.visible = true
 
                 -- Fingerprint check to prevent unneeded heavy redraws
@@ -861,15 +864,19 @@ local function update_titlebars(s, t, state, geos)
                     entry.wb:setup {
                         {
                             {
-                                { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(tab_widgets) },
-                                middle_drag,
-                                { { vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
-                                layout = wibox.layout.align.horizontal,
+                                {
+                                    { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(tab_widgets) },
+                                    middle_drag,
+                                    { { vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
+                                    layout = wibox.layout.align.horizontal,
+                                },
+                                top    = top_pad,
+                                widget = wibox.container.margin,
                             },
-                            top    = top_pad,
-                            widget = wibox.container.margin,
+                            bg     = bar_bg, shape  = rounded_top, forced_height = tb_h, widget = wibox.container.background,
                         },
-                        bg     = bar_bg, shape  = rounded_top, widget = wibox.container.background,
+                        nil, nil,
+                        layout = wibox.layout.align.vertical,
                     }
                 end
             end
@@ -901,6 +908,11 @@ local function update_focus_border(s, state, geos, gap)
     local bw      = beautiful.splitwm_focus_border_width or 2
     local bc      = beautiful.splitwm_focus_border       or "#7799dd"
     local has_win = leaf.tabs and #leaf.tabs > 0
+    -- Frame wibox handles the border when the split has windows
+    if has_win then
+        for _, wb in ipairs(sides) do wb.visible = false end
+        return
+    end
     local gy      = has_win and (geo.y - gap) or geo.y
     local gh      = has_win and (geo.height + gap) or geo.height
     local tb_h    = has_win and math.max(TITLEBAR_HEIGHT, gap) or 0
