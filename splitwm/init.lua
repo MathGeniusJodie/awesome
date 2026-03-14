@@ -788,7 +788,27 @@ local function update_titlebars(s, t, state, geos)
                             or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
                                           or  (beautiful.splitwm_inactive_bg or "#00000080"))
 
-                        local tab_bg_widget = wibox.widget {
+                        local tab_draw = wibox.widget.base.make_widget()
+                        function tab_draw:draw(_, cr, w2, h2)
+                            local lw, r, pad = 2, 6, 1
+                            local half = lw / 2
+                            local fp, fr = pad + half, r - half
+                            cr:move_to(fp, h2)
+                            cr:line_to(fp, fr + fp)
+                            cr:arc(fr + fp,       fr + fp, fr, math.pi,       1.5 * math.pi)
+                            cr:arc(w2 - fr - fp,  fr + fp, fr, 1.5 * math.pi, 2   * math.pi)
+                            cr:line_to(w2 - fp, h2)
+                            cr:close_path()
+                            cr:set_source(gears.color(tab_bg))
+                            cr:fill()
+                            draw_tab_border(cr, w2, h2)
+                            cr:set_source(gears.color(widget_bc))
+                            cr:set_line_width(lw)
+                            cr:stroke()
+                        end
+                        function tab_draw:fit(_, _, _) return 0, 0 end
+                        local tab_widget = wibox.widget {
+                            tab_draw,
                             {
                                 {
                                     { tab_icon, halign = "center", valign = "center", widget = wibox.container.place },
@@ -797,19 +817,6 @@ local function update_titlebars(s, t, state, geos)
                                 left = 4, right = 2, top = 3, bottom = 3,
                                 widget = wibox.container.margin,
                             },
-                            bg = tab_bg, shape = rounded_top, widget = wibox.container.background,
-                        }
-                        local tab_border_widget = wibox.widget.base.make_widget()
-                        function tab_border_widget:draw(_, cr, w2, h2)
-                            draw_tab_border(cr, w2, h2)
-                            cr:set_source(gears.color(widget_bc))
-                            cr:set_line_width(2)
-                            cr:stroke()
-                        end
-                        function tab_border_widget:fit(_, _, _) return 0, 0 end
-                        local tab_widget = wibox.widget {
-                            { tab_bg_widget, left = 2, right = 2, top = 2, widget = wibox.container.margin },
-                            tab_border_widget,
                             layout = wibox.layout.stack,
                         }
 
