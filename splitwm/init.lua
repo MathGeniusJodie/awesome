@@ -98,7 +98,7 @@ local function make_circle_btn(label, size, callback)
 end
 
 local function rounded_top(cr, w, h)
-    local r = 8
+    local r = 4
     cr:new_sub_path()
     cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
     cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
@@ -807,7 +807,11 @@ local function update_titlebars(s, t, state, geos)
                             cr:stroke()
                         end
                         function tab_border_widget:fit(_, _, _) return 0, 0 end
-                        local tab_widget = wibox.widget { tab_bg_widget, tab_border_widget, layout = wibox.layout.stack }
+                        local tab_widget = wibox.widget {
+                            { tab_bg_widget, left = 2, right = 2, top = 2, widget = wibox.container.margin },
+                            tab_border_widget,
+                            layout = wibox.layout.stack,
+                        }
 
                         local slot = entry.tooltip_pool[i]
                         if not slot then
