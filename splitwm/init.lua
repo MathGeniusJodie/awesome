@@ -954,7 +954,7 @@ end
 
 local function update_drag_handles(s, state, bounds)
     local gap      = beautiful.splitwm_gap or 16
-    local handle_w = math.max(HANDLE_THICKNESS, gap)
+    local handle_w = gap - 4 -- focus border width x2
     local hi       = 0  -- index only for h-direction handles
 
     for _, b in ipairs(bounds) do
