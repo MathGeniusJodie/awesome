@@ -575,11 +575,15 @@ local function arrange(p)
     -- Clean out dead clients and apply geometries in one pass.
     -- NOTE: we do NOT use p.clients here because awesome filters out
     -- minimized/hidden clients from that list, and we hide inactive tabs.
-    -- Windows are shifted up by the full gap so the titlebar fills the entire
-    -- gap above, covering the space between splits completely.
-    -- Height is increased by the same amount to compensate.
-    -- focus_bw insets the content so the focus border renders outside it.
-    local focus_bw  = beautiful.splitwm_focus_border_width or 2
+    --
+    -- Layout (container = geo.width wide):
+    --   [      titlebar: geo.width      ]   <- spans full container
+    --   [ bw | window: geo.width-2*bw | bw ]  <- side borders beside window
+    --   [      bottom border: geo.width  ]  <- focus border wibox below window
+    --
+    -- The client geometry is the window only (inset by bw on each side).
+    -- After placing the client, we extend the titlebar wibox to full width.
+    local bw      = beautiful.splitwm_focus_border_width or 2
     local tab_raise = gap
 
     for _, leaf in ipairs(collect_leaves(root)) do
@@ -601,12 +605,13 @@ local function arrange(p)
                 if i == leaf.active_tab then
                     c.hidden = false
                     c.border_width = 0
-                    local tb_hang = 4  -- titlebar overhangs each side by this many px (focus_bw + 2)
+                    -- Window is inset by bw on each side; stop bw above the
+                    -- container bottom so the bottom border isn't overlapped.
                     c:geometry({
-                        x      = geo.x + focus_bw - tb_hang,
-                        y      = geo.y + focus_bw - tab_raise,
-                        width  = math.max(1, geo.width  - 2 * focus_bw + 2 * tb_hang),
-                        height = math.max(1, geo.height - 2 * focus_bw + tab_raise),
+                        x      = geo.x + bw,
+                        y      = geo.y - tab_raise,
+                        width  = math.max(1, geo.width - bw * 2),
+                        height = math.max(1, geo.height + tab_raise - bw),
                     })
                 else
                     c.hidden = true
@@ -913,24 +918,22 @@ local function update_focus_border(s, state, geos, gap)
     local bw      = beautiful.splitwm_focus_border_width or 2
     local bc      = beautiful.splitwm_focus_border       or "#7799dd"
     local has_win = leaf.tabs and #leaf.tabs > 0
+    -- For windows, raise the top to cover the gap (titlebar lives there).
     local gy      = has_win and (geo.y - gap) or geo.y
     local gh      = has_win and (geo.height + gap) or geo.height
-    -- For splits with windows, sides start below the titlebar
+    -- Side borders sit below the titlebar, above the bottom border.
     local tb_h    = has_win and math.max(TITLEBAR_HEIGHT, gap) or 0
-    local side_y  = gy + bw + tb_h
-    local side_h  = gh - 2*bw - tb_h
-    -- Titlebar hangs 2px past focus border on each side; gx/gw match window edges
-    local hang    = has_win and 2 or 0
-    local gx      = geo.x - hang
-    local gw      = geo.width + 2 * hang
-    -- For splits with windows the left border is placed outside the window;
-    -- right and bottom stay at the original (inner-edge) positions.
-    local left_x  = gx - (has_win and bw or 0)
+    local side_y  = gy + tb_h
+    local side_h  = gh - tb_h - bw
+    -- All four borders share the same x/width as the split geo.
+    -- Layout (top to bottom): [titlebar: geo.width]
+    --                         [left bw | content | right bw]
+    --                         [bottom border: geo.width]
     local rects = {
-        { x = left_x,       y = gy,           width = gx + gw - left_x, height = bw },
-        { x = left_x,       y = gy + gh - bw, width = gx + gw - left_x, height = bw },
-        { x = left_x,       y = side_y,       width = bw, height = side_h },
-        { x = gx + gw - bw, y = side_y,       width = bw, height = side_h },
+        { x = geo.x,              y = gy,           width = geo.width, height = bw },
+        { x = geo.x,              y = gy + gh - bw, width = geo.width, height = bw },
+        { x = geo.x,              y = side_y,       width = bw,        height = side_h },
+        { x = geo.x + geo.width - bw, y = side_y,  width = bw,        height = side_h },
     }
     for i, r in ipairs(rects) do
         local wb = sides[i]
@@ -1359,8 +1362,9 @@ local function setup_tabbar(c)
     -- We call it once on setup; it will also be triggered by arrange
     gears.timer.delayed_call(update_titlebar)
 
-    -- Store the updater so arrange can call it
+    -- Store the updater and titlebar wibox so arrange can call/reposition them
     c._splitwm_update_titlebar = update_titlebar
+    c._splitwm_tb = tb
 end
 
 ---------------------------------------------------------------------------
