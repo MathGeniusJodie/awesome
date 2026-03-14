@@ -700,8 +700,12 @@ local function update_titlebars(s, t, state, geos)
                     entry.fp = fp
                     entry.titlebar_btn_list = {}
 
+                    local is_focused   = state.focused_leaf_id == leaf.id
+                    local widget_bc    = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or "#00000000"
+
                     local function make_tb_btn(label, size, callback)
                         local w = make_circle_btn_widget(label, size)
+                        w.shape_border_color = widget_bc
                         w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
                         w:connect_signal("mouse::leave", function()
                             w.bg = entry.titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080")
@@ -798,7 +802,7 @@ local function update_titlebars(s, t, state, geos)
                         local tab_border_widget = wibox.widget.base.make_widget()
                         function tab_border_widget:draw(_, cr, w2, h2)
                             draw_tab_border(cr, w2, h2)
-                            cr:set_source(gears.color(beautiful.splitwm_widget_border or "#ffffff30"))
+                            cr:set_source(gears.color(widget_bc))
                             cr:set_line_width(2)
                             cr:stroke()
                         end
@@ -861,7 +865,6 @@ local function update_titlebars(s, t, state, geos)
 
                     local top_pad = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT
 
-                    local is_focused = state.focused_leaf_id == leaf.id
                     local border_color = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or nil
                     local border_draw = wibox.widget.base.make_widget()
                     border_draw._bc   = border_color
@@ -875,7 +878,7 @@ local function update_titlebars(s, t, state, geos)
                         local x    = half
                         local y    = self._tb_h - half
                         local w    = width - self._bw
-                        local h    = height - self._tb_h + half
+                        local h    = height - self._tb_h
                         local r    = beautiful.splitwm_focus_border_radius or 2
                         cr:new_sub_path()
                         cr:arc(x + w - r, y + r,     r, -math.pi / 2, 0)
@@ -887,13 +890,29 @@ local function update_titlebars(s, t, state, geos)
                     end
                     function border_draw:fit(_, w, h) return w, h end
 
+                    -- Split tab_widgets: active tab goes to top layer, rest to bottom layer
+                    local behind_tabs, above_tabs = {}, {}
+                    for i, tw in ipairs(tab_widgets) do
+                        local ref = tw
+                        local sp  = wibox.widget.base.make_widget()
+                        function sp:fit(ctx, w, h) return ref:fit(ctx, w, h) end
+                        function sp:draw() end
+                        if i == leaf.active_tab then
+                            table.insert(behind_tabs, sp)
+                            table.insert(above_tabs,  tw)
+                        else
+                            table.insert(behind_tabs, tw)
+                            table.insert(above_tabs,  sp)
+                        end
+                    end
+
                     entry.wb:setup {
-                        border_draw,
+                        -- Layer 1: inactive tabs + split controls (behind border)
                         {
                             {
                                 {
                                     {
-                                        { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(tab_widgets) },
+                                        { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(behind_tabs) },
                                         middle_drag,
                                         { { vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
                                         layout = wibox.layout.align.horizontal,
@@ -902,6 +921,24 @@ local function update_titlebars(s, t, state, geos)
                                     widget = wibox.container.margin,
                                 },
                                 bg     = bar_bg, shape  = rounded_top, forced_height = tb_h, widget = wibox.container.background,
+                            },
+                            layout = wibox.layout.fixed.vertical,
+                        },
+                        -- Layer 2: focus border
+                        border_draw,
+                        -- Layer 3: active tab on top of border
+                        {
+                            {
+                                {
+                                    {
+                                        { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(above_tabs) },
+                                        nil, nil,
+                                        layout = wibox.layout.align.horizontal,
+                                    },
+                                    top    = top_pad,
+                                    widget = wibox.container.margin,
+                                },
+                                forced_height = tb_h, widget = wibox.container.background,
                             },
                             layout = wibox.layout.fixed.vertical,
                         },
