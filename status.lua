@@ -304,8 +304,10 @@ end
 -- Timers (start immediately on require)
 ---------------------------------------------------------------------------
 
-gears.timer { timeout = 30, autostart = true, call_now = true, callback = refresh_battery }
-gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume_internal }
-gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_chip }
+status._timers = {
+    gears.timer { timeout = 30, autostart = true, call_now = true, callback = refresh_battery },
+    gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume_internal },
+    gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_chip },
+}
 
 return status
