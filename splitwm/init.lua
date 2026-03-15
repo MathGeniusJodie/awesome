@@ -19,6 +19,9 @@ local splitwm = {}
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 33
 
+-- Initial ratio when splitting a leaf (golden ratio: larger side for the existing content).
+local SPLIT_RATIO = 0.618
+
 ---------------------------------------------------------------------------
 -- App launchers (configurable from rc.lua via splitwm.launchers)
 ---------------------------------------------------------------------------
@@ -245,7 +248,7 @@ local function split_leaf(t, direction)
     state.leaf_map[child_a.id] = child_a
     state.leaf_map[child_b.id] = child_b
 
-    local new_branch = tree.make_branch(direction, 0.618, child_a, child_b)
+    local new_branch = tree.make_branch(direction, SPLIT_RATIO, child_a, child_b)
     if leaf == state.root then
         state.root = new_branch
     else
