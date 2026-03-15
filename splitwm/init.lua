@@ -151,7 +151,7 @@ local tag_state = setmetatable({}, { __mode = "k" })
 local function get_state(t)
     if not tag_state[t] then
         local root = tree.make_leaf()
-        tag_state[t] = { root = root, focused_leaf_id = root.id }
+        tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root } }
     end
     return tag_state[t]
 end
@@ -162,7 +162,7 @@ end
 
 local function pin_client(t, c)
     local state = get_state(t)
-    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = state.leaf_map[state.focused_leaf_id]
     if not leaf then leaf = tree.collect_leaves(state.root)[1] end
     for _, tc in ipairs(leaf.tabs) do if tc == c then return end end
     table.insert(leaf.tabs, c)
@@ -190,8 +190,8 @@ local function move_client_to_leaf(root, c, target_leaf)
 end
 
 local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
-    local leaf_a = tree.find_leaf_by_id(state.root, leaf_a_id)
-    local leaf_b = tree.find_leaf_by_id(state.root, leaf_b_id)
+    local leaf_a = state.leaf_map[leaf_a_id]
+    local leaf_b = state.leaf_map[leaf_b_id]
     if not leaf_a or not leaf_b then return end
     leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
     leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
@@ -203,7 +203,7 @@ local function try_drop_picked_up(t, leaf_id)
     if not picked_up_client then return false end
     if not picked_up_client.client.valid then picked_up_client = nil; return false end
     local state = get_state(t)
-    local target = tree.find_leaf_by_id(state.root, leaf_id)
+    local target = state.leaf_map[leaf_id]
     if not target then picked_up_client = nil; return false end
 
     local c = picked_up_client.client
@@ -230,13 +230,17 @@ end
 
 local function split_leaf(t, direction)
     local state = get_state(t)
-    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = state.leaf_map[state.focused_leaf_id]
     if not leaf then return false end
 
     local child_a = tree.make_leaf()
     child_a.tabs = leaf.tabs
     child_a.active_tab = leaf.active_tab
     local child_b = tree.make_leaf()
+
+    state.leaf_map[leaf.id]      = nil
+    state.leaf_map[child_a.id]   = child_a
+    state.leaf_map[child_b.id]   = child_b
 
     leaf.type = "branch"
     leaf.direction = direction
@@ -249,14 +253,15 @@ end
 
 local function close_leaf(t, leaf_id)
     local state = get_state(t)
-    local leaf = tree.find_leaf_by_id(state.root, leaf_id)
+    local leaf = state.leaf_map[leaf_id]
     if not leaf then return false end
     if picked_up_split  == leaf_id then picked_up_split  = nil end
     if picked_up_client and tree.find_leaf_for_client(state.root, picked_up_client.client) == leaf then
         picked_up_client = nil
     end
-    local leaves = tree.collect_leaves(state.root)
-    if #leaves <= 1 then return false end
+    local leaf_count = 0
+    for _ in pairs(state.leaf_map) do leaf_count = leaf_count + 1 end
+    if leaf_count <= 1 then return false end
 
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
@@ -273,9 +278,18 @@ local function close_leaf(t, leaf_id)
     end
     if dest.active_tab == 0 and #dest.tabs > 0 then dest.active_tab = 1 end
 
-    -- Keep the currently focused leaf if it lives in the sibling subtree;
-    -- otherwise fall back to the sibling's first leaf.
-    local keep = tree.find_leaf_by_id(sibling, state.focused_leaf_id)
+    -- Keep the currently focused leaf if it lives in the sibling subtree.
+    local focused_id = state.focused_leaf_id
+    local keep
+    for _, l in ipairs(sibling_leaves) do
+        if l.id == focused_id then keep = l; break end
+    end
+
+    -- Update leaf_map: remove closed leaf; if sibling was a leaf, parent absorbs its identity.
+    state.leaf_map[leaf_id] = nil
+    if sibling.type == "leaf" then
+        state.leaf_map[sibling.id] = parent
+    end
 
     parent.type = sibling.type
     parent.direction = sibling.direction
@@ -290,7 +304,7 @@ end
 
 local function resize_focused(t, delta)
     local state = get_state(t)
-    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = state.leaf_map[state.focused_leaf_id]
     if not leaf then return false end
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
@@ -305,7 +319,7 @@ end
 
 local function cycle_tab(t, offset)
     local state = get_state(t)
-    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = state.leaf_map[state.focused_leaf_id]
     if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
 end
@@ -324,7 +338,7 @@ end
 
 local function move_tab_to_direction(t, dir)
     local state = get_state(t)
-    local src_leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+    local src_leaf = state.leaf_map[state.focused_leaf_id]
     if not src_leaf or #src_leaf.tabs == 0 then return false end
     local dst_leaf = adjacent_leaf(state, src_leaf.id, dir)
     if not dst_leaf then return false end
@@ -933,7 +947,7 @@ local function update_titlebars(s, t, state, geos, leaves)
     end
 
     for leaf_id, entry in pairs(titlebar_cache[s]) do
-        local leaf = tree.find_leaf_by_id(state.root, leaf_id)
+        local leaf = state.leaf_map[leaf_id]
         if not alive[leaf_id] or (leaf and #leaf.tabs == 0) then
             entry.wb.visible = false
             if not alive[leaf_id] then titlebar_cache[s][leaf_id] = nil end
