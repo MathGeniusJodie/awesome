@@ -1157,7 +1157,7 @@ function splitwm.setup()
         -- Splits are tag-local; cancel any pending swap so the leaf ID
         -- doesn't silently fail to resolve on the newly selected tag.
         picked_up_split = nil
-        if s then gears.timer.delayed_call(function() update_ui(s) end) end
+        if s then geo_cache[s] = nil; gears.timer.delayed_call(function() update_ui(s) end) end
     end)
 end
 
