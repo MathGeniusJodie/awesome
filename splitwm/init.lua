@@ -238,16 +238,17 @@ local function split_leaf(t, direction)
     child_a.active_tab = leaf.active_tab
     local child_b = tree.make_leaf()
 
-    state.leaf_map[leaf.id]      = nil
-    state.leaf_map[child_a.id]   = child_a
-    state.leaf_map[child_b.id]   = child_b
+    state.leaf_map[leaf.id]    = nil
+    state.leaf_map[child_a.id] = child_a
+    state.leaf_map[child_b.id] = child_b
 
-    leaf.type = "branch"
-    leaf.direction = direction
-    leaf.ratio = 0.618
-    leaf.children = { child_a, child_b }
-    leaf.tabs = nil
-    leaf.active_tab = nil
+    local new_branch = tree.make_branch(direction, 0.618, child_a, child_b)
+    if leaf == state.root then
+        state.root = new_branch
+    else
+        local parent, idx = tree.find_parent(state.root, leaf)
+        parent.children[idx] = new_branch
+    end
     state.focused_leaf_id = child_a.id
 end
 
@@ -285,19 +286,16 @@ local function close_leaf(t, leaf_id)
         if l.id == focused_id then keep = l; break end
     end
 
-    -- Update leaf_map: remove closed leaf; if sibling was a leaf, parent absorbs its identity.
+    -- Remove the closed leaf from the map; sibling keeps its own identity.
     state.leaf_map[leaf_id] = nil
-    if sibling.type == "leaf" then
-        state.leaf_map[sibling.id] = parent
-    end
 
-    parent.type = sibling.type
-    parent.direction = sibling.direction
-    parent.ratio = sibling.ratio
-    parent.children = sibling.children
-    parent.tabs = sibling.tabs
-    parent.active_tab = sibling.active_tab
-    parent.id = sibling.id
+    -- Splice sibling into the tree in place of parent — no in-place field mutation.
+    if parent == state.root then
+        state.root = sibling
+    else
+        local grand_parent, parent_idx = tree.find_parent(state.root, parent)
+        grand_parent.children[parent_idx] = sibling
+    end
 
     state.focused_leaf_id = keep and keep.id or sibling_leaves[1].id
 end
