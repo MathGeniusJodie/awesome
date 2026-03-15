@@ -765,25 +765,29 @@ local function tb_split_tab_layers(tab_widgets, active_tab)
     return behind, above
 end
 
+local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
+    return {
+        {
+            {
+                {
+                    { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
+                    middle_drag,
+                    { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
+                    layout = wibox.layout.align.horizontal,
+                },
+                top = ctx.top_pad, widget = wibox.container.margin,
+            },
+            bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
+        },
+        layout = wibox.layout.fixed.vertical,
+    }
+end
+
 -- Assemble the three-layer wibox layout for a leaf's titlebar.
 local function tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
     entry.wb:setup {
         -- Layer 1: inactive tabs + split controls (behind border)
-        {
-            {
-                {
-                    {
-                        { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
-                        middle_drag,
-                        { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
-                        layout = wibox.layout.align.horizontal,
-                    },
-                    top = ctx.top_pad, widget = wibox.container.margin,
-                },
-                bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
-            },
-            layout = wibox.layout.fixed.vertical,
-        },
+        tb_build_bar_layer(behind, controls, middle_drag, ctx),
         -- Layer 2: focus border
         border_draw,
         -- Layer 3: active tab on top of border
@@ -806,10 +810,9 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
 end
 
 -- Assemble the titlebar wibox for an empty leaf: bar strip + background + launchers.
-local function tb_assemble_empty_wibox(entry, behind, controls, border_draw, middle_drag, launcher_ws, ctx)
+local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
     entry.wb:setup {
-        -- Layer 1: content background behind everything
-        -- (transparent spacer over bar area, colored background fills the rest)
+        -- Layer 1: content background (spacer over bar area, colored content fills the rest)
         {
             { forced_height = ctx.tb_h, widget = wibox.container.background },
             {
@@ -821,22 +824,8 @@ local function tb_assemble_empty_wibox(entry, behind, controls, border_draw, mid
             },
             layout = wibox.layout.align.vertical,
         },
-        -- Layer 2: bar strip with controls
-        {
-            {
-                {
-                    {
-                        { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
-                        middle_drag,
-                        { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
-                        layout = wibox.layout.align.horizontal,
-                    },
-                    top = ctx.top_pad, widget = wibox.container.margin,
-                },
-                bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
-            },
-            layout = wibox.layout.fixed.vertical,
-        },
+        -- Layer 2: bar strip with controls (+ button left, split controls right)
+        tb_build_bar_layer(bar_widgets, controls, middle_drag, ctx),
         -- Layer 3: focus border
         border_draw,
         layout = wibox.layout.stack,
@@ -926,8 +915,8 @@ local function update_titlebars(s, t, state, geos, leaves)
                     if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
                 end)
             end
-            local behind, _ = tb_split_tab_layers(tab_widgets, leaf.active_tab)
-            tb_assemble_empty_wibox(entry, behind, controls, border_draw, middle_drag, launcher_ws, ctx)
+            -- tab_widgets contains only the "+" button; pass directly, no layer split needed
+            tb_assemble_empty_wibox(entry, tab_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
         else
             local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab)
             tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
