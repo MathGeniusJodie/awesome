@@ -534,6 +534,104 @@ local function get_titlebar_entry(c)
 end
 
 ---------------------------------------------------------------------------
+-- Update Overlays (empty split placeholders) — helpers
+---------------------------------------------------------------------------
+
+local function overlay_compute_geo(geo, focus_bw, gap, leaf)
+    local raise = leaf.v_bound_above and gap or 0
+    return {
+        x     = geo.x + focus_bw,
+        y     = geo.y + focus_bw - raise,
+        w     = math.max(1, geo.width  - 2 * focus_bw),
+        h     = math.max(1, geo.height - 2 * focus_bw + raise),
+        raise = raise,
+    }
+end
+
+local function overlay_make_action_btns(t, s, state, leaf_id)
+    local vsplit_btn = make_circle_icon_btn(icons.vsplit, 36, function()
+        state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s)
+    end)
+    local hsplit_btn = make_circle_icon_btn(icons.hsplit, 36, function()
+        state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s)
+    end)
+    local close_btn = make_circle_icon_btn(icons.close, 36, function()
+        close_leaf(t, leaf_id); awful.layout.arrange(s)
+    end)
+    return vsplit_btn, hsplit_btn, close_btn
+end
+
+local function overlay_make_launcher_row(state, leaf_id, s)
+    local widgets = {}
+    for _, entry in ipairs(splitwm.launchers) do
+        table.insert(widgets, make_launcher_widget(entry, 30, function()
+            state.focused_leaf_id = leaf_id
+            if entry.action then entry.action() elseif entry.cmd then awful.spawn(entry.cmd) end
+        end))
+    end
+    return widgets
+end
+
+local function overlay_make_drag_strip(raise, v_drag_ref, s)
+    local strip = wibox.widget {
+        forced_height = raise,
+        cursor        = raise > 0 and "sb_v_double_arrow" or nil,
+        widget        = wibox.container.background,
+    }
+    strip:buttons(gears.table.join(awful.button({}, 1, function()
+        if not v_drag_ref.b then return end
+        run_v_drag(s, function() return v_drag_ref.b end)
+    end)))
+    return strip
+end
+
+local function overlay_make_bg_widget(launcher_ws, vsplit_btn, hsplit_btn, close_btn, bg, border)
+    return wibox.widget {
+        {
+            {
+                { { spacing = 6, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) },        halign = "center", widget = wibox.container.place },
+                { { vsplit_btn, hsplit_btn, close_btn, spacing = 6, layout = wibox.layout.fixed.horizontal }, halign = "center", widget = wibox.container.place },
+                spacing = 15, layout = wibox.layout.fixed.vertical,
+            },
+            halign = "center", valign = "center", widget = wibox.container.place,
+        },
+        bg                 = bg,
+        shape              = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 8) end,
+        shape_border_width = 2,
+        shape_border_color = border,
+        widget             = wibox.container.background,
+    }
+end
+
+local function overlay_create(s, t, state, leaf_id, leaf, g, bg, border)
+    local v_drag_ref                 = { b = leaf.v_bound_above }
+    local drag_strip                 = overlay_make_drag_strip(g.raise, v_drag_ref, s)
+    local vsplit_btn, hsplit_btn, close_btn = overlay_make_action_btns(t, s, state, leaf_id)
+    local launcher_ws                = overlay_make_launcher_row(state, leaf_id, s)
+    local bg_widget                  = overlay_make_bg_widget(launcher_ws, vsplit_btn, hsplit_btn, close_btn, bg, border)
+    local wb = wibox {
+        screen = s, x = g.x, y = g.y, width = g.w, height = g.h,
+        bg = "#00000000", border_width = 0, visible = true, ontop = false, type = "utility",
+        widget = wibox.widget { drag_strip, bg_widget, layout = wibox.layout.align.vertical },
+    }
+    wb._bg_widget  = bg_widget
+    wb._drag_strip = drag_strip
+    wb._v_drag_ref = v_drag_ref
+    wb:buttons(gears.table.join(awful.button({}, 1, function()
+        if pickup.split and pickup.split ~= leaf_id then
+            swap_split_tabs(state, pickup.split, leaf_id)
+            state.focused_leaf_id = leaf_id
+            pickup:reset_split()
+            awful.layout.arrange(s); return
+        end
+        if pickup.split == leaf_id then pickup:reset_split(); awful.layout.arrange(s); return end
+        if pickup.client         then try_drop_picked_up(t, leaf_id); awful.layout.arrange(s); return end
+        state.focused_leaf_id = leaf_id; awful.layout.arrange(s)
+    end)))
+    return wb
+end
+
+---------------------------------------------------------------------------
 -- Update Overlays (empty split placeholders)
 ---------------------------------------------------------------------------
 
@@ -559,77 +657,26 @@ local function update_overlays(s, t, state, geos, leaves)
 
     for leaf_id, leaf in pairs(needed) do
         local geo = geos[leaf_id]
-        if geo then
-            local x = geo.x + focus_bw
-            local w = math.max(1, geo.width - 2 * focus_bw)
-            local raise = leaf.v_bound_above and gap or 0
-            local y = geo.y + focus_bw - raise
-            local h = math.max(1, geo.height - 2 * focus_bw + raise)
-            local bg = beautiful.splitwm_inactive_bg
-            local is_focused = (leaf_id == state.focused_leaf_id)
-            local border = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or "#00000066"
+        if not geo then goto continue end
 
-            if overlay_cache[s][leaf_id] then
-                local wb = overlay_cache[s][leaf_id]
-                wb.x = x; wb.y = y; wb.width = w; wb.height = h
-                wb._bg_widget.bg = bg
-                wb._bg_widget.shape_border_color = border
-                wb._v_drag_ref.b = leaf.v_bound_above
-                wb._drag_strip.forced_height = raise
-                wb._drag_strip.cursor = raise > 0 and "sb_v_double_arrow" or nil
-                wb.visible = true
-            else
-                local vsplit_btn = make_circle_icon_btn(icons.vsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s) end)
-                local hsplit_btn = make_circle_icon_btn(icons.hsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s) end)
-                local close_btn  = make_circle_icon_btn(icons.close,  36, function() close_leaf(t, leaf_id); awful.layout.arrange(s) end)
+        local g      = overlay_compute_geo(geo, focus_bw, gap, leaf)
+        local bg     = beautiful.splitwm_inactive_bg
+        local border = (leaf_id == state.focused_leaf_id)
+                       and (beautiful.splitwm_focus_border or "#7799dd") or "#00000066"
+        local wb     = overlay_cache[s][leaf_id]
 
-                local launcher_ws = {}
-                for _, entry in ipairs(splitwm.launchers) do
-                    table.insert(launcher_ws, make_launcher_widget(entry, 30, function()
-                        state.focused_leaf_id = leaf_id
-                        if entry.action then entry.action() elseif entry.cmd then awful.spawn(entry.cmd) end
-                    end))
-                end
-
-                local v_drag_ref = { b = leaf.v_bound_above }
-                local drag_strip = wibox.widget { forced_height = raise, cursor = raise > 0 and "sb_v_double_arrow" or nil, widget = wibox.container.background }
-                drag_strip:buttons(gears.table.join(
-                    awful.button({}, 1, function()
-                        if not v_drag_ref.b then return end
-                        run_v_drag(s, function() return v_drag_ref.b end)
-                    end)
-                ))
-
-                local bg_widget = wibox.widget {
-                    {
-                        {
-                            { { spacing = 6, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) }, halign = "center", widget = wibox.container.place },
-                            { { vsplit_btn, hsplit_btn, close_btn, spacing = 6, layout = wibox.layout.fixed.horizontal }, halign = "center", widget = wibox.container.place },
-                            spacing = 15, layout = wibox.layout.fixed.vertical,
-                        },
-                        halign = "center", valign = "center", widget = wibox.container.place,
-                    },
-                    bg = bg, shape = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 8) end, shape_border_width = 2, shape_border_color = border, widget = wibox.container.background,
-                }
-                local wb = wibox {
-                    screen = s, x = x, y = y, width = w, height = h, bg = "#00000000", border_width = 0, visible = true, ontop = false, type = "utility",
-                    widget = wibox.widget { drag_strip, bg_widget, layout = wibox.layout.align.vertical },
-                }
-                wb._bg_widget = bg_widget; wb._drag_strip = drag_strip; wb._v_drag_ref = v_drag_ref
-                wb:buttons(gears.table.join(awful.button({}, 1, function()
-                    if pickup.split and pickup.split ~= leaf_id then
-                        swap_split_tabs(state, pickup.split, leaf_id)
-                        state.focused_leaf_id = leaf_id
-                        pickup:reset_split()
-                        awful.layout.arrange(s); return
-                    end
-                    if pickup.split == leaf_id then pickup:reset_split(); awful.layout.arrange(s); return end
-                    if pickup.client then try_drop_picked_up(t, leaf_id); awful.layout.arrange(s); return end
-                    state.focused_leaf_id = leaf_id; awful.layout.arrange(s)
-                end)))
-                overlay_cache[s][leaf_id] = wb
-            end
+        if wb then
+            wb.x = g.x; wb.y = g.y; wb.width = g.w; wb.height = g.h
+            wb._bg_widget.bg               = bg
+            wb._bg_widget.shape_border_color = border
+            wb._v_drag_ref.b               = leaf.v_bound_above
+            wb._drag_strip.forced_height   = g.raise
+            wb._drag_strip.cursor          = g.raise > 0 and "sb_v_double_arrow" or nil
+            wb.visible = true
+        else
+            overlay_cache[s][leaf_id] = overlay_create(s, t, state, leaf_id, leaf, g, bg, border)
         end
+        ::continue::
     end
 end
 
