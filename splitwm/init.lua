@@ -670,23 +670,6 @@ local function update_titlebars(s, t, state, geos)
                         local tab_icon = awful.widget.clienticon(tc)
                         tab_icon.forced_width = icon_size
                         tab_icon.forced_height = icon_size
-                        tab_icon:buttons(gears.table.join(
-                            awful.button({}, 1, function()
-                                if picked_up_split and picked_up_split ~= leaf.id then
-                                    swap_split_tabs(state, picked_up_split, leaf.id)
-                                    state.focused_leaf_id = leaf.id
-                                    picked_up_split = nil
-                                    awful.layout.arrange(s); return
-                                end
-                                if picked_up_client and picked_up_client.client ~= tc then
-                                    try_drop_picked_up(t, leaf.id)
-                                    awful.layout.arrange(s)
-                                    return
-                                end
-                                leaf.active_tab = tab_idx
-                                awful.layout.arrange(s)
-                            end)
-                        ))
 
                         local move_btn = wibox.widget {
                             {
