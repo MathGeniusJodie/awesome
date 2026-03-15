@@ -168,7 +168,7 @@ function menu.setup(opts)
     splitwm.on_menu_request = function()
         app_menu:toggle()
         poll_ready = false
-        menu_poll_timer:stop()
+        if menu_poll_timer.started then menu_poll_timer:stop() end
         menu_poll_timer:start()
     end
 end

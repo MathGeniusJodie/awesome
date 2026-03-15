@@ -263,10 +263,6 @@ local function close_leaf(t, leaf_id)
     if picked_up_client and picked_up_client.client.valid and tree.find_leaf_for_client(state.root, picked_up_client.client) == leaf then
         picked_up_client = nil
     end
-    local leaf_count = 0
-    for _ in pairs(state.leaf_map) do leaf_count = leaf_count + 1 end
-    if leaf_count <= 1 then return false end
-
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
 
