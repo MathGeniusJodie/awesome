@@ -462,13 +462,13 @@ local titlebar_cache = {}
 -- Update Overlays (empty split placeholders)
 ---------------------------------------------------------------------------
 
-local function update_overlays(s, t, state, geos)
+local function update_overlays(s, t, state, geos, leaves)
     local focus_bw = beautiful.splitwm_focus_border_width or 2
     local gap      = beautiful.splitwm_gap or 16
     if not overlay_cache[s] then overlay_cache[s] = {} end
 
     local needed, alive = {}, {}
-    for _, leaf in ipairs(tree.collect_leaves(state.root)) do
+    for _, leaf in ipairs(leaves) do
         alive[leaf.id] = true
         if #leaf.tabs == 0 then needed[leaf.id] = leaf end
     end
@@ -569,7 +569,7 @@ end
 -- Titlebars (Wibox based)
 ---------------------------------------------------------------------------
 
-local function update_titlebars(s, t, state, geos)
+local function update_titlebars(s, t, state, geos, leaves)
     if not titlebar_cache[s] then titlebar_cache[s] = {} end
 
     local gap      = beautiful.splitwm_gap or 16
@@ -578,7 +578,7 @@ local function update_titlebars(s, t, state, geos)
     local alive    = {}
     local BTN_SPACING = 5
 
-    for _, leaf in ipairs(tree.collect_leaves(state.root)) do
+    for _, leaf in ipairs(leaves) do
         alive[leaf.id] = true
         if #leaf.tabs > 0 then
             local geo = geos[leaf.id]
@@ -1000,8 +1000,9 @@ local function update_ui(s)
         tree.compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
     end
 
-    update_overlays(s, t, state, geos)
-    update_titlebars(s, t, state, geos)
+    local leaves = tree.collect_leaves(state.root)
+    update_overlays(s, t, state, geos, leaves)
+    update_titlebars(s, t, state, geos, leaves)
     update_drag_handles(s, state, bounds)
 end
 
