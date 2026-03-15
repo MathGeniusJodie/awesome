@@ -10,6 +10,7 @@ local awful     = require("awful")
 local gears     = require("gears")
 local wibox     = require("wibox")
 local beautiful = require("beautiful")
+local icons     = require("splitwm.icons")
 
 local splitwm = {}
 
@@ -152,6 +153,14 @@ local function make_circle_btn_widget(label, size)
     }
 end
 
+local function make_circle_btn(label, size, callback)
+    local w = make_circle_btn_widget(label, size)
+    w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
+    w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
+    w:buttons(gears.table.join(awful.button({}, 1, callback)))
+    return w
+end
+
 local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)
@@ -171,14 +180,6 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     }
 end
 
-local function make_circle_btn(label, size, callback)
-    local w = make_circle_btn_widget(label, size)
-    w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
-    w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
-    w:buttons(gears.table.join(awful.button({}, 1, callback)))
-    return w
-end
-
 local function make_circle_icon_btn(draw_fn, size, callback)
     local w = make_circle_icon_btn_widget(draw_fn, size)
     w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
@@ -193,52 +194,6 @@ local function rounded_top(cr, w, h)
     cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
     cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
     cr:line_to(w, h) cr:line_to(0, h) cr:close_path()
-end
-
-local function icon_plus(cr, w, h)
-    local cx, cy, s = w/2, h/2, 4
-    cr:move_to(cx-s, cy); cr:line_to(cx+s, cy); cr:stroke()
-    cr:move_to(cx, cy-s); cr:line_to(cx, cy+s); cr:stroke()
-end
-
-local function icon_vsplit(cr, w, h)
-    local cx, cy, bw, bh, br = w/2, h/2, 10, 10, 1
-    local bx, by = cx-bw/2, cy-bh/2
-    cr:new_sub_path()
-    cr:arc(bx+bw-br, by+br,    br, -math.pi/2, 0)
-    cr:arc(bx+bw-br, by+bh-br, br,  0,         math.pi/2)
-    cr:arc(bx+br,    by+bh-br, br,  math.pi/2, math.pi)
-    cr:arc(bx+br,    by+br,    br,  math.pi,   3*math.pi/2)
-    cr:close_path()
-    cr:stroke()
-    cr:move_to(cx, by+1); cr:line_to(cx, by+bh-1); cr:stroke()
-end
-
-local function icon_hsplit(cr, w, h)
-    local cx, cy, bw, bh, br = w/2, h/2, 10, 10, 1
-    local bx, by = cx-bw/2, cy-bh/2
-    cr:new_sub_path()
-    cr:arc(bx+bw-br, by+br,    br, -math.pi/2, 0)
-    cr:arc(bx+bw-br, by+bh-br, br,  0,         math.pi/2)
-    cr:arc(bx+br,    by+bh-br, br,  math.pi/2, math.pi)
-    cr:arc(bx+br,    by+br,    br,  math.pi,   3*math.pi/2)
-    cr:close_path()
-    cr:stroke()
-    cr:move_to(bx+1, cy); cr:line_to(bx+bw-1, cy); cr:stroke()
-end
-
-local function icon_close(cr, w, h)
-    local cx, cy, s = w/2, h/2, 4
-    cr:move_to(cx-s, cy-s); cr:line_to(cx+s, cy+s); cr:stroke()
-    cr:move_to(cx+s, cy-s); cr:line_to(cx-s, cy+s); cr:stroke()
-end
-
-local function icon_swap(cr, w, h)
-    local cx, cy, s, ay = w/2, h/2, 4, 3
-    cr:move_to(cx - s, cy - ay); cr:line_to(cx + s, cy - ay); cr:stroke()
-    cr:move_to(cx + s - 3, cy - ay - 2); cr:line_to(cx + s, cy - ay); cr:line_to(cx + s - 3, cy - ay + 2); cr:stroke()
-    cr:move_to(cx + s, cy + ay); cr:line_to(cx - s, cy + ay); cr:stroke()
-    cr:move_to(cx - s + 3, cy + ay - 2); cr:line_to(cx - s, cy + ay); cr:line_to(cx - s + 3, cy + ay + 2); cr:stroke()
 end
 
 local function draw_tab_border(cr, w, h)
@@ -730,9 +685,9 @@ local function update_overlays(s, t, state, geos)
                 wb._drag_strip.cursor = raise > 0 and "sb_v_double_arrow" or nil
                 wb.visible = true
             else
-                local vsplit_btn = make_circle_icon_btn(icon_vsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s) end)
-                local hsplit_btn = make_circle_icon_btn(icon_hsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s) end)
-                local close_btn  = make_circle_icon_btn(icon_close,  36, function() close_leaf(t, leaf_id); awful.layout.arrange(s) end)
+                local vsplit_btn = make_circle_icon_btn(icons.vsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s) end)
+                local hsplit_btn = make_circle_icon_btn(icons.hsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s) end)
+                local close_btn  = make_circle_icon_btn(icons.close,  36, function() close_leaf(t, leaf_id); awful.layout.arrange(s) end)
 
                 local launcher_ws = {}
                 for _, entry in ipairs(splitwm.launchers) do
@@ -1035,17 +990,17 @@ local function update_titlebars(s, t, state, geos)
                         end
                     end
 
-                    local menu_btn = make_tb_btn(icon_plus, 26, function() state.focused_leaf_id = leaf.id; if splitwm.on_menu_request then splitwm.on_menu_request() end end)
+                    local menu_btn = make_tb_btn(icons.plus, 26, function() state.focused_leaf_id = leaf.id; if splitwm.on_menu_request then splitwm.on_menu_request() end end)
                     table.insert(tab_widgets, menu_btn)
 
-                    local vsplit_btn = make_tb_btn(icon_vsplit, 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "h"); awful.layout.arrange(s) end)
-                    local hsplit_btn = make_tb_btn(icon_hsplit, 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "v"); awful.layout.arrange(s) end)
-                    local close_split_btn = make_tb_btn(icon_close, 26, function() close_leaf(t, leaf.id); awful.layout.arrange(s) end)
+                    local vsplit_btn = make_tb_btn(icons.vsplit, 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "h"); awful.layout.arrange(s) end)
+                    local hsplit_btn = make_tb_btn(icons.hsplit, 26, function() state.focused_leaf_id = leaf.id; split_leaf(t, "v"); awful.layout.arrange(s) end)
+                    local close_split_btn = make_tb_btn(icons.close, 26, function() close_leaf(t, leaf.id); awful.layout.arrange(s) end)
                     close_split_btn:connect_signal("mouse::enter", function() close_split_btn.fg = "#ff6666" end)
                     close_split_btn:connect_signal("mouse::leave", function() close_split_btn.fg = "#ffffff" end)
 
                     local is_split_picked = (picked_up_split == leaf.id)
-                    local swap_split_btn = make_circle_icon_btn_widget(icon_swap, 26)
+                    local swap_split_btn = make_circle_icon_btn_widget(icons.swap, 26)
                     swap_split_btn.shape_border_color = widget_bc
                     if is_split_picked then swap_split_btn.bg = "#7799dd" end
                     swap_split_btn:connect_signal("mouse::enter", function()
