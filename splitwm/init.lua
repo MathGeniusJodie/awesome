@@ -510,143 +510,7 @@ local function get_drag_handle(s, i)
     return entry
 end
 
-local overlay_cache  = {}
 local titlebar_cache = {}
-
----------------------------------------------------------------------------
--- Update Overlays (empty split placeholders) — helpers
----------------------------------------------------------------------------
-
-local function overlay_compute_geo(geo, focus_bw, gap, leaf)
-    local raise = leaf.v_bound_above and gap or 0
-    return {
-        x     = geo.x + focus_bw,
-        y     = geo.y + focus_bw - raise,
-        w     = math.max(1, geo.width  - 2 * focus_bw),
-        h     = math.max(1, geo.height - 2 * focus_bw + raise),
-        raise = raise,
-    }
-end
-
-local function overlay_make_action_btns(t, s, state, leaf_id)
-    local cb = make_split_action_callbacks(state, leaf_id, t, s)
-    return make_circle_icon_btn(icons.vsplit, 36, cb.vsplit),
-           make_circle_icon_btn(icons.hsplit, 36, cb.hsplit),
-           make_circle_icon_btn(icons.close,  36, cb.close)
-end
-
-local function overlay_make_launcher_row(state, leaf_id, s)
-    local widgets = {}
-    for _, entry in ipairs(splitwm.launchers) do
-        table.insert(widgets, make_launcher_widget(entry, 30, function()
-            state.focused_leaf_id = leaf_id
-            if entry.action then entry.action() elseif entry.cmd then awful.spawn(entry.cmd) end
-        end))
-    end
-    return widgets
-end
-
-local function overlay_make_drag_strip(raise, v_drag_ref, s)
-    local strip = wibox.widget {
-        forced_height = raise,
-        cursor        = raise > 0 and "sb_v_double_arrow" or nil,
-        widget        = wibox.container.background,
-    }
-    strip:buttons(gears.table.join(awful.button({}, 1, function()
-        if not v_drag_ref.b then return end
-        run_v_drag(s, function() return v_drag_ref.b end)
-    end)))
-    return strip
-end
-
-local function overlay_make_bg_widget(launcher_ws, vsplit_btn, hsplit_btn, close_btn, bg, border)
-    return wibox.widget {
-        {
-            {
-                { { spacing = 6, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) },        halign = "center", widget = wibox.container.place },
-                { { vsplit_btn, hsplit_btn, close_btn, spacing = 6, layout = wibox.layout.fixed.horizontal }, halign = "center", widget = wibox.container.place },
-                spacing = 15, layout = wibox.layout.fixed.vertical,
-            },
-            halign = "center", valign = "center", widget = wibox.container.place,
-        },
-        bg                 = bg,
-        shape              = function(cr, bw, bh) gears.shape.rounded_rect(cr, bw, bh, 8) end,
-        shape_border_width = 2,
-        shape_border_color = border,
-        widget             = wibox.container.background,
-    }
-end
-
-local function overlay_create(s, t, state, leaf_id, leaf, g, bg, border)
-    local v_drag_ref                 = { b = leaf.v_bound_above }
-    local drag_strip                 = overlay_make_drag_strip(g.raise, v_drag_ref, s)
-    local vsplit_btn, hsplit_btn, close_btn = overlay_make_action_btns(t, s, state, leaf_id)
-    local launcher_ws                = overlay_make_launcher_row(state, leaf_id, s)
-    local bg_widget                  = overlay_make_bg_widget(launcher_ws, vsplit_btn, hsplit_btn, close_btn, bg, border)
-    local wb = wibox {
-        screen = s, x = g.x, y = g.y, width = g.w, height = g.h,
-        bg = "#00000000", border_width = 0, visible = true, ontop = false, type = "utility",
-        widget = wibox.widget { drag_strip, bg_widget, layout = wibox.layout.align.vertical },
-    }
-    wb._bg_widget  = bg_widget
-    wb._drag_strip = drag_strip
-    wb._v_drag_ref = v_drag_ref
-    wb:buttons(gears.table.join(awful.button({}, 1, function()
-        if pickup.tag == "split"  then handle_split_pickup(state, leaf_id, s); return end
-        if pickup.tag == "client" then try_drop_picked_up(t, leaf_id); awful.layout.arrange(s); return end
-        state.focused_leaf_id = leaf_id; awful.layout.arrange(s)
-    end)))
-    return wb
-end
-
----------------------------------------------------------------------------
--- Update Overlays (empty split placeholders)
----------------------------------------------------------------------------
-
-local function update_overlays(s, t, state, geos, leaves)
-    local focus_bw = beautiful.splitwm_focus_border_width or 2
-    local gap      = beautiful.splitwm_gap or 16
-    if not overlay_cache[s] then overlay_cache[s] = {} end
-
-    local needed, alive = {}, {}
-    for _, leaf in ipairs(leaves) do
-        alive[leaf.id] = true
-        if #leaf.tabs == 0 then needed[leaf.id] = leaf end
-    end
-
-    for leaf_id, wb in pairs(overlay_cache[s]) do
-        if not alive[leaf_id] then
-            wb.visible = false
-            overlay_cache[s][leaf_id] = nil
-        elseif not needed[leaf_id] then
-            wb.visible = false
-        end
-    end
-
-    for leaf_id, leaf in pairs(needed) do
-        local geo = geos[leaf_id]
-        if not geo then goto continue end
-
-        local g      = overlay_compute_geo(geo, focus_bw, gap, leaf)
-        local bg     = beautiful.splitwm_inactive_bg
-        local border = (leaf_id == state.focused_leaf_id)
-                       and (beautiful.splitwm_focus_border or "#7799dd") or "#00000066"
-        local wb     = overlay_cache[s][leaf_id]
-
-        if wb then
-            wb.x = g.x; wb.y = g.y; wb.width = g.w; wb.height = g.h
-            wb._bg_widget.bg               = bg
-            wb._bg_widget.shape_border_color = border
-            wb._v_drag_ref.b               = leaf.v_bound_above
-            wb._drag_strip.forced_height   = g.raise
-            wb._drag_strip.cursor          = g.raise > 0 and "sb_v_double_arrow" or nil
-            wb.visible = true
-        else
-            overlay_cache[s][leaf_id] = overlay_create(s, t, state, leaf_id, leaf, g, bg, border)
-        end
-        ::continue::
-    end
-end
 
 ---------------------------------------------------------------------------
 -- Titlebars (Wibox based) — helper functions
@@ -941,6 +805,44 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
     }
 end
 
+-- Assemble the titlebar wibox for an empty leaf: bar strip + background + launchers.
+local function tb_assemble_empty_wibox(entry, behind, controls, border_draw, middle_drag, launcher_ws, ctx)
+    entry.wb:setup {
+        -- Layer 1: content background behind everything
+        -- (transparent spacer over bar area, colored background fills the rest)
+        {
+            { forced_height = ctx.tb_h, widget = wibox.container.background },
+            {
+                {
+                    { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) },
+                    halign = "center", valign = "center", widget = wibox.container.place,
+                },
+                bg = beautiful.splitwm_inactive_bg, widget = wibox.container.background,
+            },
+            layout = wibox.layout.align.vertical,
+        },
+        -- Layer 2: bar strip with controls
+        {
+            {
+                {
+                    {
+                        { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
+                        middle_drag,
+                        { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
+                        layout = wibox.layout.align.horizontal,
+                    },
+                    top = ctx.top_pad, widget = wibox.container.margin,
+                },
+                bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
+            },
+            layout = wibox.layout.fixed.vertical,
+        },
+        -- Layer 3: focus border
+        border_draw,
+        layout = wibox.layout.stack,
+    }
+end
+
 ---------------------------------------------------------------------------
 -- Titlebars (Wibox based)
 ---------------------------------------------------------------------------
@@ -954,7 +856,6 @@ local function update_titlebars(s, t, state, geos, leaves)
     local alive = {}
 
     local function update_leaf(leaf)
-        if #leaf.tabs == 0 then return end
         local geo = geos[leaf.id]
         if not geo then return end
 
@@ -1017,8 +918,20 @@ local function update_titlebars(s, t, state, geos, leaves)
             end)))
         end
 
-        local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab)
-        tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
+        if #leaf.tabs == 0 then
+            local launcher_ws = {}
+            for _, e in ipairs(splitwm.launchers) do
+                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, 30, function()
+                    ctx.state.focused_leaf_id = leaf.id
+                    if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
+                end)
+            end
+            local behind, _ = tb_split_tab_layers(tab_widgets, leaf.active_tab)
+            tb_assemble_empty_wibox(entry, behind, controls, border_draw, middle_drag, launcher_ws, ctx)
+        else
+            local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab)
+            tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
+        end
     end
 
     for _, leaf in ipairs(leaves) do
@@ -1026,12 +939,11 @@ local function update_titlebars(s, t, state, geos, leaves)
         update_leaf(leaf)
     end
 
-    -- Hide and clean up entries for dead or empty leaves
+    -- Hide and clean up entries for dead leaves
     for leaf_id, entry in pairs(titlebar_cache[s]) do
-        local leaf = state.leaf_map[leaf_id]
-        if alive[leaf_id] and not (leaf and #leaf.tabs == 0) then goto continue end
+        if alive[leaf_id] then goto continue end
         entry.wb.visible = false
-        if not alive[leaf_id] then titlebar_cache[s][leaf_id] = nil end
+        titlebar_cache[s][leaf_id] = nil
         ::continue::
     end
 end
@@ -1089,7 +1001,6 @@ local function update_ui(s)
     if not t then
         local pool = drag_handle_pool[s]
         if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
-        hide_cache(overlay_cache[s])
         hide_cache(titlebar_cache[s], "wb")
         return
     end
@@ -1106,7 +1017,6 @@ local function update_ui(s)
     end
 
     local leaves = tree.collect_leaves(state.root)
-    update_overlays(s, t, state, geos, leaves)
     update_titlebars(s, t, state, geos, leaves)
     update_drag_handles(s, state, bounds)
 end
@@ -1211,10 +1121,6 @@ function splitwm.setup()
 end
 
 function splitwm.flush_caches()
-    for _, screen_cache in pairs(overlay_cache) do
-        for _, wb in pairs(screen_cache) do wb.visible = false end
-    end
-    overlay_cache = {}
     for _, screen_cache in pairs(titlebar_cache) do
         for _, entry in pairs(screen_cache) do
             for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
