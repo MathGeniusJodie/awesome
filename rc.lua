@@ -17,8 +17,6 @@ require("awful.autofocus")
 local wibox     = require("wibox")
 local beautiful = require("beautiful")
 local naughty   = require("naughty")
-local menubar   = require("menubar")
-local icons     = require("splitwm.icons")
 local hotkeys_popup = require("awful.hotkeys_popup")
 require("awful.hotkeys_popup.keys")
 
@@ -96,6 +94,8 @@ package.path = config_dir .. "?.lua;"
             .. package.path
 
 local splitwm = require("splitwm")
+local menu    = require("menu")
+local status  = require("status")
 
 ---------------------------------------------------------------------------
 -- Variables
@@ -108,13 +108,6 @@ local modkey   = "Mod4"
 -- Browser detection: try common browsers
 local browser = os.getenv("BROWSER") or "xdg-open http://"
 local filemanager = os.getenv("FILEMANAGER") or "thunar"
-
----------------------------------------------------------------------------
--- Freedesktop app menu (auto-generated from .desktop files)
----------------------------------------------------------------------------
-
-local menubar_utils = require("menubar.utils")
-local menu_gen      = require("menubar.menu_gen")
 
 ---------------------------------------------------------------------------
 -- App launchers shown in splits (icon with text fallback)
@@ -142,171 +135,14 @@ splitwm.launchers = {
     },
 }
 
--- Build the app menu asynchronously from .desktop files
--- We start with a placeholder and replace it once generation completes.
-local app_menu = awful.menu {
-    items = {
-        { "Loading apps...", nil },
-    },
-    theme = { width = 200, height = 24 },
-}
-
-menu_gen.generate(function(entries)
-    -- Group entries by category
-    local categories = {}
-    local cat_names  = {}
-    for _, entry in ipairs(entries) do
-        local cat = entry.category or "Other"
-        if not categories[cat] then
-            categories[cat] = {}
-            table.insert(cat_names, cat)
-        end
-        table.insert(categories[cat], {
-            entry.name,
-            entry.cmdline,
-            entry.icon,
-        })
-    end
-    table.sort(cat_names)
-
-    -- Build menu items with category submenus
-    local menu_items = {}
-    for _, cat in ipairs(cat_names) do
-        -- Sort apps within each category
-        table.sort(categories[cat], function(a, b)
-            return (a[1] or "") < (b[1] or "")
-        end)
-        -- Look up category icon
-        local cat_icon_names = {
-            Utility     = "applications-utilities",
-            Development = "applications-development",
-            Education   = "applications-science",
-            Game        = "applications-games",
-            Graphics    = "applications-graphics",
-            Network     = "applications-internet",
-            AudioVideo  = "applications-multimedia",
-            Office      = "applications-office",
-            Settings    = "preferences-desktop",
-            System      = "applications-system",
-        }
-        local cat_icon = menubar_utils.lookup_icon(cat_icon_names[cat] or "applications-other")
-        if cat_icon == false then cat_icon = nil end
-        table.insert(menu_items, { cat, categories[cat], cat_icon })
-    end
-
-    -- Add extras at the bottom
-    table.insert(menu_items, { "─────────────" })
-    table.insert(menu_items, { "Run...", function()
-        awful.screen.focused().mypromptbox:run()
-    end })
-
-    -- NOW the icon theme is ready — resolve launcher icons
-    for _, launcher in ipairs(splitwm.launchers) do
-        if not launcher.icon then
-            -- Try primary icon_name, then fallbacks
-            local names = launcher.icon_names or {}
-            if launcher.icon_name then
-                table.insert(names, 1, launcher.icon_name)
-            end
-            for _, name in ipairs(names) do
-                local path = menubar_utils.lookup_icon(name)
-                if path and path ~= false and type(path) == "string" then
-                    launcher.icon = path
-                    break
-                end
-            end
-        end
-    end
-
-    -- Prepend quick-launch items at the top (icons now resolved above)
-    local function launcher_icon(cmd)
-        for _, l in ipairs(splitwm.launchers) do
-            if l.cmd == cmd then return l.icon end
-        end
-    end
-    local quick_items = {
-        { "Terminal",     function() awful.spawn(terminal)     end, launcher_icon(terminal)     },
-        { "Browser",      function() awful.spawn(browser)      end, launcher_icon(browser)      },
-        { "File Manager", function() awful.spawn(filemanager)  end, launcher_icon(filemanager)  },
-        { "─────────────" },
-    }
-    for i = #quick_items, 1, -1 do
-        table.insert(menu_items, 1, quick_items[i])
-    end
-
-    -- Replace the placeholder menu
-    app_menu = awful.menu {
-        items = menu_items,
-        theme = { width = 200, height = 24 },
-    }
-
-    -- Flush render caches so overlays and titlebars rebuild with the new icons
-    splitwm.flush_caches()
-    local s = awful.screen.focused()
-    if s then awful.layout.arrange(s) end
-end)
-
--- Close menu on any client focus change
-client.connect_signal("focus", function()
-    app_menu:hide()
-end)
-
--- Close menu when clicking anywhere on root window
-root.buttons(gears.table.join(
-    awful.button({}, 1, function() app_menu:hide() end),
-    awful.button({}, 3, function() app_menu:hide() end)
-))
-
--- Close menu when clicking empty split overlays
-splitwm.on_background_click = function()
-    app_menu:hide()
-end
-
--- Poll: close the menu if the user clicks outside it.
--- `ready` stays false until all buttons are released after opening, so the
--- opening click itself doesn't immediately re-close the menu.
-local menu_poll_timer
-do
-    local ready = false
-    menu_poll_timer = gears.timer {
-        timeout   = 0.05,
-        autostart = false,
-        callback  = function()
-            if not (app_menu.wibox and app_menu.wibox.visible) then
-                ready = false
-                menu_poll_timer:stop()
-                return
-            end
-
-            local m       = mouse.coords()
-            local pressed = (m.buttons[1] or m.buttons[3]) and true or false
-
-            -- Wait for all buttons to be released before arming
-            if not ready then
-                if not pressed then ready = true end
-                return
-            end
-
-            if pressed then
-                local function inside(menu)
-                    if not (menu and menu.wibox and menu.wibox.visible) then return false end
-                    local g = menu.wibox:geometry()
-                    if m.x >= g.x and m.x <= g.x + g.width
-                       and m.y >= g.y and m.y <= g.y + g.height then return true end
-                    return menu.active_child and inside(menu.active_child) or false
-                end
-                if not inside(app_menu) then app_menu:hide() end
-            end
-        end,
-    }
-end
-
-splitwm.on_menu_request = function()
-    app_menu:toggle()
-    menu_poll_timer:start()
-end
-
 splitwm.setup()
+
+menu.setup({
+    terminal    = terminal,
+    browser     = browser,
+    filemanager = filemanager,
+    splitwm     = splitwm,
+})
 
 ---------------------------------------------------------------------------
 -- Layouts — splitwm is the default (and only one you need, really)
@@ -325,109 +161,6 @@ awful.layout.layouts = {
 beautiful.font           = "monospace bold 12"
 beautiful.fg_normal      = "#ffffff"
 beautiful.fg_focus       = "#ffffff"
-
----------------------------------------------------------------------------
--- Status widgets: battery + volume + chip (cpu/ram/swap)
----------------------------------------------------------------------------
-
-local battery_widgets = {}
-local volume_widgets  = {}
-local chip_widgets    = {}
-
-local function refresh_battery()
-    -- Synchronous io.open is intentional: sysfs files are kernel virtual
-    -- files with no disk I/O. Spawning a subprocess would be heavier.
-    for _, name in ipairs({ "BAT0", "BAT1", "BAT" }) do
-        local fc = io.open("/sys/class/power_supply/" .. name .. "/capacity", "r")
-        if fc then
-            local cap = tonumber(fc:read("*l")); fc:close()
-            -- Skip phantom batteries that exist in sysfs but report no capacity
-            if not cap then goto continue end
-            local fs = io.open("/sys/class/power_supply/" .. name .. "/status", "r")
-            local status = fs and fs:read("*l") or ""
-            if fs then fs:close() end
-            for _, w in ipairs(battery_widgets) do
-                w.percentage = cap
-                w.charging   = (status == "Charging")
-                w:emit_signal("widget::redraw_needed")
-            end
-            return
-        end
-        ::continue::
-    end
-end
-
-local function refresh_volume()
-    awful.spawn.easy_async_with_shell(
-        "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null; pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null",
-        function(out)
-            local muted = out:match("Mute: yes") ~= nil
-            local vol   = tonumber(out:match("(%d+)%%")) or 0
-            for _, w in ipairs(volume_widgets) do
-                w.volume = vol
-                w.muted  = muted
-                w:emit_signal("widget::redraw_needed")
-            end
-        end
-    )
-end
-
--- prev_cpu_idle/total for delta calculation
-local _cpu_prev_idle, _cpu_prev_total = 0, 0
-
-local function refresh_chip()
-    -- Synchronous io.open is intentional: /proc/stat and /proc/meminfo are
-    -- kernel virtual files with no disk I/O. Spawning subprocesses would be heavier.
-    -- CPU: read /proc/stat
-    local f = io.open("/proc/stat", "r")
-    local cpu_pct = 0
-    if f then
-        local line = f:read("*l"); f:close()
-        local vals = {}
-        for v in line:gmatch("%d+") do vals[#vals+1] = tonumber(v) end
-        local idle  = (vals[4] or 0) + (vals[5] or 0)
-        local total = 0
-        for _, v in ipairs(vals) do total = total + v end
-        local d_idle  = idle  - _cpu_prev_idle
-        local d_total = total - _cpu_prev_total
-        if d_total > 0 then
-            cpu_pct = 1 - d_idle / d_total
-        end
-        _cpu_prev_idle, _cpu_prev_total = idle, total
-    end
-
-    -- RAM + swap: read /proc/meminfo
-    local ram_pct, swap_pct = 0, 0
-    local mf = io.open("/proc/meminfo", "r")
-    if mf then
-        local mem = {}
-        for line in mf:lines() do
-            local k, v = line:match("^(%w+):%s+(%d+)")
-            if k then mem[k] = tonumber(v) end
-        end
-        mf:close()
-        local total_mem = mem["MemTotal"] or 1
-        local avail_mem = mem["MemAvailable"] or total_mem
-        ram_pct = 1 - avail_mem / total_mem
-
-        local swap_total = mem["SwapTotal"] or 0
-        local swap_free  = mem["SwapFree"]  or swap_total
-        if swap_total > 0 then
-            swap_pct = 1 - swap_free / swap_total
-        end
-    end
-
-    for _, w in ipairs(chip_widgets) do
-        w.cpu  = cpu_pct
-        w.ram  = ram_pct
-        w.swap = swap_pct
-        w:emit_signal("widget::redraw_needed")
-    end
-end
-
-gears.timer { timeout = 30, autostart = true, call_now = true, callback = refresh_battery }
-gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_volume }
-gears.timer { timeout = 2,  autostart = true, call_now = true, callback = refresh_chip }
 
 local bar_margin     = 3
 local capsule_height = 24
@@ -564,14 +297,9 @@ awful.screen.connect_for_each_screen(function(s)
     local myclock = wibox.widget.textclock("%I:%M %p")
     myclock.font = "monospace bold 12"
 
-    local bat_widget = icons.battery_widget()
-    table.insert(battery_widgets, bat_widget)
-
-    local vol_widget = icons.volume_widget()
-    table.insert(volume_widgets, vol_widget)
-
-    local chip_widget = icons.chip_widget()
-    table.insert(chip_widgets, chip_widget)
+    local bat_widget  = status.new_battery_widget()
+    local vol_widget  = status.new_volume_widget()
+    local chip_widget = status.new_chip_widget()
 
     -- Capsule helper: wraps widget(s) in a black pill-shaped background
     local function capsule(inner, pad_l, pad_r)
@@ -724,15 +452,15 @@ local globalkeys = gears.table.join(
     ---------------------------------------------------------------------------
 
     awful.key({}, "XF86AudioRaiseVolume", function()
-        awful.spawn.easy_async("pactl set-sink-volume @DEFAULT_SINK@ +5%", refresh_volume)
+        awful.spawn.easy_async("pactl set-sink-volume @DEFAULT_SINK@ +5%", status.refresh_volume)
     end, { description = "raise volume", group = "media" }),
 
     awful.key({}, "XF86AudioLowerVolume", function()
-        awful.spawn.easy_async("pactl set-sink-volume @DEFAULT_SINK@ -5%", refresh_volume)
+        awful.spawn.easy_async("pactl set-sink-volume @DEFAULT_SINK@ -5%", status.refresh_volume)
     end, { description = "lower volume", group = "media" }),
 
     awful.key({}, "XF86AudioMute", function()
-        awful.spawn.easy_async("pactl set-sink-mute @DEFAULT_SINK@ toggle", refresh_volume)
+        awful.spawn.easy_async("pactl set-sink-mute @DEFAULT_SINK@ toggle", status.refresh_volume)
     end, { description = "toggle mute", group = "media" })
 )
 

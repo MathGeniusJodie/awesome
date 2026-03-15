@@ -11,6 +11,8 @@ local gears     = require("gears")
 local wibox     = require("wibox")
 local beautiful = require("beautiful")
 local icons     = require("splitwm.icons")
+local tree      = require("splitwm.tree")
+local colors    = require("splitwm.colors")
 
 local splitwm = {}
 
@@ -24,68 +26,6 @@ splitwm.launchers = {}  -- set from rc.lua before calling setup()
 
 local picked_up_client = nil
 local picked_up_split  = nil
-
----------------------------------------------------------------------------
--- Per-window color system
----------------------------------------------------------------------------
-
-local COLORS = {
-    { name = "pink",    light = "#eda2b9", dark = "#9e5a70" },
-    { name = "orange",  light = "#efa78e", dark = "#9f5e47" },
-    { name = "gold",    light = "#dbb575", dark = "#8e6b2b" },
-    { name = "green",   light = "#b3c480", dark = "#6b7a38" },
-    { name = "emerald", light = "#85cea7", dark = "#39825f" },
-    { name = "cyan",    light = "#6ccdd3", dark = "#078287" },
-    { name = "blue",    light = "#83c3f1", dark = "#3879a2" },
-    { name = "violet",  light = "#afb5f6", dark = "#676ba7" },
-    { name = "purple",  light = "#d6a8e0", dark = "#8a6093" },
-}
-
-local COLORS_BY_NAME = {}
-for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
-
-local function get_client_color(c)
-    if not c.valid then return nil end
-    local name = c:get_xproperty("splitwm_color")
-    return name and COLORS_BY_NAME[name]
-end
-
-local function set_client_color(c, name)
-    if c.valid then c:set_xproperty("splitwm_color", name) end
-end
-
-local function pick_color_for_leaf(leaf, exclude_c)
-    local used = {}
-    for _, tc in ipairs(leaf.tabs) do
-        if tc ~= exclude_c and tc.valid then
-            local col = get_client_color(tc)
-            if col then used[col.name] = true end
-        end
-    end
-    for _, col in ipairs(COLORS) do
-        if not used[col.name] then return col end
-    end
-    return COLORS[1]
-end
-
-local function assign_color(leaf, c)
-    set_client_color(c, pick_color_for_leaf(leaf, c).name)
-end
-
-local function resolve_color_conflict(leaf, c)
-    if not c.valid then return end
-    local existing = get_client_color(c)
-    if not existing then assign_color(leaf, c); return end
-    for _, tc in ipairs(leaf.tabs) do
-        if tc ~= c and tc.valid then
-            local col = get_client_color(tc)
-            if col and col.name == existing.name then
-                assign_color(leaf, c)
-                return
-            end
-        end
-    end
-end
 
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
@@ -207,132 +147,6 @@ local function draw_tab_border(cr, w, h)
 end
 
 ---------------------------------------------------------------------------
--- Split node data model
----------------------------------------------------------------------------
-
-local next_id = 1
-local function gen_id()
-    local id = next_id
-    next_id = next_id + 1
-    return id
-end
-
-local function make_leaf()
-    return {
-        type = "leaf",
-        id   = gen_id(),
-        tabs = {},
-        active_tab = 0,
-    }
-end
-
-local function make_branch(direction, ratio, child_a, child_b)
-    return {
-        type      = "branch",
-        direction = direction,
-        ratio     = ratio or 0.5,
-        children  = { child_a, child_b },
-    }
-end
-
----------------------------------------------------------------------------
--- Tree traversal helpers
----------------------------------------------------------------------------
-
-local function collect_leaves(node, out)
-    out = out or {}
-    if node.type == "leaf" then
-        table.insert(out, node)
-    else
-        collect_leaves(node.children[1], out)
-        collect_leaves(node.children[2], out)
-    end
-    return out
-end
-
-local function find_leaf_for_client(node, c)
-    if node.type == "leaf" then
-        for _, tab_c in ipairs(node.tabs) do
-            if tab_c == c then return node end
-        end
-        return nil
-    else
-        return find_leaf_for_client(node.children[1], c)
-            or find_leaf_for_client(node.children[2], c)
-    end
-end
-
-local function find_leaf_by_id(node, id)
-    if node.type == "leaf" then
-        return node.id == id and node or nil
-    else
-        return find_leaf_by_id(node.children[1], id)
-            or find_leaf_by_id(node.children[2], id)
-    end
-end
-
-local function find_parent(root, target)
-    if root.type == "leaf" then return nil, nil end
-    for i, child in ipairs(root.children) do
-        if child == target then return root, i end
-        local p, idx = find_parent(child, target)
-        if p then return p, idx end
-    end
-    return nil, nil
-end
-
-local function find_focused_leaf(root, focused_client)
-    if focused_client then
-        local leaf = find_leaf_for_client(root, focused_client)
-        if leaf then return leaf end
-    end
-    local leaves = collect_leaves(root)
-    return leaves[1]
-end
-
----------------------------------------------------------------------------
--- Geometry computation
----------------------------------------------------------------------------
-
-local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above)
-    if node.type == "leaf" then
-        if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
-        if bounds ~= nil then node.v_bound_above = v_bound_above end
-        return
-    end
-    local dir, ratio, inner = node.direction, node.ratio, gap
-    if dir == "h" then
-        local usable = w - inner
-        local w1 = math.floor(usable * ratio)
-        if bounds then
-            table.insert(bounds, { branch = node, dir = "h", pos = x + w1 + math.floor(inner / 2),
-                start = y, span = h, parent_x = x, parent_w = w, parent_gap = inner })
-        end
-        compute_tree_inner(node.children[1], x,          y, w1,        h, gap, geos, bounds, v_bound_above)
-        compute_tree_inner(node.children[2], x+w1+inner, y, usable-w1, h, gap, geos, bounds, v_bound_above)
-    else
-        local usable = h - inner
-        local h1 = math.floor(usable * ratio)
-        local bnd
-        if bounds then
-            bnd = { branch = node, dir = "v", pos = y + h1 + math.floor(inner / 2),
-                start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner }
-            table.insert(bounds, bnd)
-        end
-        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds, v_bound_above)
-        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, bnd)
-    end
-end
-
-local function compute_tree(node, x, y, w, h, gap, geos, bounds)
-    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil)
-end
-
-local function compute_geometries(node, x, y, w, h, gap)
-    local geos = {}; compute_tree(node, x, y, w, h, gap, geos, nil); return geos
-end
-
----------------------------------------------------------------------------
 -- Per-tag state
 ---------------------------------------------------------------------------
 
@@ -340,7 +154,7 @@ local tag_state = setmetatable({}, { __mode = "k" })
 
 local function get_state(t)
     if not tag_state[t] then
-        local root = make_leaf()
+        local root = tree.make_leaf()
         tag_state[t] = { root = root, focused_leaf_id = root.id }
     end
     return tag_state[t]
@@ -352,15 +166,15 @@ end
 
 local function pin_client(t, c)
     local state = get_state(t)
-    local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
-    if not leaf then leaf = collect_leaves(state.root)[1] end
+    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+    if not leaf then leaf = tree.collect_leaves(state.root)[1] end
     for _, tc in ipairs(leaf.tabs) do if tc == c then return end end
     table.insert(leaf.tabs, c)
     leaf.active_tab = #leaf.tabs
 end
 
 local function unpin_client(root, c)
-    local leaf = find_leaf_for_client(root, c)
+    local leaf = tree.find_leaf_for_client(root, c)
     if not leaf then return end
     for i, tc in ipairs(leaf.tabs) do
         if tc == c then
@@ -380,8 +194,8 @@ local function move_client_to_leaf(root, c, target_leaf)
 end
 
 local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
-    local leaf_a = find_leaf_by_id(state.root, leaf_a_id)
-    local leaf_b = find_leaf_by_id(state.root, leaf_b_id)
+    local leaf_a = tree.find_leaf_by_id(state.root, leaf_a_id)
+    local leaf_b = tree.find_leaf_by_id(state.root, leaf_b_id)
     if not leaf_a or not leaf_b then return end
     leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
     leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
@@ -393,7 +207,7 @@ local function try_drop_picked_up(t, leaf_id)
     if not picked_up_client then return false end
     if not picked_up_client.client.valid then picked_up_client = nil; return false end
     local state = get_state(t)
-    local target = find_leaf_by_id(state.root, leaf_id)
+    local target = tree.find_leaf_by_id(state.root, leaf_id)
     if not target then picked_up_client = nil; return false end
 
     local c = picked_up_client.client
@@ -408,7 +222,7 @@ local function try_drop_picked_up(t, leaf_id)
     move_client_to_leaf(state.root, c, target)
     state.focused_leaf_id = leaf_id
     picked_up_client = nil
-    resolve_color_conflict(target, c)
+    colors.resolve_color_conflict(target, c)
 
     if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
     return true
@@ -420,13 +234,13 @@ end
 
 local function split_leaf(t, direction)
     local state = get_state(t)
-    local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
     if not leaf then return false end
 
-    local child_a = make_leaf()
+    local child_a = tree.make_leaf()
     child_a.tabs = leaf.tabs
     child_a.active_tab = leaf.active_tab
-    local child_b = make_leaf()
+    local child_b = tree.make_leaf()
 
     leaf.type = "branch"
     leaf.direction = direction
@@ -439,12 +253,12 @@ end
 
 local function close_leaf(t, leaf_id)
     local state = get_state(t)
-    local leaf = find_leaf_by_id(state.root, leaf_id)
+    local leaf = tree.find_leaf_by_id(state.root, leaf_id)
     if not leaf then return false end
-    local leaves = collect_leaves(state.root)
+    local leaves = tree.collect_leaves(state.root)
     if #leaves <= 1 then return false end
 
-    local parent, idx = find_parent(state.root, leaf)
+    local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
 
     local sibling_idx = idx == 1 and 2 or 1
@@ -458,15 +272,15 @@ local function close_leaf(t, leaf_id)
     parent.active_tab = sibling.active_tab
     parent.id = sibling.id
 
-    local new_leaves = collect_leaves(parent)
+    local new_leaves = tree.collect_leaves(parent)
     if new_leaves[1] then state.focused_leaf_id = new_leaves[1].id end
 end
 
 local function resize_focused(t, delta)
     local state = get_state(t)
-    local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
     if not leaf then return false end
-    local parent, idx = find_parent(state.root, leaf)
+    local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
     local new_ratio = parent.ratio
     if idx == 1 then new_ratio = new_ratio + delta else new_ratio = new_ratio - delta end
@@ -479,13 +293,13 @@ end
 
 local function cycle_tab(t, offset)
     local state = get_state(t)
-    local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
     if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
 end
 
 local function adjacent_leaf(state, leaf_id, dir)
-    local leaves = collect_leaves(state.root)
+    local leaves = tree.collect_leaves(state.root)
     if #leaves < 2 then return nil end
     local cur_idx
     for i, l in ipairs(leaves) do if l.id == leaf_id then cur_idx = i; break end end
@@ -498,7 +312,7 @@ end
 
 local function move_tab_to_direction(t, dir)
     local state = get_state(t)
-    local src_leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
+    local src_leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
     if not src_leaf or #src_leaf.tabs == 0 then return false end
     local dst_leaf = adjacent_leaf(state, src_leaf.id, dir)
     if not dst_leaf then return false end
@@ -508,7 +322,7 @@ local function move_tab_to_direction(t, dir)
     if src_leaf.active_tab > #src_leaf.tabs then src_leaf.active_tab = math.max(0, #src_leaf.tabs) end
     table.insert(dst_leaf.tabs, c)
     dst_leaf.active_tab = #dst_leaf.tabs
-    resolve_color_conflict(dst_leaf, c)
+    colors.resolve_color_conflict(dst_leaf, c)
 end
 
 local function focus_direction(t, dir)
@@ -532,18 +346,18 @@ local function arrange(p)
 
     local root = state.root
     local pinned = {}
-    for _, leaf in ipairs(collect_leaves(root)) do
+    for _, leaf in ipairs(tree.collect_leaves(root)) do
         for _, tc in ipairs(leaf.tabs) do pinned[tc] = true end
     end
     for _, c in ipairs(cls) do
         if not pinned[c] then pin_client(tag, c) end
     end
 
-    local geos = compute_geometries(root, wa.x, wa.y, wa.width, wa.height, gap)
+    local geos = tree.compute_geometries(root, wa.x, wa.y, wa.width, wa.height, gap)
     local bw   = beautiful.splitwm_focus_border_width or 2
     local tb_h = math.max(TITLEBAR_HEIGHT, gap)
 
-    for _, leaf in ipairs(collect_leaves(root)) do
+    for _, leaf in ipairs(tree.collect_leaves(root)) do
         local new_tabs = {}
         for _, tc in ipairs(leaf.tabs) do
             if tc.valid then table.insert(new_tabs, tc) end
@@ -650,7 +464,7 @@ local function update_overlays(s, t, state, geos)
     if not overlay_cache[s] then overlay_cache[s] = {} end
 
     local needed, alive = {}, {}
-    for _, leaf in ipairs(collect_leaves(state.root)) do
+    for _, leaf in ipairs(tree.collect_leaves(state.root)) do
         alive[leaf.id] = true
         if #leaf.tabs == 0 then needed[leaf.id] = leaf end
     end
@@ -759,7 +573,7 @@ local function update_titlebars(s, t, state, geos)
     local alive    = {}
     local BTN_SPACING = 5
 
-    for _, leaf in ipairs(collect_leaves(state.root)) do
+    for _, leaf in ipairs(tree.collect_leaves(state.root)) do
         alive[leaf.id] = true
         if #leaf.tabs > 0 then
             local geo = geos[leaf.id]
@@ -812,7 +626,7 @@ local function update_titlebars(s, t, state, geos)
 
                     local is_focused    = state.focused_leaf_id == leaf.id
                     local active_client = leaf.tabs[leaf.active_tab]
-                    local active_color  = active_client and get_client_color(active_client)
+                    local active_color  = active_client and colors.get_client_color(active_client)
                     local focus_color   = active_color and active_color.light or beautiful.splitwm_focus_border or "#7799dd"
                     local widget_bc     = is_focused and focus_color or "#00000000"
 
@@ -910,7 +724,7 @@ local function update_titlebars(s, t, state, geos)
                             close_btn:buttons(gears.table.join(awful.button({}, 1, function() tab_client:kill() end)))
                         end
 
-                        local client_color = get_client_color(tc)
+                        local client_color = colors.get_client_color(tc)
                         local tab_bg = is_picked and "#445566"
                             or (client_color and client_color.dark
                                 or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
@@ -1133,7 +947,7 @@ local function update_titlebars(s, t, state, geos)
     end
 
     for leaf_id, entry in pairs(titlebar_cache[s]) do
-        local leaf = find_leaf_by_id(state.root, leaf_id)
+        local leaf = tree.find_leaf_by_id(state.root, leaf_id)
         if not alive[leaf_id] or (leaf and #leaf.tabs == 0) then
             entry.wb.visible = false
             if not alive[leaf_id] then titlebar_cache[s][leaf_id] = nil end
@@ -1147,7 +961,7 @@ end
 
 local function update_focus_border(s, state, geos, gap)
     local sides = get_focus_border(s)
-    local leaf = find_leaf_by_id(state.root, state.focused_leaf_id)
+    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
     local geo  = leaf and geos[leaf.id]
     if not geo then
         for _, wb in ipairs(sides) do wb.visible = false end
@@ -1241,7 +1055,7 @@ local function update_ui(s)
     local gap    = beautiful.splitwm_gap or 16
     local geos   = {}
     local bounds = {}
-    compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
+    tree.compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
 
     update_overlays(s, t, state, geos)
     update_titlebars(s, t, state, geos)
@@ -1305,9 +1119,9 @@ function splitwm.setup()
         local t = c.first_tag
         if not t then return end
         local state = get_state(t)
-        if not find_leaf_for_client(state.root, c) then pin_client(t, c) end
-        local leaf = find_leaf_for_client(state.root, c)
-        if leaf then resolve_color_conflict(leaf, c) end
+        if not tree.find_leaf_for_client(state.root, c) then pin_client(t, c) end
+        local leaf = tree.find_leaf_for_client(state.root, c)
+        if leaf then colors.resolve_color_conflict(leaf, c) end
     end)
 
     client.connect_signal("unmanage", function(c)
@@ -1319,7 +1133,7 @@ function splitwm.setup()
         if not t then return end
         local state = tag_state[t]
         if not state then return end
-        local leaf = find_leaf_for_client(state.root, c)
+        local leaf = tree.find_leaf_for_client(state.root, c)
         if leaf and leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
             awful.layout.arrange(c.screen)
@@ -1332,7 +1146,7 @@ function splitwm.setup()
         local state = tag_state[t]
         if not state then return end
         if picked_up_split then
-            local target_leaf = find_leaf_for_client(state.root, c)
+            local target_leaf = tree.find_leaf_for_client(state.root, c)
             if target_leaf and target_leaf.id ~= picked_up_split then
                 swap_split_tabs(state, picked_up_split, target_leaf.id)
                 state.focused_leaf_id = target_leaf.id
@@ -1341,10 +1155,10 @@ function splitwm.setup()
             end
         end
         if picked_up_client and picked_up_client.client.valid and picked_up_client.client ~= c then
-            local target_leaf = find_leaf_for_client(state.root, c)
+            local target_leaf = tree.find_leaf_for_client(state.root, c)
             if target_leaf then try_drop_picked_up(t, target_leaf.id); awful.layout.arrange(c.screen); return end
         end
-        local leaf = find_leaf_for_client(state.root, c)
+        local leaf = tree.find_leaf_for_client(state.root, c)
         if leaf and leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
             awful.layout.arrange(c.screen)
@@ -1370,6 +1184,6 @@ function splitwm.flush_caches()
 end
 
 splitwm.get_state = get_state
-splitwm.collect_leaves = collect_leaves
+splitwm.collect_leaves = tree.collect_leaves
 
 return splitwm
