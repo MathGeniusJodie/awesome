@@ -37,23 +37,22 @@ end
 -- Tree traversal helpers
 ---------------------------------------------------------------------------
 
-function tree.collect_leaves(node, out)
-    out = out or {}
-    if node.type == "leaf" then
-        table.insert(out, node)
-    else
-        tree.collect_leaves(node.children[1], out)
-        tree.collect_leaves(node.children[2], out)
-    end
+local function traverse(node, fn)
+    if node.type == "leaf" then fn(node)
+    else traverse(node.children[1], fn); traverse(node.children[2], fn) end
+end
+
+function tree.collect_leaves(node)
+    local out = {}
+    traverse(node, function(leaf) table.insert(out, leaf) end)
     return out
 end
 
 function tree.find_leaf_for_client(node, c)
     if node.type == "leaf" then
-        for _, tab_c in ipairs(node.tabs) do
-            if tab_c == c then return node end
+        for _, tc in ipairs(node.tabs) do
+            if tc == c then return node end
         end
-        return nil
     else
         return tree.find_leaf_for_client(node.children[1], c)
             or tree.find_leaf_for_client(node.children[2], c)

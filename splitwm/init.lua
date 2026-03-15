@@ -38,7 +38,6 @@ local pickup = {
 }
 function pickup:reset()           self.client = nil; self.client_tag = nil; self.split = nil end
 function pickup:reset_client()    self.client = nil; self.client_tag = nil end
-function pickup:reset_split()     self.split = nil end
 function pickup:pick_client(c, t) self:reset(); self.client = c; self.client_tag = t end
 function pickup:pick_split(id)    self:reset(); self.split = id end
 
@@ -183,10 +182,6 @@ local function get_leaf_from_client(c)
     return tree.find_leaf_for_client(state.root, c), state, t
 end
 
--- Clamps leaf.active_tab into [0, #leaf.tabs].
-local function clamp_active_tab(leaf)
-    leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
-end
 
 ---------------------------------------------------------------------------
 -- Client management
@@ -210,7 +205,7 @@ local function unpin_client(root, c)
             if i < leaf.active_tab then
                 leaf.active_tab = leaf.active_tab - 1
             else
-                clamp_active_tab(leaf)
+                leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
             end
             return
         end
@@ -230,8 +225,8 @@ local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
     if not leaf_a or not leaf_b then return end
     leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
     leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
-    clamp_active_tab(leaf_a)
-    clamp_active_tab(leaf_b)
+    leaf_a.active_tab = math.min(leaf_a.active_tab, #leaf_a.tabs)
+    leaf_b.active_tab = math.min(leaf_b.active_tab, #leaf_b.tabs)
 end
 
 -- Called when pickup.split is active: swaps tabs if different leaf, then always resets and arranges.
@@ -240,7 +235,7 @@ local function handle_split_pickup(state, leaf_id, s)
         swap_split_tabs(state, pickup.split, leaf_id)
         state.focused_leaf_id = leaf_id
     end
-    pickup:reset_split()
+    pickup.split = nil
     awful.layout.arrange(s)
 end
 
@@ -302,7 +297,7 @@ local function close_leaf(t, leaf_id)
     local state = get_state(t)
     local leaf = state.leaf_map[leaf_id]
     if not leaf then return false end
-    if pickup.split == leaf_id then pickup:reset_split() end
+    if pickup.split == leaf_id then pickup.split = nil end
     if pickup.client and pickup.client.valid and tree.find_leaf_for_client(state.root, pickup.client) == leaf then
         pickup:reset_client()
     end
@@ -470,7 +465,7 @@ local function arrange(p)
             if tc.valid then table.insert(new_tabs, tc) end
         end
         leaf.tabs = new_tabs
-        clamp_active_tab(leaf)
+        leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
 
         local geo = geos[leaf.id]
         if geo then
@@ -797,12 +792,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     end
 
     local client_color = colors.get_client_color(tc)
-    local tab_bg
-    if    is_picked     then tab_bg = "#445566"
-    elseif client_color then tab_bg = client_color.dark
-    elseif is_active    then tab_bg = beautiful.splitwm_tab_active_bg or "#535d6c"
-    else                     tab_bg = beautiful.splitwm_inactive_bg   or "#00000080"
-    end
+    local tab_bg = is_picked and "#445566"
+        or (client_color and client_color.dark)
+        or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c"))
+        or beautiful.splitwm_inactive_bg or "#00000080"
     local tab_bg_pat   = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
 
@@ -880,7 +873,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
     entry.swap_btn_picked = is_split_picked
     swap_btn:buttons(gears.table.join(awful.button({}, 1, function()
         if pickup.split == leaf.id then
-            pickup:reset_split()
+            pickup.split = nil
         elseif pickup.split then
             handle_split_pickup(ctx.state, leaf.id, ctx.s); return
         else
@@ -1117,13 +1110,21 @@ end
 -- Unified UI update
 ---------------------------------------------------------------------------
 
+local function hide_cache(cache, wb_key)
+    if not cache then return end
+    for _, v in pairs(cache) do
+        local obj = wb_key and v[wb_key] or v
+        obj.visible = false
+    end
+end
+
 local function update_ui(s)
     local t, state = get_active_state(s)
     if not t then
         local pool = drag_handle_pool[s]
         if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
-        if overlay_cache[s]  then for _, wb    in pairs(overlay_cache[s])  do wb.visible = false    end end
-        if titlebar_cache[s] then for _, entry in pairs(titlebar_cache[s]) do entry.wb.visible = false end end
+        hide_cache(overlay_cache[s])
+        hide_cache(titlebar_cache[s], "wb")
         return
     end
 
@@ -1238,7 +1239,7 @@ function splitwm.setup()
         if type(s) == "number" then s = screen[s] end
         -- Splits are tag-local; cancel any pending swap so the leaf ID
         -- doesn't silently fail to resolve on the newly selected tag.
-        pickup:reset_split()
+        pickup.split = nil
         if s then geo_cache[s] = nil; gears.timer.delayed_call(function() update_ui(s) end) end
     end)
 end

@@ -116,13 +116,11 @@ local filemanager = os.getenv("FILEMANAGER") or "thunar"
 splitwm.launchers = {
     {
         label      = "$",
-        icon_name  = "utilities-terminal",
         icon_names = {"utilities-terminal", "terminal", "xterm", "org.xfce.terminal"},
         cmd        = terminal,
     },
     {
         label      = "B",
-        icon_name  = "internet-web-browser",
         icon_names = {"internet-web-browser", "web-browser", "firefox", "firefox-esr",
                       "librewolf", "brave-browser", "chromium", "google-chrome"},
         cmd        = browser,
