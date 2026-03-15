@@ -17,24 +17,23 @@ for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
 
 -- Lua-side cache to avoid repeated X11 xproperty reads.
 -- Weak keys so entries are evicted automatically when clients are GC'd.
-local color_cache  = setmetatable({}, { __mode = "k" })
-local NO_COLOR     = {}  -- sentinel: client has no color set
+-- Boxes ({value}) distinguish "not cached" (nil) from "cached nil" ({nil}).
+local color_cache = setmetatable({}, { __mode = "k" })
 
 function colors.get_client_color(c)
     if not c.valid then return nil end
-    local cached = color_cache[c]
-    if cached == NO_COLOR then return nil end
-    if cached then return cached end
+    local box = color_cache[c]
+    if box ~= nil then return box[1] end
     local name = c:get_xproperty("splitwm_color")
     local result = name and COLORS_BY_NAME[name]
-    color_cache[c] = result or NO_COLOR
+    color_cache[c] = { result }
     return result
 end
 
 local function set_client_color(c, name)
     if not c.valid then return end
     c:set_xproperty("splitwm_color", name)
-    color_cache[c] = COLORS_BY_NAME[name] or NO_COLOR
+    color_cache[c] = { COLORS_BY_NAME[name] }
 end
 
 local function pick_color_for_leaf(leaf, exclude_c)
