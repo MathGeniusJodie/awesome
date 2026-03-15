@@ -22,6 +22,7 @@ local TITLEBAR_HEIGHT = 33
 splitwm.launchers = {}  -- set from rc.lua before calling setup()
 
 local picked_up_client = nil
+local picked_up_split  = nil
 
 ---------------------------------------------------------------------------
 -- Per-window color system
@@ -232,6 +233,14 @@ local function icon_close(cr, w, h)
     cr:move_to(cx+s, cy-s); cr:line_to(cx-s, cy+s); cr:stroke()
 end
 
+local function icon_swap(cr, w, h)
+    local cx, cy, s, ay = w/2, h/2, 4, 3
+    cr:move_to(cx - s, cy - ay); cr:line_to(cx + s, cy - ay); cr:stroke()
+    cr:move_to(cx + s - 3, cy - ay - 2); cr:line_to(cx + s, cy - ay); cr:line_to(cx + s - 3, cy - ay + 2); cr:stroke()
+    cr:move_to(cx + s, cy + ay); cr:line_to(cx - s, cy + ay); cr:stroke()
+    cr:move_to(cx - s + 3, cy + ay - 2); cr:line_to(cx - s, cy + ay); cr:line_to(cx - s + 3, cy + ay + 2); cr:stroke()
+end
+
 local function draw_tab_border(cr, w, h)
     local r   = 6
     local pad = 1
@@ -413,6 +422,16 @@ local function move_client_to_leaf(root, c, target_leaf)
     for _, tc in ipairs(target_leaf.tabs) do if tc == c then return end end
     table.insert(target_leaf.tabs, c)
     target_leaf.active_tab = #target_leaf.tabs
+end
+
+local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
+    local leaf_a = find_leaf_by_id(state.root, leaf_a_id)
+    local leaf_b = find_leaf_by_id(state.root, leaf_b_id)
+    if not leaf_a or not leaf_b then return end
+    leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
+    leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
+    if leaf_a.active_tab > #leaf_a.tabs then leaf_a.active_tab = math.max(0, #leaf_a.tabs) end
+    if leaf_b.active_tab > #leaf_b.tabs then leaf_b.active_tab = math.max(0, #leaf_b.tabs) end
 end
 
 local function try_drop_picked_up(t, leaf_id)
@@ -756,6 +775,13 @@ local function update_overlays(s, t, state, geos)
                 }
                 wb._bg_widget = bg_widget; wb._drag_strip = drag_strip; wb._v_drag_ref = v_drag_ref
                 wb:buttons(gears.table.join(awful.button({}, 1, function()
+                    if picked_up_split and picked_up_split ~= leaf_id then
+                        swap_split_tabs(state, picked_up_split, leaf_id)
+                        state.focused_leaf_id = leaf_id
+                        picked_up_split = nil
+                        awful.layout.arrange(s); return
+                    end
+                    if picked_up_split == leaf_id then picked_up_split = nil; awful.layout.arrange(s); return end
                     if picked_up_client then try_drop_picked_up(t, leaf_id); awful.layout.arrange(s); return end
                     state.focused_leaf_id = leaf_id; awful.layout.arrange(s)
                 end)))
@@ -817,7 +843,7 @@ local function update_titlebars(s, t, state, geos)
                 wb.visible = true
 
                 -- Fingerprint check to prevent unneeded heavy redraws
-                local fp_parts = { leaf.active_tab, state.focused_leaf_id == leaf.id and 1 or 0, tostring(leaf.v_bound_above) }
+                local fp_parts = { leaf.active_tab, state.focused_leaf_id == leaf.id and 1 or 0, tostring(leaf.v_bound_above), picked_up_split == leaf.id and "S" or "" }
                 for _, tc in ipairs(leaf.tabs) do
                     fp_parts[#fp_parts+1] = tostring(tc.window)
                     fp_parts[#fp_parts+1] = tc.name or "?"
@@ -863,6 +889,12 @@ local function update_titlebars(s, t, state, geos)
                         tab_icon.forced_height = icon_size
                         tab_icon:buttons(gears.table.join(
                             awful.button({}, 1, function()
+                                if picked_up_split and picked_up_split ~= leaf.id then
+                                    swap_split_tabs(state, picked_up_split, leaf.id)
+                                    state.focused_leaf_id = leaf.id
+                                    picked_up_split = nil
+                                    awful.layout.arrange(s); return
+                                end
                                 if picked_up_client and picked_up_client.client ~= tc then
                                     try_drop_picked_up(t, leaf.id)
                                     awful.layout.arrange(s)
@@ -977,6 +1009,12 @@ local function update_titlebars(s, t, state, geos)
                         slot.prev_obj = tab_widget
                         tab_widget:buttons(gears.table.join(
                             awful.button({}, 1, function()
+                                if picked_up_split and picked_up_split ~= leaf.id then
+                                    swap_split_tabs(state, picked_up_split, leaf.id)
+                                    state.focused_leaf_id = leaf.id
+                                    picked_up_split = nil
+                                    awful.layout.arrange(s); return
+                                end
                                 if picked_up_client and picked_up_client.client ~= tc then
                                     try_drop_picked_up(t, leaf.id)
                                     awful.layout.arrange(s)
@@ -1005,6 +1043,31 @@ local function update_titlebars(s, t, state, geos)
                     local close_split_btn = make_tb_btn(icon_close, 26, function() close_leaf(t, leaf.id); awful.layout.arrange(s) end)
                     close_split_btn:connect_signal("mouse::enter", function() close_split_btn.fg = "#ff6666" end)
                     close_split_btn:connect_signal("mouse::leave", function() close_split_btn.fg = "#ffffff" end)
+
+                    local is_split_picked = (picked_up_split == leaf.id)
+                    local swap_split_btn = make_circle_icon_btn_widget(icon_swap, 26)
+                    swap_split_btn.shape_border_color = widget_bc
+                    if is_split_picked then swap_split_btn.bg = "#7799dd" end
+                    swap_split_btn:connect_signal("mouse::enter", function()
+                        swap_split_btn.bg = is_split_picked and "#aabbee" or "#333333"
+                    end)
+                    swap_split_btn:connect_signal("mouse::leave", function()
+                        swap_split_btn.bg = is_split_picked and "#7799dd"
+                            or (entry.titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080"))
+                    end)
+                    swap_split_btn:buttons(gears.table.join(awful.button({}, 1, function()
+                        if picked_up_split == leaf.id then
+                            picked_up_split = nil
+                        elseif picked_up_split then
+                            swap_split_tabs(state, picked_up_split, leaf.id)
+                            state.focused_leaf_id = leaf.id
+                            picked_up_split = nil
+                        else
+                            picked_up_split = leaf.id
+                            state.focused_leaf_id = leaf.id
+                        end
+                        awful.layout.arrange(s)
+                    end)))
 
                     local bar_bg = (state.focused_leaf_id == leaf.id)
                         and (beautiful.titlebar_bg_focus  or "#000000")
@@ -1079,7 +1142,7 @@ local function update_titlebars(s, t, state, geos)
                                     {
                                         { spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal, table.unpack(behind_tabs) },
                                         middle_drag,
-                                        { { vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
+                                        { { swap_split_btn, vsplit_btn, hsplit_btn, close_split_btn, spacing = BTN_SPACING, layout  = wibox.layout.fixed.horizontal }, right  = 0, widget = wibox.container.margin },
                                         layout = wibox.layout.align.horizontal,
                                     },
                                     top    = top_pad,
@@ -1268,8 +1331,9 @@ splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -0.
 splitwm.close_split      = function() with_tag(function(t) close_leaf(t, get_state(t).focused_leaf_id) end) end
 
 function splitwm.cancel_pickup()
-    if picked_up_client then
+    if picked_up_client or picked_up_split then
         picked_up_client = nil
+        picked_up_split  = nil
         awful.layout.arrange(awful.screen.focused())
     end
 end
