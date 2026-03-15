@@ -513,15 +513,6 @@ end
 local overlay_cache  = {}
 local titlebar_cache = {}
 
--- Returns (entry, leaf) for a client's titlebar, or (nil, nil) if any step fails.
-local function get_titlebar_entry(c)
-    if not c.screen then return nil, nil end
-    local leaf = get_leaf_from_client(c)
-    if not leaf then return nil, nil end
-    local entry = titlebar_cache[c.screen] and titlebar_cache[c.screen][leaf.id]
-    return entry, leaf
-end
-
 ---------------------------------------------------------------------------
 -- Update Overlays (empty split placeholders) — helpers
 ---------------------------------------------------------------------------
