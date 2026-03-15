@@ -448,7 +448,7 @@ local function split_leaf(t, direction)
 
     leaf.type = "branch"
     leaf.direction = direction
-    leaf.ratio = 0.5
+    leaf.ratio = 0.618
     leaf.children = { child_a, child_b }
     leaf.tabs = nil
     leaf.active_tab = nil
