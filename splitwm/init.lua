@@ -19,6 +19,9 @@ local splitwm = {}
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 33
 
+-- Cairo line cap value for rounded ends (cairo.LineCap.ROUND = 1).
+local CAIRO_LINE_CAP_ROUND = 1
+
 -- Initial ratio when splitting a leaf (golden ratio: larger side for the existing content).
 local SPLIT_RATIO = 0.618
 
@@ -107,7 +110,7 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     function icon:draw(_, cr, w, h)
         cr:set_source_rgba(1, 1, 1, 0.85)
         cr:set_line_width(2)
-        cr:set_line_cap(1) -- ROUND
+        cr:set_line_cap(CAIRO_LINE_CAP_ROUND)
         draw_fn(cr, w, h)
     end
     function icon:fit(_, w, h) return w, h end
