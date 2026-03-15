@@ -1153,6 +1153,9 @@ function splitwm.setup()
     tag.connect_signal("property::selected", function(t)
         local s = t.screen
         if type(s) == "number" then s = screen[s] end
+        -- Splits are tag-local; cancel any pending swap so the leaf ID
+        -- doesn't silently fail to resolve on the newly selected tag.
+        picked_up_split = nil
         if s then gears.timer.delayed_call(function() update_ui(s) end) end
     end)
 end
