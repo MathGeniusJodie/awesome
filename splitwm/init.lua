@@ -1023,6 +1023,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         }
 
         -- Detach tooltip from previous tab widgets before rebuilding
+        entry.tooltip:hide()
         for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
         entry.tooltip_objs = {}
 
