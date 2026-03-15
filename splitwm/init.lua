@@ -464,23 +464,23 @@ local function arrange(p)
         leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
 
         local geo = geos[leaf.id]
-        if geo then
-            for i, c in ipairs(leaf.tabs) do
-                if i == leaf.active_tab then
-                    c.hidden = false
-                    c.border_width = 0
-                    -- Content precisely sits below the external titlebar Wibox cache
-                    c:geometry({
-                        x      = geo.x + bw,
-                        y      = geo.y - gap + tb_h,
-                        width  = math.max(1, geo.width - bw * 2),
-                        height = math.max(1, geo.height + gap - bw - tb_h),
-                    })
-                else
-                    c.hidden = true
-                end
+        if not geo then goto continue end
+        for i, c in ipairs(leaf.tabs) do
+            if i == leaf.active_tab then
+                c.hidden = false
+                c.border_width = 0
+                -- Content precisely sits below the external titlebar Wibox cache
+                c:geometry({
+                    x      = geo.x + bw,
+                    y      = geo.y - gap + tb_h,
+                    width  = math.max(1, geo.width - bw * 2),
+                    height = math.max(1, geo.height + gap - bw - tb_h),
+                })
+            else
+                c.hidden = true
             end
         end
+        ::continue::
     end
 end
 
@@ -769,6 +769,14 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         forced_width = 26,
         widget       = wibox.container.background,
     }
+    local close_btn = wibox.widget {
+        { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
+        bg           = "#00000000",
+        fg           = tab_state == "active" and "#ffffff" or "#00000000",
+        shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
+        forced_width = 26,
+        widget       = wibox.container.background,
+    }
     if tab_state == "active" then
         move_btn:connect_signal("mouse::enter", function() move_btn.bg = "#ffffff22" end)
         move_btn:connect_signal("mouse::leave", function() move_btn.bg = "#00000000" end)
@@ -780,17 +788,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end
             awful.layout.arrange(ctx.s)
         end)))
-    end
-
-    local close_btn = wibox.widget {
-        { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-        bg           = "#00000000",
-        fg           = tab_state == "active" and "#ffffff" or "#00000000",
-        shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
-        forced_width = 26,
-        widget       = wibox.container.background,
-    }
-    if tab_state == "active" then
         on_hover_fg(close_btn, "#ff6666", "#ffffff")
         close_btn:buttons(gears.table.join(awful.button({}, 1, function() tc:kill() end)))
     end
@@ -1067,10 +1064,10 @@ local function update_titlebars(s, t, state, geos, leaves)
     -- Hide and clean up entries for dead or empty leaves
     for leaf_id, entry in pairs(titlebar_cache[s]) do
         local leaf = state.leaf_map[leaf_id]
-        if not alive[leaf_id] or (leaf and #leaf.tabs == 0) then
-            entry.wb.visible = false
-            if not alive[leaf_id] then titlebar_cache[s][leaf_id] = nil end
-        end
+        if alive[leaf_id] and not (leaf and #leaf.tabs == 0) then goto continue end
+        entry.wb.visible = false
+        if not alive[leaf_id] then titlebar_cache[s][leaf_id] = nil end
+        ::continue::
     end
 end
 
