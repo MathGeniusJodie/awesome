@@ -95,8 +95,6 @@ end
 
 local function make_circle_btn(label, size, callback)
     local w = make_circle_btn_widget(label, size)
-    w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
-    w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
 end
@@ -122,8 +120,6 @@ end
 
 local function make_circle_icon_btn(draw_fn, size, callback)
     local w = make_circle_icon_btn_widget(draw_fn, size)
-    w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
-    w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
 end
@@ -611,10 +607,16 @@ local function update_titlebars(s, t, state, geos)
                     entry.wb:connect_signal("mouse::enter", function()
                         entry.titlebar_hovered = true
                         for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = "#000000" end
+                        if entry.swap_btn and not entry.swap_btn_picked then
+                            entry.swap_btn.bg = "#000000"
+                        end
                     end)
                     entry.wb:connect_signal("mouse::leave", function()
                         entry.titlebar_hovered = false
                         for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = "#00000099" end
+                        if entry.swap_btn then
+                            entry.swap_btn.bg = entry.swap_btn_picked and "#7799dd" or "#00000099"
+                        end
                     end)
                     titlebar_cache[s][leaf.id] = entry
                 end
@@ -649,10 +651,6 @@ local function update_titlebars(s, t, state, geos)
                     local function make_tb_btn(draw_fn, size, callback)
                         local w = make_circle_icon_btn_widget(draw_fn, size)
                         w.shape_border_color = widget_bc
-                        w:connect_signal("mouse::enter", function() w.bg = "#333333" end)
-                        w:connect_signal("mouse::leave", function()
-                            w.bg = entry.titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080")
-                        end)
                         w:buttons(gears.table.join(awful.button({}, 1, callback)))
                         table.insert(entry.titlebar_btn_list, w)
                         return w
@@ -833,13 +831,8 @@ local function update_titlebars(s, t, state, geos)
                     local swap_split_btn = make_circle_icon_btn_widget(icons.swap, 26)
                     swap_split_btn.shape_border_color = widget_bc
                     if is_split_picked then swap_split_btn.bg = "#7799dd" end
-                    swap_split_btn:connect_signal("mouse::enter", function()
-                        swap_split_btn.bg = is_split_picked and "#aabbee" or "#333333"
-                    end)
-                    swap_split_btn:connect_signal("mouse::leave", function()
-                        swap_split_btn.bg = is_split_picked and "#7799dd"
-                            or (entry.titlebar_hovered and "#000000" or (beautiful.splitwm_inactive_bg or "#00000080"))
-                    end)
+                    entry.swap_btn        = swap_split_btn
+                    entry.swap_btn_picked = is_split_picked
                     swap_split_btn:buttons(gears.table.join(awful.button({}, 1, function()
                         if picked_up_split == leaf.id then
                             picked_up_split = nil
