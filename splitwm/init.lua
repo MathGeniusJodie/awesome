@@ -639,11 +639,12 @@ local function update_titlebars(s, t, state, geos, leaves)
                 wb.bg     = "#00000000"
                 wb.visible = true
 
-                -- Fingerprint check to prevent unneeded heavy redraws
+                -- Fingerprint check to prevent unneeded heavy redraws.
+                -- Tab names are excluded: name changes are handled by the property::name
+                -- signal handler which updates tooltips directly without a full rebuild.
                 local fp_parts = { leaf.active_tab, state.focused_leaf_id == leaf.id and 1 or 0, tostring(leaf.v_bound_above), picked_up_split == leaf.id and "S" or "" }
                 for _, tc in ipairs(leaf.tabs) do
                     fp_parts[#fp_parts+1] = tostring(tc.window)
-                    fp_parts[#fp_parts+1] = tc.name or "?"
                     if picked_up_client and picked_up_client.client == tc then fp_parts[#fp_parts+1] = "P" end
                 end
                 local fp = table.concat(fp_parts, "\0")
@@ -1126,7 +1127,23 @@ function splitwm.setup()
     end)
 
     client.connect_signal("property::name", function(c)
-        if c.screen then gears.timer.delayed_call(function() update_ui(c.screen) end) end
+        -- Update only the affected tooltip in-place; no full widget rebuild needed.
+        if not c.screen then return end
+        local t = c.first_tag
+        if not t then return end
+        local state = tag_state[t]
+        if not state then return end
+        local leaf = tree.find_leaf_for_client(state.root, c)
+        if not leaf then return end
+        local entry = titlebar_cache[c.screen] and titlebar_cache[c.screen][leaf.id]
+        if not entry then return end
+        for i, tc in ipairs(leaf.tabs) do
+            if tc == c then
+                local slot = entry.tooltip_pool[i]
+                if slot then slot.tt.text = c.name or "?" end
+                break
+            end
+        end
     end)
 
     tag.connect_signal("property::selected", function(t)
