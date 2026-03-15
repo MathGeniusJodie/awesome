@@ -631,6 +631,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                             type    = "utility",
                         },
                         tooltip_pool      = {},
+                        tooltip_pool_n    = 0,
                         titlebar_btn_list = {},
                         titlebar_hovered  = false,
                     }
@@ -798,6 +799,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                                 tt = awful.tooltip { text = name, delay_show = 0.3, font = "monospace bold 12", bg = "#000000", fg = "#ffffff", border_width = 0 },
                             }
                             entry.tooltip_pool[i] = slot
+                            if i > entry.tooltip_pool_n then entry.tooltip_pool_n = i end
                         else
                             slot.tt.text = name
                             if slot.prev_obj then slot.tt.visible = false; slot.tt:remove_from_object(slot.prev_obj) end
@@ -825,13 +827,14 @@ local function update_titlebars(s, t, state, geos, leaves)
                         table.insert(tab_widgets, tab_widget)
                     end
 
-                    for i = #leaf.tabs + 1, #entry.tooltip_pool do
+                    for i = #leaf.tabs + 1, entry.tooltip_pool_n do
                         local slot = entry.tooltip_pool[i]
                         if slot then
                             if slot.prev_obj then slot.tt.visible = false; slot.tt:remove_from_object(slot.prev_obj) end
                             entry.tooltip_pool[i] = nil
                         end
                     end
+                    entry.tooltip_pool_n = #leaf.tabs
 
                     local menu_btn = make_tb_btn(icons.plus, 26, function() state.focused_leaf_id = leaf.id; if splitwm.on_menu_request then splitwm.on_menu_request() end end)
                     table.insert(tab_widgets, menu_btn)

@@ -106,7 +106,7 @@ local editor   = os.getenv("EDITOR") or "vim"
 local modkey   = "Mod4"
 
 -- Browser detection: try common browsers
-local browser = os.getenv("BROWSER") or "xdg-open http://"
+local browser = os.getenv("BROWSER") or "xdg-open https://"
 local filemanager = os.getenv("FILEMANAGER") or "thunar"
 
 ---------------------------------------------------------------------------
