@@ -809,23 +809,25 @@ local function update_titlebars(s, t, state, geos)
                                 bottom = 2, widget = wibox.container.margin,
                             },
                             bg           = is_picked and "#7799dd" or "#00000000",
-                            fg           = "#ffffff",
+                            fg           = is_active and "#ffffff" or "#00000000",
                             shape        = function(cr, bw2, bh) gears.shape.rounded_rect(cr, bw2, bh, 4) end,
                             forced_width = 26,
                             widget = wibox.container.background,
                         }
-                        move_btn:connect_signal("mouse::enter", function() if not is_picked then move_btn.bg = "#ffffff22" end end)
-                        move_btn:connect_signal("mouse::leave", function() if not is_picked then move_btn.bg = "#00000000" end end)
-                        move_btn:buttons(gears.table.join(
-                            awful.button({}, 1, function()
-                                if picked_up_client and picked_up_client.client == tab_client then
-                                    picked_up_client = nil
-                                else
-                                    picked_up_client = { client = tab_client, tag = t }
-                                end
-                                awful.layout.arrange(s)
-                            end)
-                        ))
+                        if is_active then
+                            move_btn:connect_signal("mouse::enter", function() if not is_picked then move_btn.bg = "#ffffff22" end end)
+                            move_btn:connect_signal("mouse::leave", function() if not is_picked then move_btn.bg = "#00000000" end end)
+                            move_btn:buttons(gears.table.join(
+                                awful.button({}, 1, function()
+                                    if picked_up_client and picked_up_client.client == tab_client then
+                                        picked_up_client = nil
+                                    else
+                                        picked_up_client = { client = tab_client, tag = t }
+                                    end
+                                    awful.layout.arrange(s)
+                                end)
+                            ))
+                        end
 
                         local close_btn = wibox.widget {
                             {
@@ -835,14 +837,16 @@ local function update_titlebars(s, t, state, geos)
                                 widget = wibox.widget.textbox,
                             },
                             bg           = "#00000000",
-                            fg           = "#ffffff",
+                            fg           = is_active and "#ffffff" or "#00000000",
                             shape        = function(cr, bw2, bh) gears.shape.rounded_rect(cr, bw2, bh, 4) end,
                             forced_width = 26,
                             widget = wibox.container.background,
                         }
-                        close_btn:connect_signal("mouse::enter", function() close_btn.fg = "#ff6666" end)
-                        close_btn:connect_signal("mouse::leave", function() close_btn.fg = "#ffffff" end)
-                        close_btn:buttons(gears.table.join(awful.button({}, 1, function() tab_client:kill() end)))
+                        if is_active then
+                            close_btn:connect_signal("mouse::enter", function() close_btn.fg = "#ff6666" end)
+                            close_btn:connect_signal("mouse::leave", function() close_btn.fg = "#ffffff" end)
+                            close_btn:buttons(gears.table.join(awful.button({}, 1, function() tab_client:kill() end)))
+                        end
 
                         local tab_bg = is_picked and "#445566"
                             or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
@@ -894,6 +898,17 @@ local function update_titlebars(s, t, state, geos)
                         end
                         slot.tt:add_to_object(tab_widget)
                         slot.prev_obj = tab_widget
+                        tab_widget:buttons(gears.table.join(
+                            awful.button({}, 1, function()
+                                if picked_up_client and picked_up_client.client ~= tc then
+                                    try_drop_picked_up(t, leaf.id)
+                                    awful.layout.arrange(s)
+                                    return
+                                end
+                                leaf.active_tab = tab_idx
+                                awful.layout.arrange(s)
+                            end)
+                        ))
 
                         table.insert(tab_widgets, tab_widget)
                     end
