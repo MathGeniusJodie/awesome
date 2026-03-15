@@ -202,7 +202,7 @@ local function icon_plus(cr, w, h)
 end
 
 local function icon_vsplit(cr, w, h)
-    local cx, cy, bw, bh, br = w/2, h/2, 10, 8, 1
+    local cx, cy, bw, bh, br = w/2, h/2, 10, 10, 1
     local bx, by = cx-bw/2, cy-bh/2
     cr:new_sub_path()
     cr:arc(bx+bw-br, by+br,    br, -math.pi/2, 0)
@@ -215,7 +215,7 @@ local function icon_vsplit(cr, w, h)
 end
 
 local function icon_hsplit(cr, w, h)
-    local cx, cy, bw, bh, br = w/2, h/2, 10, 8, 1
+    local cx, cy, bw, bh, br = w/2, h/2, 10, 10, 1
     local bx, by = cx-bw/2, cy-bh/2
     cr:new_sub_path()
     cr:arc(bx+bw-br, by+br,    br, -math.pi/2, 0)
