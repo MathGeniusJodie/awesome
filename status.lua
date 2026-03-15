@@ -8,6 +8,9 @@ local battery_widgets = {}
 local volume_widgets  = {}
 local chip_widgets    = {}
 
+-- Forward declaration so new_battery_widget can trigger a refresh on creation.
+local refresh_battery
+
 ---------------------------------------------------------------------------
 -- Widget factories
 ---------------------------------------------------------------------------
@@ -74,6 +77,7 @@ function status.new_battery_widget()
     end
 
     table.insert(battery_widgets, w)
+    gears.timer.delayed_call(function() refresh_battery() end)
     return w
 end
 
@@ -206,26 +210,44 @@ end
 -- Refresh functions
 ---------------------------------------------------------------------------
 
-local function refresh_battery()
-    -- Synchronous io.open is intentional: sysfs files are kernel virtual
-    -- files with no disk I/O. Spawning a subprocess would be heavier.
-    for _, name in ipairs({ "BAT0", "BAT1", "BAT" }) do
-        local fc = io.open("/sys/class/power_supply/" .. name .. "/capacity", "r")
-        if fc then
-            local cap = tonumber(fc:read("*l")); fc:close()
-            -- Skip phantom batteries that exist in sysfs but report no capacity
-            if not cap then goto continue end
-            local fs = io.open("/sys/class/power_supply/" .. name .. "/status", "r")
-            local stat = fs and fs:read("*l") or ""
-            if fs then fs:close() end
-            for _, w in ipairs(battery_widgets) do
-                w.percentage = cap
-                w.charging   = (stat == "Charging")
-                w:emit_signal("widget::redraw_needed")
-            end
-            return
+-- Cached battery path: found once, reused on every refresh tick.
+local _battery_path = nil
+local function find_battery_path()
+    if _battery_path then return _battery_path end
+    local base = "/sys/class/power_supply/"
+    -- Fast path: try common names without spawning a subprocess.
+    for _, name in ipairs({ "BAT0", "BAT1", "BAT", "BATT" }) do
+        local f = io.open(base .. name .. "/capacity", "r")
+        if f then f:close(); _battery_path = base .. name; return _battery_path end
+    end
+    -- Fallback: enumerate the directory (one-time subprocess, result is cached).
+    local ls = io.popen("ls /sys/class/power_supply/ 2>/dev/null")
+    if ls then
+        for name in ls:lines() do
+            local f = io.open(base .. name .. "/capacity", "r")
+            if f then f:close(); ls:close(); _battery_path = base .. name; return _battery_path end
         end
-        ::continue::
+        ls:close()
+    end
+    return nil
+end
+
+-- Synchronous io.open is intentional: sysfs files are kernel virtual
+-- files with no disk I/O. Spawning a subprocess would be heavier.
+refresh_battery = function()
+    local path = find_battery_path()
+    if not path then return end
+    local fc = io.open(path .. "/capacity", "r")
+    if not fc then _battery_path = nil; return end  -- battery disappeared; reset cache
+    local cap = tonumber(fc:read("*l")); fc:close()
+    if not cap then return end
+    local fs = io.open(path .. "/status", "r")
+    local stat = fs and fs:read("*l") or ""
+    if fs then fs:close() end
+    for _, w in ipairs(battery_widgets) do
+        w.percentage = cap
+        w.charging   = (stat == "Charging")
+        w:emit_signal("widget::redraw_needed")
     end
 end
 
