@@ -71,10 +71,9 @@ function menu.setup(opts)
         for _, launcher in ipairs(splitwm.launchers) do
             if not launcher.icon then
                 -- Try primary icon_name, then fallbacks
-                local names = launcher.icon_names or {}
-                if launcher.icon_name then
-                    table.insert(names, 1, launcher.icon_name)
-                end
+                local names = {}
+                if launcher.icon_name then names[#names + 1] = launcher.icon_name end
+                for _, n in ipairs(launcher.icon_names or {}) do names[#names + 1] = n end
                 for _, name in ipairs(names) do
                     local path = menubar_utils.lookup_icon(name)
                     if path and path ~= false and type(path) == "string" then
