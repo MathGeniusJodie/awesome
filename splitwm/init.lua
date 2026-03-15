@@ -175,8 +175,11 @@ local function unpin_client(root, c)
     for i, tc in ipairs(leaf.tabs) do
         if tc == c then
             table.remove(leaf.tabs, i)
-            if leaf.active_tab > #leaf.tabs then leaf.active_tab = math.max(1, #leaf.tabs) end
-            if #leaf.tabs == 0 then leaf.active_tab = 0 end
+            if i < leaf.active_tab then
+                leaf.active_tab = leaf.active_tab - 1
+            else
+                leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
+            end
             return
         end
     end
