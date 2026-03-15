@@ -1086,6 +1086,7 @@ function splitwm.setup()
     end)
 
     client.connect_signal("unmanage", function(c)
+        if picked_up_client and picked_up_client.client == c then picked_up_client = nil end
         for t, state in pairs(tag_state) do unpin_client(state.root, c) end
     end)
 
