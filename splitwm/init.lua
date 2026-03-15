@@ -19,6 +19,20 @@ local splitwm = {}
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 33
 
+-- Tab shape geometry. TAB_ALPHA is the slant angle from vertical.
+-- The ear arc sweeps from pi/2 down to TAB_ALPHA so its tangent matches the slant,
+-- and the top corner arc starts at pi+TAB_ALPHA for the same reason.
+-- Corner center: cx = (TAB_CORNER + TAB_EAR)*(1-sin α)/cos α + h*tan α
+local TAB_ALPHA  = math.rad(20)
+local TAB_EAR    = 11
+local TAB_CORNER = 8
+local TAB_SA     = math.sin(TAB_ALPHA)
+local TAB_CA     = math.cos(TAB_ALPHA)
+local TAB_TA     = math.tan(TAB_ALPHA)
+local function tab_cx(h) return (TAB_CORNER + TAB_EAR) * (1 - TAB_SA) / TAB_CA + h * TAB_TA end
+-- Overlap = 2x slant width for tighter nesting. Using TITLEBAR_HEIGHT as reference.
+local TAB_SPACING = -math.floor((tab_cx(TITLEBAR_HEIGHT) - TAB_EAR * TAB_CA) * 2)
+
 -- Cairo line cap value for rounded ends (cairo.LineCap.ROUND = 1).
 local CAIRO_LINE_CAP_ROUND = 1
 
@@ -112,13 +126,14 @@ local function rounded_top(cr, w, h)
 end
 
 local function draw_tab_border(cr, w, h)
-    local r   = 6
-    local pad = 1
-    cr:move_to(pad, h)
-    cr:line_to(pad, r + pad)
-    cr:arc(r + pad,     r + pad, r, math.pi,       1.5 * math.pi)
-    cr:arc(w - r - pad, r + pad, r, 1.5 * math.pi, 2   * math.pi)
-    cr:line_to(w - pad, h)
+    local cx = tab_cx(h)
+    cr:move_to(0, h)
+    cr:arc_negative(0,     h - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
+    cr:line_to(cx - TAB_CORNER * TAB_CA, TAB_CORNER * (1 - TAB_SA))
+    cr:arc(cx,     TAB_CORNER, TAB_CORNER, math.pi + TAB_ALPHA, 1.5 * math.pi)
+    cr:arc(w - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
+    cr:line_to(w - TAB_EAR * TAB_CA, h - TAB_EAR * (1 - TAB_SA))
+    cr:arc_negative(w, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
 end
 
 ---------------------------------------------------------------------------
@@ -632,21 +647,21 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     local tab_draw = wibox.widget.base.make_widget()
     function tab_draw:draw(_, cr, w2, h2)
-        local lw, r, pad = 2, 6, 1
-        local half = lw / 2
-        local fpad, fr = pad + half, r - half
-        cr:move_to(fpad, h2)
-        cr:line_to(fpad, fr + fpad)
-        cr:arc(fr + fpad,      fr + fpad, fr, math.pi,       1.5 * math.pi)
-        cr:arc(w2 - fr - fpad, fr + fpad, fr, 1.5 * math.pi, 2   * math.pi)
-        cr:line_to(w2 - fpad, h2)
+        local cx = tab_cx(h2)
+        cr:move_to(0, h2)
+        cr:arc_negative(0,      h2 - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
+        cr:line_to(cx - TAB_CORNER * TAB_CA, TAB_CORNER * (1 - TAB_SA))
+        cr:arc(cx,      TAB_CORNER, TAB_CORNER, math.pi + TAB_ALPHA, 1.5 * math.pi)
+        cr:arc(w2 - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
+        cr:line_to(w2 - TAB_EAR * TAB_CA, h2 - TAB_EAR * (1 - TAB_SA))
+        cr:arc_negative(w2, h2 - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
         cr:close_path()
         cr:set_source(tab_bg_pat)
         cr:fill()
         if tab_state == "active" then
             draw_tab_border(cr, w2, h2)
             cr:set_source(widget_bc_pat)
-            cr:set_line_width(lw)
+            cr:set_line_width(2)
             cr:stroke()
         end
     end
@@ -659,7 +674,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 { { tab_icon, halign = "center", valign = "center", widget = wibox.container.place }, right = 3, widget = wibox.container.margin },
                 move_btn, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
             },
-            left = 8, right = 6, top = 3, bottom = 3, widget = wibox.container.margin,
+            left = 20, right = 20, top = 3, bottom = 3, widget = wibox.container.margin,
         },
         layout = wibox.layout.stack,
     }
@@ -749,12 +764,18 @@ end
 -- inactive tabs stay behind it.  Spacers preserve layout width in each layer.
 local function tb_split_tab_layers(tab_widgets, active_tab)
     local behind, above = {}, {}
+    local n = #tab_widgets
     for i, tw in ipairs(tab_widgets) do
         local ref = tw
         local sp  = wibox.widget.base.make_widget()
         function sp:fit(wctx, w, h) return ref:fit(wctx, w, h) end
         function sp:draw() end
+        -- The last widget ("+" button) always goes in above so it's drawn on top of
+        -- the active tab's negative-spacing overlap in Layer 3.
         if i == active_tab then
+            table.insert(behind, sp)
+            table.insert(above,  tw)
+        elseif i == n then
             table.insert(behind, sp)
             table.insert(above,  tw)
         else
@@ -766,17 +787,26 @@ local function tb_split_tab_layers(tab_widgets, active_tab)
 end
 
 local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
-    return {
+    local btn_w  = 4 * 26 + 3 * ctx.BTN_SPACING
+    local tabs   = { spacing = ctx.TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) }
+    -- Rendered on top of tabs in the stack so its background paints over any tab overflow.
+    local ctrl_cover = {
         {
             {
-                {
-                    { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
-                    middle_drag,
-                    { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
-                    layout = wibox.layout.align.horizontal,
-                },
-                top = ctx.top_pad, widget = wibox.container.margin,
+                { controls.swap, controls.vsplit, controls.hsplit, controls.close,
+                  spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
+                left = 0, widget = wibox.container.margin,
             },
+            bg = ctx.bar_bg, widget = wibox.container.background,
+        },
+        halign = "right", widget = wibox.container.place,
+    }
+    local layers = middle_drag
+        and { middle_drag, tabs, ctrl_cover, layout = wibox.layout.stack }
+        or  { tabs, ctrl_cover, layout = wibox.layout.stack }
+    return {
+        {
+            { layers, top = ctx.top_pad, widget = wibox.container.margin },
             bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
         },
         layout = wibox.layout.fixed.vertical,
@@ -790,14 +820,13 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
         tb_build_bar_layer(behind, controls, middle_drag, ctx),
         -- Layer 2: focus border
         border_draw,
-        -- Layer 3: active tab on top of border
+        -- Layer 3: active tab on top of border (clipped same as Layer 1 so it doesn't overlap controls)
         {
             {
                 {
                     {
-                        { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
-                        nil, nil,
-                        layout = wibox.layout.align.horizontal,
+                        { spacing = ctx.TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
+                        right = 4 * 26 + 3 * ctx.BTN_SPACING, widget = wibox.container.margin,
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
                 },
@@ -876,6 +905,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             icon_size    = 20,
             tab_btn_font = "monospace bold 18",
             BTN_SPACING  = 5,
+            TAB_SPACING  = TAB_SPACING,
         }
 
         -- Detach tooltip from previous tab widgets before rebuilding
@@ -889,11 +919,15 @@ local function update_titlebars(s, t, state, geos, leaves)
             table.insert(tab_widgets, tb_build_tab_widget(leaf, tc, i, entry, ctx))
         end
 
-        -- "+" menu button lives at the end of the tab row
-        table.insert(tab_widgets, tb_make_btn(entry, ctx.widget_bc, icons.plus, 26, function()
-            ctx.state.focused_leaf_id = leaf.id
-            if splitwm.on_menu_request then splitwm.on_menu_request() end
-        end))
+        -- "+" lives at the end of the tab row; tb_split_tab_layers always puts it in
+        -- the above layer so it renders on top of the active tab's negative-spacing overlap.
+        table.insert(tab_widgets, wibox.widget {
+            tb_make_btn(entry, ctx.widget_bc, icons.plus, 26, function()
+                ctx.state.focused_leaf_id = leaf.id
+                if splitwm.on_menu_request then splitwm.on_menu_request() end
+            end),
+            left = #leaf.tabs > 0 and 24 or 0, widget = wibox.container.margin,
+        })
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
         local border_draw = tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw)
@@ -915,7 +949,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                     if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
                 end)
             end
-            -- tab_widgets contains only the "+" button; pass directly, no layer split needed
+            -- tab_widgets is empty for empty leaves; controls.menu has the "+" button
             tb_assemble_empty_wibox(entry, tab_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
             -- Clicking the content area completes a swap/drop, just like the old overlay did
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
