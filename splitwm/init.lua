@@ -710,6 +710,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         or (client_color and client_color.dark
             or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
                            or  (beautiful.splitwm_inactive_bg  or "#00000080")))
+    local tab_bg_pat   = gears.color(tab_bg)
+    local widget_bc_pat = gears.color(ctx.widget_bc)
 
     local tab_draw = wibox.widget.base.make_widget()
     function tab_draw:draw(_, cr, w2, h2)
@@ -722,11 +724,11 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         cr:arc(w2 - fr - fpad, fr + fpad, fr, 1.5 * math.pi, 2   * math.pi)
         cr:line_to(w2 - fpad, h2)
         cr:close_path()
-        cr:set_source(gears.color(tab_bg))
+        cr:set_source(tab_bg_pat)
         cr:fill()
         if is_active then
             draw_tab_border(cr, w2, h2)
-            cr:set_source(gears.color(ctx.widget_bc))
+            cr:set_source(widget_bc_pat)
             cr:set_line_width(lw)
             cr:stroke()
         end
@@ -869,24 +871,20 @@ end
 
 -- Assemble the three-layer wibox layout for a leaf's titlebar.
 local function tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
-    local BTN_SPACING = ctx.BTN_SPACING
-    local top_pad     = ctx.top_pad
-    local tb_h        = ctx.tb_h
-    local bar_bg      = ctx.bar_bg
     entry.wb:setup {
         -- Layer 1: inactive tabs + split controls (behind border)
         {
             {
                 {
                     {
-                        { spacing = BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
+                        { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) },
                         middle_drag,
-                        { { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = BTN_SPACING, layout = wibox.layout.fixed.horizontal }, right = 0, widget = wibox.container.margin },
+                        { controls.swap, controls.vsplit, controls.hsplit, controls.close, spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
                         layout = wibox.layout.align.horizontal,
                     },
-                    top = top_pad, widget = wibox.container.margin,
+                    top = ctx.top_pad, widget = wibox.container.margin,
                 },
-                bg = bar_bg, shape = rounded_top, forced_height = tb_h, widget = wibox.container.background,
+                bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
             },
             layout = wibox.layout.fixed.vertical,
         },
@@ -897,13 +895,13 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
             {
                 {
                     {
-                        { spacing = BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
+                        { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
                         nil, nil,
                         layout = wibox.layout.align.horizontal,
                     },
-                    top = top_pad, widget = wibox.container.margin,
+                    top = ctx.top_pad, widget = wibox.container.margin,
                 },
-                forced_height = tb_h, widget = wibox.container.background,
+                forced_height = ctx.tb_h, widget = wibox.container.background,
             },
             layout = wibox.layout.fixed.vertical,
         },
@@ -935,7 +933,6 @@ local function update_titlebars(s, t, state, geos, leaves)
         wb.y       = geo.y - gap
         wb.width   = geo.width
         wb.height  = geo.height + gap
-        wb.bg      = "#00000000"
         wb.visible = true
 
         local fp = tb_compute_fingerprint(leaf, state)
@@ -951,15 +948,11 @@ local function update_titlebars(s, t, state, geos, leaves)
             s            = s,
             t            = t,
             state        = state,
-            is_focused   = is_focused,
-            focus_color  = focus_color,
             widget_bc    = is_focused and focus_color or "#00000000",
             bar_bg       = is_focused and (beautiful.titlebar_bg_focus  or "#000000")
                                       or  (beautiful.titlebar_bg_normal or "#000000aa"),
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
-            bw           = bw,
-            gap          = gap,
             icon_size    = 20,
             tab_btn_font = "monospace bold 18",
             BTN_SPACING  = 5,
