@@ -363,7 +363,12 @@ end
 local geo_cache = {}   -- [screen] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
 
 local function arrange(p)
-    local tag = p.tag or awful.screen.focused().selected_tag
+    local tag = p.tag
+    if not tag then
+        local s = p.screen
+        if type(s) == "number" then s = screen[s] end
+        tag = s and s.selected_tag
+    end
     if not tag then return end
     local state = get_state(tag)
     local wa    = p.workarea
