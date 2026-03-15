@@ -1158,9 +1158,23 @@ function splitwm.setup()
 end
 
 function splitwm.flush_caches()
-    for _, screen_cache in pairs(overlay_cache)  do for _, wb    in pairs(screen_cache) do wb.visible = false    end end
+    for _, screen_cache in pairs(overlay_cache) do
+        for _, wb in pairs(screen_cache) do wb.visible = false end
+    end
     overlay_cache = {}
-    for _, screen_cache in pairs(titlebar_cache) do for _, entry in pairs(screen_cache) do entry.wb.visible = false end end
+    for _, screen_cache in pairs(titlebar_cache) do
+        for _, entry in pairs(screen_cache) do
+            -- Detach tooltips before dropping the entry so their signal
+            -- connections don't keep the old tab widgets alive.
+            for _, slot in pairs(entry.tooltip_pool) do
+                if slot and slot.prev_obj then
+                    slot.tt.visible = false
+                    slot.tt:remove_from_object(slot.prev_obj)
+                end
+            end
+            entry.wb.visible = false
+        end
+    end
     titlebar_cache = {}
 end
 
