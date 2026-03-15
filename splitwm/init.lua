@@ -348,6 +348,8 @@ end
 -- The layout "arrange" function
 ---------------------------------------------------------------------------
 
+local geo_cache = {}   -- [screen] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
+
 local function arrange(p)
     local tag = p.tag or awful.screen.focused().selected_tag
     if not tag then return end
@@ -365,7 +367,11 @@ local function arrange(p)
         if not pinned[c] then pin_client(tag, c) end
     end
 
-    local geos = tree.compute_geometries(root, wa.x, wa.y, wa.width, wa.height, gap)
+    local geos, bounds = {}, {}
+    tree.compute_tree(root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
+    local s = p.screen
+    if type(s) == "number" then s = screen[s] end
+    if s then geo_cache[s] = { geos = geos, bounds = bounds } end
     local bw   = beautiful.splitwm_focus_border_width or 2
     local tb_h = math.max(TITLEBAR_HEIGHT, gap)
 
@@ -983,11 +989,16 @@ local function update_ui(s)
         return
     end
 
-    local wa     = s.workarea
     local gap    = beautiful.splitwm_gap or 16
-    local geos   = {}
-    local bounds = {}
-    tree.compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
+    local cached = geo_cache[s]
+    local geos, bounds
+    if cached then
+        geos, bounds = cached.geos, cached.bounds
+    else
+        local wa = s.workarea
+        geos, bounds = {}, {}
+        tree.compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
+    end
 
     update_overlays(s, t, state, geos)
     update_titlebars(s, t, state, geos)
