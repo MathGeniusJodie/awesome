@@ -1376,6 +1376,15 @@ function splitwm.setup()
         if not t then return end
         local state = tag_state[t]
         if not state then return end
+        if picked_up_split then
+            local target_leaf = find_leaf_for_client(state.root, c)
+            if target_leaf and target_leaf.id ~= picked_up_split then
+                swap_split_tabs(state, picked_up_split, target_leaf.id)
+                state.focused_leaf_id = target_leaf.id
+                picked_up_split = nil
+                awful.layout.arrange(c.screen); return
+            end
+        end
         if picked_up_client and picked_up_client.client.valid and picked_up_client.client ~= c then
             local target_leaf = find_leaf_for_client(state.root, c)
             if target_leaf then try_drop_picked_up(t, target_leaf.id); awful.layout.arrange(c.screen); return end
