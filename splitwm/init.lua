@@ -356,6 +356,22 @@ local function focus_direction(t, dir)
 end
 
 ---------------------------------------------------------------------------
+-- Drag helpers
+---------------------------------------------------------------------------
+
+local function run_v_drag(s, get_b)
+    mousegrabber.run(function(mouse)
+        if not mouse.buttons[1] then awful.layout.arrange(s); return false end
+        local b = get_b()
+        if not b then return false end
+        local igap = b.parent_gap or 0
+        b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.y - b.parent_y) / (b.parent_h - igap)))
+        awful.layout.arrange(s)
+        return true
+    end, "sb_v_double_arrow")
+end
+
+---------------------------------------------------------------------------
 -- The layout "arrange" function
 ---------------------------------------------------------------------------
 
@@ -536,15 +552,8 @@ local function update_overlays(s, t, state, geos, leaves)
                 local drag_strip = wibox.widget { forced_height = raise, cursor = raise > 0 and "sb_v_double_arrow" or nil, widget = wibox.container.background }
                 drag_strip:buttons(gears.table.join(
                     awful.button({}, 1, function()
-                        local b = v_drag_ref.b
-                        if not b then return end
-                        mousegrabber.run(function(mouse)
-                            if not mouse.buttons[1] then awful.layout.arrange(s); return false end
-                            local igap = b.parent_gap or 0
-                            b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.y - b.parent_y) / (b.parent_h - igap)))
-                            awful.layout.arrange(s)
-                            return true
-                        end, "sb_v_double_arrow")
+                        if not v_drag_ref.b then return end
+                        run_v_drag(s, function() return v_drag_ref.b end)
                     end)
                 ))
 
@@ -850,15 +859,8 @@ local function update_titlebars(s, t, state, geos, leaves)
                         middle_drag = wibox.widget { cursor = "sb_v_double_arrow", widget = wibox.container.background }
                         middle_drag:buttons(gears.table.join(
                             awful.button({}, 1, function()
-                                local b = leaf.v_bound_above
-                                if not b then return end
-                                mousegrabber.run(function(mouse)
-                                    if not mouse.buttons[1] then awful.layout.arrange(s); return false end
-                                    local igap = b.parent_gap or 0
-                                    b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.y - b.parent_y) / (b.parent_h - igap)))
-                                    awful.layout.arrange(s)
-                                    return true
-                                end, "sb_v_double_arrow")
+                                if not leaf.v_bound_above then return end
+                                run_v_drag(s, function() return leaf.v_bound_above end)
                             end)
                         ))
                     end
