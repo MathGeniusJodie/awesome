@@ -1,3 +1,4 @@
+local gears = require("gears")
 local icons = {}
 
 ---------------------------------------------------------------------------
@@ -48,6 +49,43 @@ function icons.swap(cr, w, h)
     cr:move_to(cx + s - 3, cy - ay - 2); cr:line_to(cx + s, cy - ay); cr:line_to(cx + s - 3, cy - ay + 2); cr:stroke()
     cr:move_to(cx + s, cy + ay); cr:line_to(cx - s, cy + ay); cr:stroke()
     cr:move_to(cx - s + 3, cy + ay - 2); cr:line_to(cx - s, cy + ay); cr:line_to(cx - s + 3, cy + ay + 2); cr:stroke()
+end
+
+function icons.chip(cr, w, h)
+    local cw, ch  = 15, 11
+    local pin_len = 3
+    local n_pins  = 3
+    local bx = math.floor(w / 2) - math.floor(cw / 2)
+    local by = math.floor(h / 2) - math.floor(ch / 2)
+
+    cr:set_line_width(2)
+    local pin_spacing = (ch - 2) / (n_pins - 1)
+    for i = 1, n_pins do
+        local py = by + 1 + (i - 1) * pin_spacing
+        cr:move_to(bx,      py) cr:line_to(bx - pin_len,      py) cr:stroke()
+        cr:move_to(bx + cw, py) cr:line_to(bx + cw + pin_len, py) cr:stroke()
+    end
+
+    cr:save()
+    cr:translate(bx, by)
+    gears.shape.rounded_rect(cr, cw, ch, 1.5)
+    cr:restore()
+    cr:stroke()
+end
+
+function icons.speaker(cr, _, h)
+    local s  = h / 32.0
+    local cy = h / 2
+    local sx = 1 * s
+
+    cr:move_to(sx,           cy + 4*s)
+    cr:line_to(sx,           cy - 4*s)
+    cr:line_to(sx + 4*s,     cy - 4*s)
+    cr:line_to(sx + 10*s,    cy - 8*s)
+    cr:line_to(sx + 10*s,    cy + 8*s)
+    cr:line_to(sx + 4*s,     cy + 4*s)
+    cr:close_path()
+    cr:fill()
 end
 
 return icons

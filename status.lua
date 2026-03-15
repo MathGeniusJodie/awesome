@@ -1,6 +1,7 @@
 local awful  = require("awful")
 local gears  = require("gears")
 local wibox  = require("wibox")
+local icons  = require("splitwm.icons")
 
 local status = {}
 
@@ -99,16 +100,7 @@ function status.new_volume_widget()
         local sx = 1 * s
 
         cr:set_source_rgba(1, 1, 1, 1)
-
-        -- Speaker body: box + flared cone (filled polygon)
-        cr:move_to(sx,           cy + 4*s)
-        cr:line_to(sx,           cy - 4*s)
-        cr:line_to(sx + 4*s,     cy - 4*s)
-        cr:line_to(sx + 10*s,    cy - 8*s)
-        cr:line_to(sx + 10*s,    cy + 8*s)
-        cr:line_to(sx + 4*s,     cy + 4*s)
-        cr:close_path()
-        cr:fill()
+        icons.speaker(cr, nil, height)
 
         -- Sound waves or mute X, starting just right of the cone tip
         local ax = sx + 10*s
@@ -145,7 +137,6 @@ function status.new_chip_widget()
 
     local cw, ch    = 15, 11
     local pin_len   = 3
-    local n_pins    = 3
 
     function w:fit(_, _, h) return cw + pin_len * 2 + 6, h end
 
@@ -155,24 +146,8 @@ function status.new_chip_widget()
         local bx = cx - math.floor(cw / 2)
         local by = cy - math.floor(ch / 2)
 
-        -- Pins (left and right sides)
         cr:set_source_rgba(1, 1, 1, 1)
-        cr:set_line_width(2)
-        local pin_spacing = (ch - 2) / (n_pins - 1)
-        for i = 1, n_pins do
-            local py = by + 1 + (i - 1) * pin_spacing
-            cr:move_to(bx,          py) cr:line_to(bx - pin_len,      py) cr:stroke()
-            cr:move_to(bx + cw,     py) cr:line_to(bx + cw + pin_len, py) cr:stroke()
-        end
-
-        -- Body outline: identical to battery (line_width 2, radius 1.5)
-        cr:set_source_rgba(1, 1, 1, 1)
-        cr:set_line_width(2)
-        cr:save()
-        cr:translate(bx, by)
-        gears.shape.rounded_rect(cr, cw, ch, 1.5)
-        cr:restore()
-        cr:stroke()
+        icons.chip(cr, width, height)
 
         -- 3 vertical gauges inside body, 1px gap between them
         -- Inner area matches battery fill inset: 2px from each edge
