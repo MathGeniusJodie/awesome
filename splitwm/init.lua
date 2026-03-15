@@ -78,31 +78,6 @@ local function make_launcher_widget(entry, size, callback)
     return w
 end
 
-local function make_circle_btn_widget(label, size)
-    return wibox.widget {
-        {
-            {
-                markup = '<span font_family="Sans">' .. label .. '</span>',
-                align  = "center",
-                valign = "center",
-                font   = beautiful.splitwm_btn_font or "monospace bold 14",
-                widget = wibox.widget.textbox,
-            },
-            halign = "center",
-            valign = "center",
-            widget = wibox.container.place,
-        },
-        bg           = beautiful.splitwm_inactive_bg or "#00000080",
-        fg           = "#ffffff",
-        shape        = gears.shape.circle,
-        shape_border_width  = 2,
-        shape_border_color  = beautiful.splitwm_widget_border or "#ffffff30",
-        forced_width  = size,
-        forced_height = size,
-        widget       = wibox.container.background,
-    }
-end
-
 local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)
@@ -114,7 +89,7 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     function icon:fit(_, w, h) return w, h end
     return wibox.widget {
         icon,
-        bg                 = beautiful.splitwm_inactive_bg or "#00000080",
+        bg                 = beautiful.splitwm_inactive_bg,
         shape              = gears.shape.circle,
         forced_width       = size,
         forced_height      = size,
@@ -795,8 +770,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local client_color = colors.get_client_color(tc)
     local tab_bg = tab_state == "picked" and "#445566"
         or (client_color and client_color.dark)
-        or (tab_state == "active" and (beautiful.splitwm_tab_active_bg or "#535d6c"))
-        or beautiful.splitwm_inactive_bg or "#00000080"
+        or (tab_state == "active" and (beautiful.splitwm_tab_active_bg))
+        or beautiful.splitwm_inactive_bg
     local tab_bg_pat   = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
 
@@ -1014,8 +989,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             t            = t,
             state        = state,
             widget_bc    = is_focused and focus_color or "#00000000",
-            bar_bg       = is_focused and (beautiful.titlebar_bg_focus  or "#000000")
-                                      or  (beautiful.titlebar_bg_normal or "#000000aa"),
+            bar_bg       = beautiful.titlebar_bg_normal,
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
             icon_size    = 20,

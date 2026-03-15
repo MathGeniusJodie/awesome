@@ -59,22 +59,14 @@ beautiful.useless_gap        = 0
 beautiful.border_width       = 0
 beautiful.splitwm_gap        = 32
 beautiful.splitwm_inactive_bg  = "#00000080"
-beautiful.splitwm_empty_bg   = "#00000060"
 beautiful.splitwm_focus_border = "#7799dd"
-beautiful.splitwm_empty_border = "#555555"
 beautiful.splitwm_tab_active_bg = "#000000"
 beautiful.splitwm_tab_active_fg = "#ffffff"
-beautiful.splitwm_tab_fg     = "#888888"
 beautiful.splitwm_handle_hover_bg = "#7799dd22"
 beautiful.splitwm_handle_drag_bg  = "#7799dd44"
-beautiful.splitwm_launcher_bg       = "#3a3a3a"
-beautiful.splitwm_launcher_hover_bg  = "#555555"
 beautiful.splitwm_focus_border_width = 2
-beautiful.splitwm_widget_border      = "#fffffff0"
-beautiful.splitwm_font           = "monospace 12"
 beautiful.splitwm_btn_font       = "monospace bold 14"
 beautiful.titlebar_bg_normal     = "#00000000"
-beautiful.titlebar_bg_focus      = "#00000000"
 
 -- Wallpaper
 local wallpaper_path = os.getenv("HOME") .. "/background.jpg"
