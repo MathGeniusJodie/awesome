@@ -264,6 +264,19 @@ local function close_leaf(t, leaf_id)
     local sibling_idx = idx == 1 and 2 or 1
     local sibling = parent.children[sibling_idx]
 
+    -- Move the closed leaf's tabs to the sibling's first leaf so no windows are lost.
+    local sibling_leaves = tree.collect_leaves(sibling)
+    local dest = sibling_leaves[1]
+    for _, tc in ipairs(leaf.tabs) do
+        table.insert(dest.tabs, tc)
+        colors.resolve_color_conflict(dest, tc)
+    end
+    if dest.active_tab == 0 and #dest.tabs > 0 then dest.active_tab = 1 end
+
+    -- Keep the currently focused leaf if it lives in the sibling subtree;
+    -- otherwise fall back to the sibling's first leaf.
+    local keep = tree.find_leaf_by_id(sibling, state.focused_leaf_id)
+
     parent.type = sibling.type
     parent.direction = sibling.direction
     parent.ratio = sibling.ratio
@@ -272,8 +285,7 @@ local function close_leaf(t, leaf_id)
     parent.active_tab = sibling.active_tab
     parent.id = sibling.id
 
-    local new_leaves = tree.collect_leaves(parent)
-    if new_leaves[1] then state.focused_leaf_id = new_leaves[1].id end
+    state.focused_leaf_id = keep and keep.id or sibling_leaves[1].id
 end
 
 local function resize_focused(t, delta)
