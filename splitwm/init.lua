@@ -23,6 +23,68 @@ splitwm.launchers = {}  -- set from rc.lua before calling setup()
 
 local picked_up_client = nil
 
+---------------------------------------------------------------------------
+-- Per-window color system
+---------------------------------------------------------------------------
+
+local COLORS = {
+    { name = "pink",    light = "#eda2b9", dark = "#9e5a70" },
+    { name = "orange",  light = "#efa78e", dark = "#9f5e47" },
+    { name = "gold",    light = "#dbb575", dark = "#8e6b2b" },
+    { name = "green",   light = "#b3c480", dark = "#6b7a38" },
+    { name = "emerald", light = "#85cea7", dark = "#39825f" },
+    { name = "cyan",    light = "#6ccdd3", dark = "#078287" },
+    { name = "blue",    light = "#83c3f1", dark = "#3879a2" },
+    { name = "violet",  light = "#afb5f6", dark = "#676ba7" },
+    { name = "purple",  light = "#d6a8e0", dark = "#8a6093" },
+}
+
+local COLORS_BY_NAME = {}
+for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
+
+local function get_client_color(c)
+    if not c.valid then return nil end
+    local name = c:get_xproperty("splitwm_color")
+    return name and COLORS_BY_NAME[name]
+end
+
+local function set_client_color(c, name)
+    if c.valid then c:set_xproperty("splitwm_color", name) end
+end
+
+local function pick_color_for_leaf(leaf, exclude_c)
+    local used = {}
+    for _, tc in ipairs(leaf.tabs) do
+        if tc ~= exclude_c and tc.valid then
+            local col = get_client_color(tc)
+            if col then used[col.name] = true end
+        end
+    end
+    for _, col in ipairs(COLORS) do
+        if not used[col.name] then return col end
+    end
+    return COLORS[1]
+end
+
+local function assign_color(leaf, c)
+    set_client_color(c, pick_color_for_leaf(leaf, c).name)
+end
+
+local function resolve_color_conflict(leaf, c)
+    if not c.valid then return end
+    local existing = get_client_color(c)
+    if not existing then assign_color(leaf, c); return end
+    for _, tc in ipairs(leaf.tabs) do
+        if tc ~= c and tc.valid then
+            local col = get_client_color(tc)
+            if col and col.name == existing.name then
+                assign_color(leaf, c)
+                return
+            end
+        end
+    end
+end
+
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
     local inner
@@ -364,6 +426,7 @@ local function try_drop_picked_up(t, leaf_id)
     move_client_to_leaf(state.root, c, target)
     state.focused_leaf_id = leaf_id
     picked_up_client = nil
+    resolve_color_conflict(target, c)
 
     if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
     return true
@@ -463,6 +526,7 @@ local function move_tab_to_direction(t, dir)
     if src_leaf.active_tab > #src_leaf.tabs then src_leaf.active_tab = math.max(0, #src_leaf.tabs) end
     table.insert(dst_leaf.tabs, c)
     dst_leaf.active_tab = #dst_leaf.tabs
+    resolve_color_conflict(dst_leaf, c)
 end
 
 local function focus_direction(t, dir)
@@ -757,8 +821,11 @@ local function update_titlebars(s, t, state, geos)
                     entry.fp = fp
                     entry.titlebar_btn_list = {}
 
-                    local is_focused   = state.focused_leaf_id == leaf.id
-                    local widget_bc    = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or "#00000000"
+                    local is_focused    = state.focused_leaf_id == leaf.id
+                    local active_client = leaf.tabs[leaf.active_tab]
+                    local active_color  = active_client and get_client_color(active_client)
+                    local focus_color   = active_color and active_color.light or beautiful.splitwm_focus_border or "#7799dd"
+                    local widget_bc     = is_focused and focus_color or "#00000000"
 
                     local function make_tb_btn(draw_fn, size, callback)
                         local w = make_circle_icon_btn_widget(draw_fn, size)
@@ -848,9 +915,11 @@ local function update_titlebars(s, t, state, geos)
                             close_btn:buttons(gears.table.join(awful.button({}, 1, function() tab_client:kill() end)))
                         end
 
+                        local client_color = get_client_color(tc)
                         local tab_bg = is_picked and "#445566"
-                            or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
-                                          or  (beautiful.splitwm_inactive_bg or "#00000080"))
+                            or (client_color and client_color.dark
+                                or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
+                                              or  (beautiful.splitwm_inactive_bg or "#00000080")))
 
                         local tab_draw = wibox.widget.base.make_widget()
                         function tab_draw:draw(_, cr, w2, h2)
@@ -953,7 +1022,7 @@ local function update_titlebars(s, t, state, geos)
 
                     local top_pad = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT
 
-                    local border_color = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or nil
+                    local border_color = is_focused and focus_color or nil
                     local border_draw = wibox.widget.base.make_widget()
                     border_draw._bc   = border_color
                     border_draw._tb_h = tb_h
@@ -1202,11 +1271,15 @@ end
 ---------------------------------------------------------------------------
 
 function splitwm.setup()
+    awesome.register_xproperty("splitwm_color", "string")
+
     client.connect_signal("manage", function(c)
         local t = c.first_tag
         if not t then return end
         local state = get_state(t)
         if not find_leaf_for_client(state.root, c) then pin_client(t, c) end
+        local leaf = find_leaf_for_client(state.root, c)
+        if leaf then resolve_color_conflict(leaf, c) end
     end)
 
     client.connect_signal("unmanage", function(c)
