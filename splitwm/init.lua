@@ -786,7 +786,7 @@ local function update_titlebars(s, t, state, geos)
                             entry.tooltip_pool[i] = slot
                         else
                             slot.tt.text = name
-                            if slot.prev_obj then slot.tt:remove_from_object(slot.prev_obj); slot.tt.visible = false end
+                            if slot.prev_obj then slot.tt.visible = false; slot.tt:remove_from_object(slot.prev_obj) end
                         end
                         slot.tt:add_to_object(tab_widget)
                         slot.prev_obj = tab_widget
@@ -813,8 +813,9 @@ local function update_titlebars(s, t, state, geos)
 
                     for i = #leaf.tabs + 1, #entry.tooltip_pool do
                         local slot = entry.tooltip_pool[i]
-                        if slot and slot.prev_obj then
-                            slot.tt:remove_from_object(slot.prev_obj); slot.tt.visible = false; slot.prev_obj = nil
+                        if slot then
+                            if slot.prev_obj then slot.tt.visible = false; slot.tt:remove_from_object(slot.prev_obj) end
+                            entry.tooltip_pool[i] = nil
                         end
                     end
 
