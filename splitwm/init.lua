@@ -1265,6 +1265,7 @@ local function update_drag_handles(s, state, bounds)
     end
 end
 
+
 ---------------------------------------------------------------------------
 -- Unified UI update
 ---------------------------------------------------------------------------
@@ -1276,7 +1277,7 @@ local function update_ui(s)
         if sides then for _, wb in ipairs(sides) do wb.visible = false end end
         local pool = drag_handle_pool[s]
         if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
-        if overlay_cache[s] then for _, wb in pairs(overlay_cache[s]) do wb.visible = false end end
+        if overlay_cache[s]  then for _, wb    in pairs(overlay_cache[s])  do wb.visible = false    end end
         if titlebar_cache[s] then for _, entry in pairs(titlebar_cache[s]) do entry.wb.visible = false end end
         return
     end
@@ -1398,9 +1399,8 @@ function splitwm.setup()
 end
 
 function splitwm.flush_caches()
-    for _, screen_cache in pairs(overlay_cache) do for _, wb in pairs(screen_cache) do wb.visible = false end end
+    for _, screen_cache in pairs(overlay_cache)  do for _, wb    in pairs(screen_cache) do wb.visible = false    end end
     overlay_cache = {}
-    
     for _, screen_cache in pairs(titlebar_cache) do for _, entry in pairs(screen_cache) do entry.wb.visible = false end end
     titlebar_cache = {}
 end
