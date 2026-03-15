@@ -783,7 +783,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         layout = wibox.layout.stack,
     }
 
-    tab_widget:connect_signal("mouse::enter", function() entry.tooltip.text = tc.name or "?" end)
+    tab_widget:connect_signal("mouse::enter", function() entry.tooltip.text = (tc.valid and tc.name) or "?" end)
     entry.tooltip:add_to_object(tab_widget)
     table.insert(entry.tooltip_objs, tab_widget)
 
@@ -1208,7 +1208,6 @@ function splitwm.flush_caches()
     overlay_cache = {}
     for _, screen_cache in pairs(titlebar_cache) do
         for _, entry in pairs(screen_cache) do
-            entry.tooltip.visible = false
             for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
             entry.wb.visible = false
         end
