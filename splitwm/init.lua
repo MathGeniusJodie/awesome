@@ -162,6 +162,18 @@ local function get_state(t)
     return tag_state[t]
 end
 
+-- Returns (tag, state) for a client, or (nil, nil) if either is missing.
+local function get_tag_state(c)
+    local t = c.first_tag
+    if not t then return nil, nil end
+    return t, tag_state[t]
+end
+
+-- Clamps leaf.active_tab into [0, #leaf.tabs].
+local function clamp_active_tab(leaf)
+    leaf.active_tab = math.max(0, math.min(leaf.active_tab, #leaf.tabs))
+end
+
 ---------------------------------------------------------------------------
 -- Client management
 ---------------------------------------------------------------------------
@@ -204,8 +216,8 @@ local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
     if not leaf_a or not leaf_b then return end
     leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
     leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
-    if leaf_a.active_tab > #leaf_a.tabs then leaf_a.active_tab = math.max(0, #leaf_a.tabs) end
-    if leaf_b.active_tab > #leaf_b.tabs then leaf_b.active_tab = math.max(0, #leaf_b.tabs) end
+    clamp_active_tab(leaf_a)
+    clamp_active_tab(leaf_b)
 end
 
 local function try_drop_picked_up(t, leaf_id)
@@ -352,7 +364,7 @@ local function move_tab_to_direction(t, dir)
 
     local c = src_leaf.tabs[src_leaf.active_tab]
     table.remove(src_leaf.tabs, src_leaf.active_tab)
-    if src_leaf.active_tab > #src_leaf.tabs then src_leaf.active_tab = math.max(0, #src_leaf.tabs) end
+    clamp_active_tab(src_leaf)
     table.insert(dst_leaf.tabs, c)
     dst_leaf.active_tab = #dst_leaf.tabs
     colors.resolve_color_conflict(dst_leaf, c)
@@ -425,8 +437,7 @@ local function arrange(p)
             if tc.valid then table.insert(new_tabs, tc) end
         end
         leaf.tabs = new_tabs
-        if leaf.active_tab > #leaf.tabs then leaf.active_tab = math.max(0, #leaf.tabs) end
-        if #leaf.tabs == 0 then leaf.active_tab = 0 end
+        clamp_active_tab(leaf)
 
         local geo = geos[leaf.id]
         if geo then
@@ -501,6 +512,19 @@ end
 
 local overlay_cache  = {}
 local titlebar_cache = {}
+
+-- Returns (entry, leaf) for a client's titlebar, or (nil, nil) if any step fails.
+local function get_titlebar_entry(c)
+    if not c.screen then return nil, nil end
+    local t = c.first_tag
+    if not t then return nil, nil end
+    local state = tag_state[t]
+    if not state then return nil, nil end
+    local leaf = tree.find_leaf_for_client(state.root, c)
+    if not leaf then return nil, nil end
+    local entry = titlebar_cache[c.screen] and titlebar_cache[c.screen][leaf.id]
+    return entry, leaf
+end
 
 ---------------------------------------------------------------------------
 -- Update Overlays (empty split placeholders)
@@ -606,6 +630,11 @@ end
 -- Titlebars (Wibox based) — helper functions
 ---------------------------------------------------------------------------
 
+local function on_hover_fg(w, hover_fg, normal_fg)
+    w:connect_signal("mouse::enter", function() w.fg = hover_fg end)
+    w:connect_signal("mouse::leave", function() w.fg = normal_fg end)
+end
+
 local function tb_get_or_create_entry(s, leaf)
     local cache = titlebar_cache[s]
     local entry = cache[leaf.id]
@@ -700,16 +729,17 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         widget       = wibox.container.background,
     }
     if is_active then
-        close_btn:connect_signal("mouse::enter", function() close_btn.fg = "#ff6666" end)
-        close_btn:connect_signal("mouse::leave", function() close_btn.fg = "#ffffff" end)
+        on_hover_fg(close_btn, "#ff6666", "#ffffff")
         close_btn:buttons(gears.table.join(awful.button({}, 1, function() tc:kill() end)))
     end
 
     local client_color = colors.get_client_color(tc)
-    local tab_bg = is_picked and "#445566"
-        or (client_color and client_color.dark
-            or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c")
-                           or  (beautiful.splitwm_inactive_bg  or "#00000080")))
+    local tab_bg
+    if    is_picked     then tab_bg = "#445566"
+    elseif client_color then tab_bg = client_color.dark
+    elseif is_active    then tab_bg = beautiful.splitwm_tab_active_bg or "#535d6c"
+    else                     tab_bg = beautiful.splitwm_inactive_bg   or "#00000080"
+    end
     local tab_bg_pat   = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
 
@@ -795,8 +825,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local close_split_btn = make_btn(icons.close, function()
         close_leaf(ctx.t, leaf.id); awful.layout.arrange(ctx.s)
     end)
-    close_split_btn:connect_signal("mouse::enter", function() close_split_btn.fg = "#ff6666" end)
-    close_split_btn:connect_signal("mouse::leave", function() close_split_btn.fg = "#ffffff" end)
+    on_hover_fg(close_split_btn, "#ff6666", "#ffffff")
 
     local is_split_picked = (picked_up_split == leaf.id)
     local swap_btn = make_circle_icon_btn_widget(icons.swap, 26)
@@ -1143,9 +1172,7 @@ function splitwm.setup()
     end)
 
     client.connect_signal("focus", function(c)
-        local t = c.first_tag
-        if not t then return end
-        local state = tag_state[t]
+        local t, state = get_tag_state(c)
         if not state then return end
         local leaf = tree.find_leaf_for_client(state.root, c)
         if leaf and leaf.id ~= state.focused_leaf_id then
@@ -1155,9 +1182,7 @@ function splitwm.setup()
     end)
 
     client.connect_signal("button::press", function(c)
-        local t = c.first_tag
-        if not t then return end
-        local state = tag_state[t]
+        local t, state = get_tag_state(c)
         if not state then return end
         if picked_up_split then
             local target_leaf = tree.find_leaf_for_client(state.root, c)
@@ -1181,14 +1206,7 @@ function splitwm.setup()
 
     client.connect_signal("property::name", function(c)
         -- Update only the affected tooltip in-place; no full widget rebuild needed.
-        if not c.screen then return end
-        local t = c.first_tag
-        if not t then return end
-        local state = tag_state[t]
-        if not state then return end
-        local leaf = tree.find_leaf_for_client(state.root, c)
-        if not leaf then return end
-        local entry = titlebar_cache[c.screen] and titlebar_cache[c.screen][leaf.id]
+        local entry, leaf = get_titlebar_entry(c)
         if not entry then return end
         for i, tc in ipairs(leaf.tabs) do
             if tc == c then
