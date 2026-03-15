@@ -969,6 +969,9 @@ local function update_drag_handles(s, state, bounds)
     local handle_w = gap - 4
     local hi       = 0
 
+    -- Only "h" bounds (vertical dividers between left/right panes) need a drag strip wibox.
+    -- "v" bounds (horizontal dividers between top/bottom panes) are dragged via the titlebar,
+    -- which spans the full width of the pane and sits exactly on the vertical gap.
     for _, b in ipairs(bounds) do
         if b.dir == "h" then
             hi = hi + 1
