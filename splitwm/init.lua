@@ -255,6 +255,10 @@ local function close_leaf(t, leaf_id)
     local state = get_state(t)
     local leaf = tree.find_leaf_by_id(state.root, leaf_id)
     if not leaf then return false end
+    if picked_up_split  == leaf_id then picked_up_split  = nil end
+    if picked_up_client and tree.find_leaf_for_client(state.root, picked_up_client.client) == leaf then
+        picked_up_client = nil
+    end
     local leaves = tree.collect_leaves(state.root)
     if #leaves <= 1 then return false end
 
