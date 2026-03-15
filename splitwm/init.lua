@@ -1082,8 +1082,8 @@ function splitwm.setup()
         local t = c.first_tag
         if not t then return end
         local state = get_state(t)
-        if not tree.find_leaf_for_client(state.root, c) then pin_client(t, c) end
         local leaf = tree.find_leaf_for_client(state.root, c)
+        if not leaf then pin_client(t, c); leaf = tree.find_leaf_for_client(state.root, c) end
         if leaf then colors.resolve_color_conflict(leaf, c) end
     end)
 
