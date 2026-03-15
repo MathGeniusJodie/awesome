@@ -178,6 +178,14 @@ local function make_circle_btn(label, size, callback)
     return w
 end
 
+local function make_circle_icon_btn(draw_fn, size, callback)
+    local w = make_circle_icon_btn_widget(draw_fn, size)
+    w:connect_signal("mouse::enter", function() w.bg = "#00000080" end)
+    w:connect_signal("mouse::leave", function() w.bg = beautiful.splitwm_inactive_bg or "#00000080" end)
+    w:buttons(gears.table.join(awful.button({}, 1, callback)))
+    return w
+end
+
 local function rounded_top(cr, w, h)
     local r = 4
     cr:new_sub_path()
@@ -703,9 +711,9 @@ local function update_overlays(s, t, state, geos)
                 wb._drag_strip.cursor = raise > 0 and "sb_v_double_arrow" or nil
                 wb.visible = true
             else
-                local vsplit_btn = make_circle_btn("│", 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s) end)
-                local hsplit_btn = make_circle_btn("─", 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s) end)
-                local close_btn  = make_circle_btn("✕", 36, function() close_leaf(t, leaf_id); awful.layout.arrange(s) end)
+                local vsplit_btn = make_circle_icon_btn(icon_vsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s) end)
+                local hsplit_btn = make_circle_icon_btn(icon_hsplit, 36, function() state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s) end)
+                local close_btn  = make_circle_icon_btn(icon_close,  36, function() close_leaf(t, leaf_id); awful.layout.arrange(s) end)
 
                 local launcher_ws = {}
                 for _, entry in ipairs(splitwm.launchers) do
