@@ -133,7 +133,8 @@ function menu.setup(opts)
     -- `ready` stays false until all buttons are released after opening, so the
     -- opening click itself doesn't immediately re-close the menu.
     local poll_ready = false
-    local menu_poll_timer = gears.timer {
+    local menu_poll_timer
+    menu_poll_timer = gears.timer {
         timeout   = 0.05,
         autostart = false,
         callback  = function()

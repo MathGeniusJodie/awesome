@@ -257,7 +257,7 @@ local function close_leaf(t, leaf_id)
     local leaf = state.leaf_map[leaf_id]
     if not leaf then return false end
     if picked_up_split  == leaf_id then picked_up_split  = nil end
-    if picked_up_client and tree.find_leaf_for_client(state.root, picked_up_client.client) == leaf then
+    if picked_up_client and picked_up_client.client.valid and tree.find_leaf_for_client(state.root, picked_up_client.client) == leaf then
         picked_up_client = nil
     end
     local leaf_count = 0
@@ -792,7 +792,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                                     picked_up_split = nil
                                     awful.layout.arrange(s); return
                                 end
-                                if picked_up_client and picked_up_client.client ~= tc then
+                                if picked_up_client and picked_up_client.client.valid and picked_up_client.client ~= tc then
                                     try_drop_picked_up(t, leaf.id)
                                     awful.layout.arrange(s)
                                     return
