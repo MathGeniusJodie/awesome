@@ -8,8 +8,10 @@ local battery_widgets = {}
 local volume_widgets  = {}
 local chip_widgets    = {}
 
--- Forward declaration so new_battery_widget can trigger a refresh on creation.
+-- Forward declarations so widget factories can trigger an immediate refresh on creation.
 local refresh_battery
+local refresh_volume_internal
+local refresh_chip
 
 ---------------------------------------------------------------------------
 -- Widget factories
@@ -131,6 +133,7 @@ function status.new_volume_widget()
     end
 
     table.insert(volume_widgets, w)
+    gears.timer.delayed_call(function() refresh_volume_internal() end)
     return w
 end
 
@@ -203,6 +206,7 @@ function status.new_chip_widget()
     end
 
     table.insert(chip_widgets, w)
+    gears.timer.delayed_call(function() refresh_chip() end)
     return w
 end
 
