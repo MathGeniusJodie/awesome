@@ -917,7 +917,14 @@ local function update_titlebars(s, t, state, geos, leaves)
             end
             -- tab_widgets contains only the "+" button; pass directly, no layer split needed
             tb_assemble_empty_wibox(entry, tab_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
+            -- Clicking the content area completes a swap/drop, just like the old overlay did
+            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
+                if pickup.tag == "split"  then handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
+                if pickup.tag == "client" then try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
+                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
+            end)))
         else
+            entry.wb:buttons(gears.table.join())  -- clear handler when split becomes non-empty
             local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab)
             tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
         end
