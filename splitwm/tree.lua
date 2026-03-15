@@ -108,10 +108,4 @@ function tree.compute_tree(node, x, y, w, h, gap, geos, bounds)
     compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil)
 end
 
-function tree.compute_geometries(node, x, y, w, h, gap)
-    local geos = {}
-    tree.compute_tree(node, x, y, w, h, gap, geos, nil)
-    return geos
-end
-
 return tree

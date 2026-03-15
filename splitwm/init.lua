@@ -108,12 +108,6 @@ local function make_circle_btn_widget(label, size)
     }
 end
 
-local function make_circle_btn(label, size, callback)
-    local w = make_circle_btn_widget(label, size)
-    w:buttons(gears.table.join(awful.button({}, 1, callback)))
-    return w
-end
-
 local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)

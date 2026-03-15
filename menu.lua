@@ -123,11 +123,6 @@ function menu.setup(opts)
         awful.button({}, 3, function() app_menu:hide() end)
     ))
 
-    -- Close menu when clicking empty split overlays
-    splitwm.on_background_click = function()
-        app_menu:hide()
-    end
-
     -- Poll: close the menu if the user clicks outside it.
     -- `ready` stays false until all buttons are released after opening, so the
     -- opening click itself doesn't immediately re-close the menu.

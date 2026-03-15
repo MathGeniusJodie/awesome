@@ -102,7 +102,6 @@ local status  = require("status")
 ---------------------------------------------------------------------------
 
 local terminal = os.getenv("TERMINAL") or "xterm"
-local editor   = os.getenv("EDITOR") or "vim"
 local modkey   = "Mod4"
 
 -- Browser detection: try common browsers
