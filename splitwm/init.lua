@@ -648,8 +648,8 @@ local function tb_get_or_create_entry(s, leaf)
     if entry then return entry end
     entry = {
         wb                = wibox { screen = s, bg = "#00000000", visible = true, ontop = false, type = "utility" },
-        tooltip_pool      = {},
-        tooltip_pool_n    = 0,
+        tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12", bg = "#000000", fg = "#ffffff", border_width = 0 },
+        tooltip_objs      = {},
         titlebar_btn_list = {},
         titlebar_hovered  = false,
     }
@@ -670,8 +670,7 @@ local function tb_get_or_create_entry(s, leaf)
 end
 
 -- Fingerprint check to prevent unneeded heavy redraws.
--- Tab names are excluded: name changes are handled by the property::name
--- signal handler which updates tooltips directly without a full rebuild.
+-- Tab names are excluded: tooltip text is set dynamically on mouse::enter.
 local function tb_compute_fingerprint(leaf, state)
     local parts = {
         leaf.active_tab,
@@ -784,19 +783,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         layout = wibox.layout.stack,
     }
 
-    -- Tooltip: reuse slot from pool to avoid leaking objects
-    local name = tc.name or "?"
-    local slot = entry.tooltip_pool[tab_idx]
-    if not slot then
-        slot = { tt = awful.tooltip { text = name, delay_show = 0.3, font = "monospace bold 12", bg = "#000000", fg = "#ffffff", border_width = 0 } }
-        entry.tooltip_pool[tab_idx] = slot
-        if tab_idx > entry.tooltip_pool_n then entry.tooltip_pool_n = tab_idx end
-    else
-        slot.tt.text = name
-        if slot.prev_obj then slot.tt.visible = false; slot.tt:remove_from_object(slot.prev_obj) end
-    end
-    slot.tt:add_to_object(tab_widget)
-    slot.prev_obj = tab_widget
+    tab_widget:connect_signal("mouse::enter", function() entry.tooltip.text = tc.name or "?" end)
+    entry.tooltip:add_to_object(tab_widget)
+    table.insert(entry.tooltip_objs, tab_widget)
 
     tab_widget:buttons(gears.table.join(awful.button({}, 1, function()
         if pickup.split and pickup.split ~= leaf.id then
@@ -993,21 +982,15 @@ local function update_titlebars(s, t, state, geos, leaves)
             BTN_SPACING  = 5,
         }
 
+        -- Detach tooltip from previous tab widgets before rebuilding
+        for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
+        entry.tooltip_objs = {}
+
         -- Build per-tab widgets
         local tab_widgets = {}
         for i, tc in ipairs(leaf.tabs) do
             table.insert(tab_widgets, tb_build_tab_widget(leaf, tc, i, entry, ctx))
         end
-
-        -- Release stale tooltip slots beyond current tab count
-        for i = #leaf.tabs + 1, entry.tooltip_pool_n do
-            local slot = entry.tooltip_pool[i]
-            if slot then
-                if slot.prev_obj then slot.tt.visible = false; slot.tt:remove_from_object(slot.prev_obj) end
-                entry.tooltip_pool[i] = nil
-            end
-        end
-        entry.tooltip_pool_n = #leaf.tabs
 
         -- "+" menu button lives at the end of the tab row
         table.insert(tab_widgets, tb_make_btn(entry, ctx.widget_bc, icons.plus, 26, function()
@@ -1208,19 +1191,6 @@ function splitwm.setup()
         end
     end)
 
-    client.connect_signal("property::name", function(c)
-        -- Update only the affected tooltip in-place; no full widget rebuild needed.
-        local entry, leaf = get_titlebar_entry(c)
-        if not entry then return end
-        for i, tc in ipairs(leaf.tabs) do
-            if tc == c then
-                local slot = entry.tooltip_pool[i]
-                if slot then slot.tt.text = c.name or "?" end
-                break
-            end
-        end
-    end)
-
     tag.connect_signal("property::selected", function(t)
         local s = t.screen
         if type(s) == "number" then s = screen[s] end
@@ -1238,14 +1208,8 @@ function splitwm.flush_caches()
     overlay_cache = {}
     for _, screen_cache in pairs(titlebar_cache) do
         for _, entry in pairs(screen_cache) do
-            -- Detach tooltips before dropping the entry so their signal
-            -- connections don't keep the old tab widgets alive.
-            for _, slot in pairs(entry.tooltip_pool) do
-                if slot and slot.prev_obj then
-                    slot.tt.visible = false
-                    slot.tt:remove_from_object(slot.prev_obj)
-                end
-            end
+            entry.tooltip.visible = false
+            for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
             entry.wb.visible = false
         end
     end
