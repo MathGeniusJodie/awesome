@@ -255,7 +255,7 @@ refresh_battery = function()
     end
 end
 
-local function refresh_volume_internal()
+refresh_volume_internal = function()
     awful.spawn.easy_async_with_shell(
         "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null; pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null",
         function(out)
@@ -276,7 +276,7 @@ end
 
 local _cpu_prev_idle, _cpu_prev_total = 0, 0
 
-local function refresh_chip()
+refresh_chip = function()
     -- Synchronous io.open is intentional: /proc/stat and /proc/meminfo are
     -- kernel virtual files with no disk I/O. Spawning subprocesses would be heavier.
     -- CPU: read /proc/stat

@@ -60,15 +60,6 @@ function tree.find_leaf_for_client(node, c)
     end
 end
 
-function tree.find_leaf_by_id(node, id)
-    if node.type == "leaf" then
-        return node.id == id and node or nil
-    else
-        return tree.find_leaf_by_id(node.children[1], id)
-            or tree.find_leaf_by_id(node.children[2], id)
-    end
-end
-
 function tree.find_parent(root, target)
     if root.type == "leaf" then return nil, nil end
     for i, child in ipairs(root.children) do
@@ -77,15 +68,6 @@ function tree.find_parent(root, target)
         if p then return p, idx end
     end
     return nil, nil
-end
-
-function tree.find_focused_leaf(root, focused_client)
-    if focused_client then
-        local leaf = tree.find_leaf_for_client(root, focused_client)
-        if leaf then return leaf end
-    end
-    local leaves = tree.collect_leaves(root)
-    return leaves[1]
 end
 
 ---------------------------------------------------------------------------
