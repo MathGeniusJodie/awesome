@@ -986,35 +986,26 @@ local function update_focus_border(s, state, geos, gap)
 
     local bw      = beautiful.splitwm_focus_border_width or 2
     local bc      = beautiful.splitwm_focus_border       or "#7799dd"
-    local has_win = leaf.tabs and #leaf.tabs > 0
     -- Frame wibox handles the border when the split has windows
-    if has_win then
+    if leaf.tabs and #leaf.tabs > 0 then
         for _, wb in ipairs(sides) do wb.visible = false end
         return
     end
-    local gy      = has_win and (geo.y - gap) or geo.y
-    local gh      = has_win and (geo.height + gap) or geo.height
-    local tb_h    = has_win and math.max(TITLEBAR_HEIGHT, gap) or 0
-    local side_y  = gy + tb_h
-    local side_h  = gh - tb_h - bw
+    local side_h  = geo.height - bw
     local rects = {
-        { x = geo.x,              y = gy,           width = geo.width, height = bw },
-        { x = geo.x,              y = gy + gh - bw, width = geo.width, height = bw },
-        { x = geo.x,              y = side_y,       width = bw,        height = side_h },
-        { x = geo.x + geo.width - bw, y = side_y,  width = bw,        height = side_h },
+        { x = geo.x,                  y = geo.y,                  width = geo.width, height = bw },
+        { x = geo.x,                  y = geo.y + geo.height - bw, width = geo.width, height = bw },
+        { x = geo.x,                  y = geo.y,                  width = bw,        height = side_h },
+        { x = geo.x + geo.width - bw, y = geo.y,                  width = bw,        height = side_h },
     }
     for i, r in ipairs(rects) do
         local wb = sides[i]
-        if i == 1 and has_win then
-            wb.visible = false
-        else
-            wb.bg      = bc
-            wb.x       = r.x
-            wb.y       = r.y
-            wb.width   = math.max(1, r.width)
-            wb.height  = math.max(1, r.height)
-            wb.visible = true
-        end
+        wb.bg      = bc
+        wb.x       = r.x
+        wb.y       = r.y
+        wb.width   = math.max(1, r.width)
+        wb.height  = math.max(1, r.height)
+        wb.visible = true
     end
 end
 
