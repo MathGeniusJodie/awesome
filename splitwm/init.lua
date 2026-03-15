@@ -714,7 +714,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                             },
                             bg           = is_picked and "#7799dd" or "#00000000",
                             fg           = is_active and "#ffffff" or "#00000000",
-                            shape        = function(cr, bw2, bh) gears.shape.rounded_rect(cr, bw2, bh, 4) end,
+                            shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
                             forced_width = 26,
                             widget = wibox.container.background,
                         }
@@ -742,7 +742,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                             },
                             bg           = "#00000000",
                             fg           = is_active and "#ffffff" or "#00000000",
-                            shape        = function(cr, bw2, bh) gears.shape.rounded_rect(cr, bw2, bh, 4) end,
+                            shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
                             forced_width = 26,
                             widget = wibox.container.background,
                         }
