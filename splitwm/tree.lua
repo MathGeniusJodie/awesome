@@ -1,5 +1,8 @@
 local tree = {}
 
+tree.DIR_H = "horizontal"
+tree.DIR_V = "vertical"
+
 ---------------------------------------------------------------------------
 -- ID generator
 ---------------------------------------------------------------------------
@@ -17,7 +20,7 @@ end
 
 function tree.make_leaf()
     return {
-        type = "leaf",
+        kind = "leaf",
         id   = gen_id(),
         tabs = {},
         active_tab = 0,
@@ -26,7 +29,7 @@ end
 
 function tree.make_branch(direction, ratio, child_a, child_b)
     return {
-        type      = "branch",
+        kind      = "branch",
         direction = direction,
         ratio     = ratio or 0.5,
         children  = { child_a, child_b },
@@ -38,7 +41,7 @@ end
 ---------------------------------------------------------------------------
 
 local function traverse(node, fn)
-    if node.type == "leaf" then fn(node)
+    if node.kind == "leaf" then fn(node)
     else traverse(node.children[1], fn); traverse(node.children[2], fn) end
 end
 
@@ -49,7 +52,7 @@ function tree.collect_leaves(node)
 end
 
 function tree.find_leaf_for_client(node, c)
-    if node.type == "leaf" then
+    if node.kind == "leaf" then
         for _, tc in ipairs(node.tabs) do
             if tc == c then return node end
         end
@@ -60,7 +63,7 @@ function tree.find_leaf_for_client(node, c)
 end
 
 function tree.find_parent(root, target)
-    if root.type == "leaf" then return nil, nil end
+    if root.kind == "leaf" then return nil, nil end
     for i, child in ipairs(root.children) do
         if child == target then return root, i end
         local p, idx = tree.find_parent(child, target)
@@ -74,17 +77,17 @@ end
 ---------------------------------------------------------------------------
 
 local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above)
-    if node.type == "leaf" then
+    if node.kind == "leaf" then
         if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
         if bounds ~= nil then node.v_bound_above = v_bound_above end
         return
     end
     local dir, ratio, inner = node.direction, node.ratio, gap
-    if dir == "h" then
+    if dir == tree.DIR_H then
         local usable = w - inner
         local w1 = math.floor(usable * ratio)
         if bounds then
-            table.insert(bounds, { branch = node, dir = "h", pos = x + w1 + math.floor(inner / 2),
+            table.insert(bounds, { branch = node, dir = tree.DIR_H, pos = x + w1 + math.floor(inner / 2),
                 start = y, span = h, parent_x = x, parent_w = w, parent_gap = inner })
         end
         compute_tree_inner(node.children[1], x,          y, w1,        h, gap, geos, bounds, v_bound_above)
@@ -94,7 +97,7 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
         local h1 = math.floor(usable * ratio)
         local bnd
         if bounds then
-            bnd = { branch = node, dir = "v", pos = y + h1 + math.floor(inner / 2),
+            bnd = { branch = node, dir = tree.DIR_V, pos = y + h1 + math.floor(inner / 2),
                 start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner }
             table.insert(bounds, bnd)
         end

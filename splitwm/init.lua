@@ -30,16 +30,12 @@ local SPLIT_RATIO = 0.618
 ---------------------------------------------------------------------------
 splitwm.launchers = {}  -- set from rc.lua before calling setup()
 
--- Drag-and-drop state.  Only one of client or split can be active at a time.
-local pickup = {
-    client     = nil,  -- AwesomeWM client being moved (or nil)
-    client_tag = nil,  -- tag the client was picked from
-    split      = nil,  -- leaf_id of the split being swapped (or nil)
-}
-function pickup:reset()           self.client = nil; self.client_tag = nil; self.split = nil end
-function pickup:reset_client()    self.client = nil; self.client_tag = nil end
-function pickup:pick_client(c, t) self:reset(); self.client = c; self.client_tag = t end
-function pickup:pick_split(id)    self:reset(); self.split = id end
+-- Pickup is a tagged union: idle | client{client,client_tag} | split{split_id}
+local PICKUP_IDLE = { tag = "idle" }
+local function pickup_idle()            return PICKUP_IDLE end
+local function pickup_client(c, t)      return { tag = "client", client = c, client_tag = t } end
+local function pickup_split(id)         return { tag = "split", split_id = id } end
+local pickup = PICKUP_IDLE
 
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
@@ -229,22 +225,22 @@ local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
     leaf_b.active_tab = math.min(leaf_b.active_tab, #leaf_b.tabs)
 end
 
--- Called when pickup.split is active: swaps tabs if different leaf, then always resets and arranges.
+-- Called when pickup tag=="split" is active: swaps tabs if different leaf, then always resets and arranges.
 local function handle_split_pickup(state, leaf_id, s)
-    if pickup.split ~= leaf_id then
-        swap_split_tabs(state, pickup.split, leaf_id)
+    if pickup.split_id ~= leaf_id then
+        swap_split_tabs(state, pickup.split_id, leaf_id)
         state.focused_leaf_id = leaf_id
     end
-    pickup.split = nil
+    pickup = pickup_idle()
     awful.layout.arrange(s)
 end
 
 local function try_drop_picked_up(t, leaf_id)
-    if not pickup.client then return false end
-    if not pickup.client.valid then pickup:reset_client(); return false end
+    if pickup.tag ~= "client" then return false end
+    if not pickup.client.valid then pickup = pickup_idle(); return false end
     local state = get_state(t)
     local target = state.leaf_map[leaf_id]
-    if not target then pickup:reset_client(); return false end
+    if not target then pickup = pickup_idle(); return false end
 
     local c = pickup.client
     local src_tag = pickup.client_tag
@@ -257,7 +253,7 @@ local function try_drop_picked_up(t, leaf_id)
 
     move_client_to_leaf(state.root, c, target)
     state.focused_leaf_id = leaf_id
-    pickup:reset_client()
+    pickup = pickup_idle()
     colors.resolve_color_conflict(target, c)
 
     if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
@@ -297,9 +293,9 @@ local function close_leaf(t, leaf_id)
     local state = get_state(t)
     local leaf = state.leaf_map[leaf_id]
     if not leaf then return false end
-    if pickup.split == leaf_id then pickup.split = nil end
-    if pickup.client and pickup.client.valid and tree.find_leaf_for_client(state.root, pickup.client) == leaf then
-        pickup:reset_client()
+    if pickup.tag == "split" and pickup.split_id == leaf_id then pickup = pickup_idle() end
+    if pickup.tag == "client" and pickup.client.valid and tree.find_leaf_for_client(state.root, pickup.client) == leaf then
+        pickup = pickup_idle()
     end
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
@@ -341,8 +337,8 @@ end
 -- Returns callbacks table for the three split control actions (vsplit, hsplit, close).
 local function make_split_action_callbacks(state, leaf_id, t, s)
     return {
-        vsplit = function() state.focused_leaf_id = leaf_id; split_leaf(t, "h"); awful.layout.arrange(s) end,
-        hsplit = function() state.focused_leaf_id = leaf_id; split_leaf(t, "v"); awful.layout.arrange(s) end,
+        vsplit = function() state.focused_leaf_id = leaf_id; split_leaf(t, tree.DIR_H); awful.layout.arrange(s) end,
+        hsplit = function() state.focused_leaf_id = leaf_id; split_leaf(t, tree.DIR_V); awful.layout.arrange(s) end,
         close  = function() close_leaf(t, leaf_id); awful.layout.arrange(s) end,
     }
 end
@@ -504,21 +500,22 @@ local function get_drag_handle(s, i)
     if not drag_handle_pool[s] then drag_handle_pool[s] = {} end
     if drag_handle_pool[s][i] then return drag_handle_pool[s][i] end
 
-    local ref = { b = nil, handle_w = 1, dragging = false }
+    local ref = { b = nil, handle_w = 1 }
+    local handle_state = "idle"
     local wb  = wibox { x = 0, y = 0, width = 1, height = 1, bg = "#00000000", visible = false, ontop = true, type = "utility" }
 
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
             if not ref.b then return end
-            ref.dragging = true
+            handle_state = "dragging"
             wb.bg = beautiful.splitwm_handle_drag_bg or "#7799dd44"
             local b, hw = ref.b, ref.handle_w
             mousegrabber.run(function(mouse)
                 if not mouse.buttons[1] then
-                    ref.dragging = false; wb.bg = "#00000000"; awful.layout.arrange(s); return false
+                    handle_state = "idle"; wb.bg = "#00000000"; awful.layout.arrange(s); return false
                 end
                 local igap = b.parent_gap or 0
-                if b.dir == "h" then
+                if b.dir == tree.DIR_H then
                     b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.x - b.parent_x) / (b.parent_w - igap)))
                     wb.x = mouse.x - math.floor(hw / 2)
                 else
@@ -527,11 +524,11 @@ local function get_drag_handle(s, i)
                 end
                 awful.layout.arrange(s)
                 return true
-            end, b.dir == "h" and "sb_h_double_arrow" or "sb_v_double_arrow")
+            end, b.dir == tree.DIR_H and "sb_h_double_arrow" or "sb_v_double_arrow")
         end)
     ))
-    wb:connect_signal("mouse::enter", function() if not ref.dragging then wb.bg = beautiful.splitwm_handle_hover_bg or "#7799dd22" end end)
-    wb:connect_signal("mouse::leave", function() if not ref.dragging then wb.bg = "#00000000" end end)
+    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = beautiful.splitwm_handle_hover_bg or "#7799dd22" end end)
+    wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = "#00000000" end end)
 
     local entry = { wb = wb, ref = ref }
     drag_handle_pool[s][i] = entry
@@ -629,8 +626,8 @@ local function overlay_create(s, t, state, leaf_id, leaf, g, bg, border)
     wb._drag_strip = drag_strip
     wb._v_drag_ref = v_drag_ref
     wb:buttons(gears.table.join(awful.button({}, 1, function()
-        if pickup.split           then handle_split_pickup(state, leaf_id, s); return end
-        if pickup.client          then try_drop_picked_up(t, leaf_id); awful.layout.arrange(s); return end
+        if pickup.tag == "split"  then handle_split_pickup(state, leaf_id, s); return end
+        if pickup.tag == "client" then try_drop_picked_up(t, leaf_id); awful.layout.arrange(s); return end
         state.focused_leaf_id = leaf_id; awful.layout.arrange(s)
     end)))
     return wb
@@ -728,11 +725,11 @@ local function tb_compute_fingerprint(leaf, state)
         leaf.active_tab,
         state.focused_leaf_id == leaf.id and 1 or 0,
         tostring(leaf.v_bound_above),
-        pickup.split == leaf.id and "S" or "",
+        (pickup.tag == "split" and pickup.split_id == leaf.id) and "S" or "",
     }
     for _, tc in ipairs(leaf.tabs) do
         parts[#parts+1] = tostring(tc.window)
-        if pickup.client == tc then parts[#parts+1] = "P" end
+        if pickup.tag == "client" and pickup.client == tc then parts[#parts+1] = "P" end
     end
     return table.concat(parts, "\0")
 end
@@ -745,10 +742,17 @@ local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
     return w
 end
 
+-- tab_state: "active" | "inactive" | "picked"
+local function get_tab_state(tab_idx, leaf, tc)
+    if pickup.tag == "client" and pickup.client == tc then return "picked"
+    elseif tab_idx == leaf.active_tab then return "active"
+    else return "inactive"
+    end
+end
+
 -- Build the widget for a single tab (icon, move button, close button, shape, tooltip).
 local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
-    local is_active = (tab_idx == leaf.active_tab)
-    local is_picked = (pickup.client == tc)
+    local tab_state = get_tab_state(tab_idx, leaf, tc)
 
     local tab_icon = awful.widget.clienticon(tc)
     tab_icon.forced_width  = ctx.icon_size
@@ -756,23 +760,23 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     local move_btn = wibox.widget {
         {
-            { text = is_picked and "▼" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
+            { text = tab_state == "picked" and "▼" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
             bottom = 2, widget = wibox.container.margin,
         },
-        bg           = is_picked and (beautiful.splitwm_focus_border or "#7799dd") or "#00000000",
-        fg           = is_active and "#ffffff" or "#00000000",
+        bg           = tab_state == "picked" and (beautiful.splitwm_focus_border or "#7799dd") or "#00000000",
+        fg           = tab_state == "active" and "#ffffff" or "#00000000",
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = 26,
         widget       = wibox.container.background,
     }
-    if is_active then
-        move_btn:connect_signal("mouse::enter", function() if not is_picked then move_btn.bg = "#ffffff22" end end)
-        move_btn:connect_signal("mouse::leave", function() if not is_picked then move_btn.bg = "#00000000" end end)
+    if tab_state == "active" then
+        move_btn:connect_signal("mouse::enter", function() move_btn.bg = "#ffffff22" end)
+        move_btn:connect_signal("mouse::leave", function() move_btn.bg = "#00000000" end)
         move_btn:buttons(gears.table.join(awful.button({}, 1, function()
-            if pickup.client == tc then
-                pickup:reset_client()
+            if pickup.tag == "client" and pickup.client == tc then
+                pickup = pickup_idle()
             else
-                pickup:pick_client(tc, ctx.t)
+                pickup = pickup_client(tc, ctx.t)
             end
             awful.layout.arrange(ctx.s)
         end)))
@@ -781,20 +785,20 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
         bg           = "#00000000",
-        fg           = is_active and "#ffffff" or "#00000000",
+        fg           = tab_state == "active" and "#ffffff" or "#00000000",
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = 26,
         widget       = wibox.container.background,
     }
-    if is_active then
+    if tab_state == "active" then
         on_hover_fg(close_btn, "#ff6666", "#ffffff")
         close_btn:buttons(gears.table.join(awful.button({}, 1, function() tc:kill() end)))
     end
 
     local client_color = colors.get_client_color(tc)
-    local tab_bg = is_picked and "#445566"
+    local tab_bg = tab_state == "picked" and "#445566"
         or (client_color and client_color.dark)
-        or (is_active and (beautiful.splitwm_tab_active_bg or "#535d6c"))
+        or (tab_state == "active" and (beautiful.splitwm_tab_active_bg or "#535d6c"))
         or beautiful.splitwm_inactive_bg or "#00000080"
     local tab_bg_pat   = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
@@ -812,7 +816,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         cr:close_path()
         cr:set_source(tab_bg_pat)
         cr:fill()
-        if is_active then
+        if tab_state == "active" then
             draw_tab_border(cr, w2, h2)
             cr:set_source(widget_bc_pat)
             cr:set_line_width(lw)
@@ -838,10 +842,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     table.insert(entry.tooltip_objs, tab_widget)
 
     tab_widget:buttons(gears.table.join(awful.button({}, 1, function()
-        if pickup.split and pickup.split ~= leaf.id then
+        if pickup.tag == "split" and pickup.split_id ~= leaf.id then
             handle_split_pickup(ctx.state, leaf.id, ctx.s); return
         end
-        if pickup.client and pickup.client.valid and pickup.client ~= tc then
+        if pickup.tag == "client" and pickup.client.valid and pickup.client ~= tc then
             try_drop_picked_up(ctx.t, leaf.id)
             awful.layout.arrange(ctx.s)
             return
@@ -865,19 +869,19 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local close_split_btn = make_btn(icons.close,  cb.close)
     on_hover_fg(close_split_btn, "#ff6666", "#ffffff")
 
-    local is_split_picked = (pickup.split == leaf.id)
+    local is_split_picked = (pickup.tag == "split" and pickup.split_id == leaf.id)
     local swap_btn = make_circle_icon_btn_widget(icons.swap, 26)
     swap_btn.shape_border_color = ctx.widget_bc
     if is_split_picked then swap_btn.bg = beautiful.splitwm_focus_border or "#7799dd" end
     entry.swap_btn        = swap_btn
     entry.swap_btn_picked = is_split_picked
     swap_btn:buttons(gears.table.join(awful.button({}, 1, function()
-        if pickup.split == leaf.id then
-            pickup.split = nil
-        elseif pickup.split then
+        if pickup.tag == "split" and pickup.split_id == leaf.id then
+            pickup = pickup_idle()
+        elseif pickup.tag == "split" then
             handle_split_pickup(ctx.state, leaf.id, ctx.s); return
         else
-            pickup:pick_split(leaf.id)
+            pickup = pickup_split(leaf.id)
             ctx.state.focused_leaf_id = leaf.id
         end
         awful.layout.arrange(ctx.s)
@@ -1080,11 +1084,11 @@ local function update_drag_handles(s, state, bounds)
     local handle_w = gap - 4
     local hi       = 0
 
-    -- Only "h" bounds (vertical dividers between left/right panes) need a drag strip wibox.
-    -- "v" bounds (horizontal dividers between top/bottom panes) are dragged via the titlebar,
+    -- Only "horizontal" bounds (vertical dividers between left/right panes) need a drag strip wibox.
+    -- "vertical" bounds (horizontal dividers between top/bottom panes) are dragged via the titlebar,
     -- which spans the full width of the pane and sits exactly on the vertical gap.
     for _, b in ipairs(bounds) do
-        if b.dir == "h" then
+        if b.dir == tree.DIR_H then
             hi = hi + 1
             local entry    = get_drag_handle(s, hi)
             local wb, ref  = entry.wb, entry.ref
@@ -1095,7 +1099,6 @@ local function update_drag_handles(s, state, bounds)
             wb.width  = handle_w
             wb.height = math.max(1, b.span)
             wb.cursor = "sb_h_double_arrow"
-            if not ref.dragging then wb.bg = "#00000000" end
             wb.visible = true
         end
     end
@@ -1171,8 +1174,8 @@ local function with_tag(fn)
     if t and fn(t) ~= false then awful.layout.arrange(s) end
 end
 
-splitwm.split_horizontal = function() with_tag(function(t) split_leaf(t, "h") end) end
-splitwm.split_vertical   = function() with_tag(function(t) split_leaf(t, "v") end) end
+splitwm.split_horizontal = function() with_tag(function(t) split_leaf(t, tree.DIR_H) end) end
+splitwm.split_vertical   = function() with_tag(function(t) split_leaf(t, tree.DIR_V) end) end
 splitwm.focus_next_split = function() with_tag(function(t) focus_direction(t, "next") end) end
 splitwm.focus_prev_split = function() with_tag(function(t) focus_direction(t, "prev") end) end
 splitwm.next_tab         = function() with_tag(function(t) cycle_tab(t, 1) end) end
@@ -1184,8 +1187,8 @@ splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -0.
 splitwm.close_split      = function() with_tag(function(t) close_leaf(t, get_state(t).focused_leaf_id) end) end
 
 function splitwm.cancel_pickup()
-    if pickup.client or pickup.split then
-        pickup:reset()
+    if pickup.tag ~= "idle" then
+        pickup = pickup_idle()
         awful.layout.arrange(awful.screen.focused())
     end
 end
@@ -1207,7 +1210,7 @@ function splitwm.setup()
     end)
 
     client.connect_signal("unmanage", function(c)
-        if pickup.client == c then pickup:reset_client() end
+        if pickup.tag == "client" and pickup.client == c then pickup = pickup_idle() end
         for t, state in pairs(tag_state) do unpin_client(state.root, c) end
     end)
 
@@ -1223,11 +1226,11 @@ function splitwm.setup()
     client.connect_signal("button::press", function(c)
         local leaf, state, t = get_leaf_from_client(c)
         if not state then return end
-        if pickup.split then
-            if leaf and leaf.id ~= pickup.split then
+        if pickup.tag == "split" then
+            if leaf and leaf.id ~= pickup.split_id then
                 handle_split_pickup(state, leaf.id, c.screen)
             end
-        elseif pickup.client and pickup.client.valid and pickup.client ~= c then
+        elseif pickup.tag == "client" and pickup.client.valid and pickup.client ~= c then
             if leaf then try_drop_picked_up(t, leaf.id); awful.layout.arrange(c.screen) end
         elseif leaf and leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
@@ -1240,7 +1243,7 @@ function splitwm.setup()
         if type(s) == "number" then s = screen[s] end
         -- Splits are tag-local; cancel any pending swap so the leaf ID
         -- doesn't silently fail to resolve on the newly selected tag.
-        pickup.split = nil
+        if pickup.tag == "split" then pickup = pickup_idle() end
         if s then geo_cache[s] = nil; gears.timer.delayed_call(function() update_ui(s) end) end
     end)
 end
