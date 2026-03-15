@@ -409,20 +409,6 @@ local function get_active_state(s)
     return t, get_state(t)
 end
 
-local focus_border_pool = {}
-local function get_focus_border(s)
-    if focus_border_pool[s] then return focus_border_pool[s] end
-    local sides = {}
-    for _ = 1, 4 do
-        table.insert(sides, wibox {
-            screen = s, x = 0, y = 0, width = 1, height = 1,
-            bg = beautiful.splitwm_focus_border or "#7799dd", border_width = 0,
-            visible = false, ontop = true, type = "utility", input_passthrough = true,
-        })
-    end
-    focus_border_pool[s] = sides
-    return sides
-end
 
 local drag_handle_pool = {}
 local function get_drag_handle(s, i)
@@ -499,7 +485,8 @@ local function update_overlays(s, t, state, geos)
             local y = geo.y + focus_bw - raise
             local h = math.max(1, geo.height - 2 * focus_bw + raise)
             local bg = beautiful.splitwm_inactive_bg
-            local border = "#00000066"
+            local is_focused = (leaf_id == state.focused_leaf_id)
+            local border = is_focused and (beautiful.splitwm_focus_border or "#7799dd") or "#00000066"
 
             if overlay_cache[s][leaf_id] then
                 local wb = overlay_cache[s][leaf_id]
@@ -948,43 +935,6 @@ local function update_titlebars(s, t, state, geos)
     end
 end
 
----------------------------------------------------------------------------
--- Update focus border
----------------------------------------------------------------------------
-
-local function update_focus_border(s, state, geos, gap)
-    local sides = get_focus_border(s)
-    local leaf = tree.find_leaf_by_id(state.root, state.focused_leaf_id)
-    local geo  = leaf and geos[leaf.id]
-    if not geo then
-        for _, wb in ipairs(sides) do wb.visible = false end
-        return
-    end
-
-    local bw      = beautiful.splitwm_focus_border_width or 2
-    local bc      = beautiful.splitwm_focus_border       or "#7799dd"
-    -- Frame wibox handles the border when the split has windows
-    if leaf.tabs and #leaf.tabs > 0 then
-        for _, wb in ipairs(sides) do wb.visible = false end
-        return
-    end
-    local side_h  = geo.height - bw
-    local rects = {
-        { x = geo.x,                  y = geo.y,                  width = geo.width, height = bw },
-        { x = geo.x,                  y = geo.y + geo.height - bw, width = geo.width, height = bw },
-        { x = geo.x,                  y = geo.y,                  width = bw,        height = side_h },
-        { x = geo.x + geo.width - bw, y = geo.y,                  width = bw,        height = side_h },
-    }
-    for i, r in ipairs(rects) do
-        local wb = sides[i]
-        wb.bg      = bc
-        wb.x       = r.x
-        wb.y       = r.y
-        wb.width   = math.max(1, r.width)
-        wb.height  = math.max(1, r.height)
-        wb.visible = true
-    end
-end
 
 ---------------------------------------------------------------------------
 -- Update drag handles
@@ -1026,8 +976,6 @@ end
 local function update_ui(s)
     local t, state = get_active_state(s)
     if not t then
-        local sides = focus_border_pool[s]
-        if sides then for _, wb in ipairs(sides) do wb.visible = false end end
         local pool = drag_handle_pool[s]
         if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
         if overlay_cache[s]  then for _, wb    in pairs(overlay_cache[s])  do wb.visible = false    end end
@@ -1043,7 +991,6 @@ local function update_ui(s)
 
     update_overlays(s, t, state, geos)
     update_titlebars(s, t, state, geos)
-    update_focus_border(s, state, geos, gap)
     update_drag_handles(s, state, bounds)
 end
 
