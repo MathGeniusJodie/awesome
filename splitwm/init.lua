@@ -256,6 +256,7 @@ local function split_leaf(t, direction)
         parent.children[idx] = new_branch
     end
     state.focused_leaf_id = child_a.id
+    return true
 end
 
 local function close_leaf(t, leaf_id)
@@ -300,6 +301,7 @@ local function close_leaf(t, leaf_id)
     end
 
     state.focused_leaf_id = keep and keep.id or sibling_leaves[1].id
+    return true
 end
 
 local function resize_focused(t, delta)
@@ -311,6 +313,7 @@ local function resize_focused(t, delta)
     local new_ratio = parent.ratio
     if idx == 1 then new_ratio = new_ratio + delta else new_ratio = new_ratio - delta end
     parent.ratio = math.max(0.1, math.min(0.9, new_ratio))
+    return true
 end
 
 ---------------------------------------------------------------------------
@@ -322,6 +325,7 @@ local function cycle_tab(t, offset)
     local leaf = state.leaf_map[state.focused_leaf_id]
     if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
+    return true
 end
 
 local function adjacent_leaf(state, leaf_id, dir)
@@ -349,6 +353,7 @@ local function move_tab_to_direction(t, dir)
     table.insert(dst_leaf.tabs, c)
     dst_leaf.active_tab = #dst_leaf.tabs
     colors.resolve_color_conflict(dst_leaf, c)
+    return true
 end
 
 local function focus_direction(t, dir)
@@ -356,6 +361,7 @@ local function focus_direction(t, dir)
     local leaf = adjacent_leaf(state, state.focused_leaf_id, dir)
     if not leaf then return false end
     state.focused_leaf_id = leaf.id
+    return true
 end
 
 ---------------------------------------------------------------------------
