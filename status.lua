@@ -31,7 +31,7 @@ function status.new_battery_widget()
         local nub_w, nub_h = 2, 5
         local total_w = bw + nub_w
         local bx = math.floor((width - total_w) / 2)
-        local by = math.floor((height - bh) / 2)
+        local by = math.floor((height - bh) / 2) + 1
         local nub_x = bx + bw
         local nub_y = by + math.floor((bh - nub_h) / 2)
 
@@ -93,13 +93,22 @@ function status.new_volume_widget()
         return math.ceil(26 * h / 32), h
     end
 
-    function w:draw(_, cr, _, height)
+    function w:draw(_, cr, width, height)
         -- Scale all coordinates proportionally to height (designed for 32px)
         local s  = height / 32.0
         local cy = height / 2
         local sx = 1 * s
 
         cr:set_source_rgba(1, 1, 1, 1)
+
+        -- Rotate 45° counterclockwise so the speaker points top-right
+        local pivot_x = width / 2
+        local pivot_y = cy
+        cr:save()
+        cr:translate(pivot_x, pivot_y - 3)
+        cr:rotate(-math.pi / 4)
+        cr:translate(-pivot_x, -(pivot_y - 3))
+
         icons.speaker(cr, nil, height)
 
         -- Sound waves or mute X, starting just right of the cone tip
@@ -122,6 +131,7 @@ function status.new_volume_widget()
                 cr:stroke()
             end
         end
+        cr:restore()
     end
 
     table.insert(volume_widgets, w)
@@ -147,6 +157,8 @@ function status.new_chip_widget()
         local by = cy - math.floor(ch / 2)
 
         cr:set_source_rgba(1, 1, 1, 1)
+        cr:save()
+        cr:translate(0, 1)
         icons.chip(cr, width, height)
 
         -- 3 vertical gauges inside body, 1px gap between them
@@ -178,6 +190,7 @@ function status.new_chip_widget()
                 cr:fill()
             end
         end
+        cr:restore()
     end
 
     table.insert(chip_widgets, w)

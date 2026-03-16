@@ -355,7 +355,7 @@ awful.screen.connect_for_each_screen(function(s)
             gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
         end
         bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
-        return wibox.container.margin(bg, 0, 0, bar_margin, 0)
+        return wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
     end
 
     -- Status icons capsule (chip + battery + volume) — tab profile on left side
@@ -371,7 +371,7 @@ awful.screen.connect_for_each_screen(function(s)
     dt_row.spacing = 8
     dt_row:add(mydate)
     dt_row:add(myclock)
-    local dt_capsule = capsule(dt_row, 24, 24, splitwm.tab_shape)
+    local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 1, 0), 24, 24, splitwm.tab_shape)
 
     local sg = beautiful.splitwm_gap
     s.mywibox = wibox({
