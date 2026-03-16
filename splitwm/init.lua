@@ -108,13 +108,17 @@ end
 local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)
-        cr:set_source_rgba(1, 1, 1, 0.85)
+        if self._dark then
+            cr:set_source_rgba(0, 0, 0, 0.85)
+        else
+            cr:set_source_rgba(1, 1, 1, 0.85)
+        end
         cr:set_line_width(2)
         cr:set_line_cap(CAIRO_LINE_CAP_ROUND)
         draw_fn(cr, w, h)
     end
     function icon:fit(_, w, h) return w, h end
-    return wibox.widget {
+    local w = wibox.widget {
         icon,
         bg                 = beautiful.splitwm_inactive_bg,
         shape              = gears.shape.circle,
@@ -122,6 +126,8 @@ local function make_circle_icon_btn_widget(draw_fn, size)
         forced_height      = size,
         widget             = wibox.container.background,
     }
+    w._icon = icon
+    return w
 end
 
 local function make_circle_icon_btn(draw_fn, size, callback)
@@ -598,7 +604,11 @@ local function tb_get_or_create_entry(s, leaf)
         entry.titlebar_hovered = false
         for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = "#00000099" end
         if entry.swap_btn then
-            entry.swap_btn.bg = entry.swap_btn_picked and (beautiful.splitwm_focus_border or "#7799dd") or "#00000099"
+            entry.swap_btn.bg = entry.swap_btn_picked and "#ffffff" or "#00000099"
+            if entry.swap_btn._icon then
+                entry.swap_btn._icon._dark = entry.swap_btn_picked
+                entry.swap_btn._icon:emit_signal("widget::redraw_needed")
+            end
         end
     end)
     cache[leaf.id] = entry
@@ -647,11 +657,11 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     local move_btn = wibox.widget {
         {
-            { text = tab_state == "picked" and "▼" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
+            { text = tab_state == "picked" and "↗" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
             bottom = 2, widget = wibox.container.margin,
         },
-        bg           = tab_state == "picked" and (beautiful.splitwm_focus_border or "#7799dd") or "#00000000",
-        fg           = tab_state == "active" and "#ffffff" or "#00000000",
+        bg           = tab_state == "picked" and "#ffffff" or "#00000000",
+        fg           = tab_state == "picked" and "#000000" or (tab_state == "active" and "#ffffff" or "#00000000"),
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = 26,
         widget       = wibox.container.background,
@@ -680,7 +690,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     end
 
     local client_color = colors.get_client_color(tc)
-    local tab_bg = tab_state == "picked" and "#445566"
+    local tab_bg = tab_state == "picked" and "#ffffff"
         or (client_color and client_color.dark)
         or (tab_state == "active" and (beautiful.splitwm_tab_active_bg))
         or beautiful.splitwm_inactive_bg
@@ -700,9 +710,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         cr:close_path()
         cr:set_source(tab_bg_pat)
         cr:fill()
-        if tab_state == "active" then
+        if tab_state == "active" or tab_state == "picked" then
             draw_tab_border(cr, w2, h2)
-            cr:set_source(widget_bc_pat)
+            cr:set_source(tab_state == "picked" and gears.color("#ffffff") or widget_bc_pat)
             cr:set_line_width(2)
             cr:stroke()
         end
@@ -756,7 +766,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local is_split_picked = (pickup.tag == "split" and pickup.split_id == leaf.id)
     local swap_btn = make_circle_icon_btn_widget(icons.swap, 26)
     swap_btn.shape_border_color = ctx.widget_bc
-    if is_split_picked then swap_btn.bg = beautiful.splitwm_focus_border or "#7799dd" end
+    if is_split_picked then swap_btn.bg = "#ffffff"; swap_btn._icon._dark = true end
     entry.swap_btn        = swap_btn
     entry.swap_btn_picked = is_split_picked
     swap_btn:buttons(gears.table.join(awful.button({}, 1, function()
@@ -952,8 +962,11 @@ local function update_titlebars(s, t, state, geos, leaves)
 
         local is_focused    = state.focused_leaf_id == leaf.id
         local active_client = leaf.tabs[leaf.active_tab]
+        local active_picked = pickup.tag == "client" and pickup.client == active_client
         local active_color  = active_client and colors.get_client_color(active_client)
-        local focus_color   = active_color and active_color.light or beautiful.splitwm_focus_border or "#7799dd"
+        local focus_color   = active_picked and "#ffffff"
+            or (active_color and active_color.light)
+            or beautiful.splitwm_focus_border or "#7799dd"
         local ctx = {
             s            = s,
             t            = t,
@@ -992,8 +1005,9 @@ local function update_titlebars(s, t, state, geos, leaves)
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
         local empty_r     = 14
+        local empty_focus_color = beautiful.splitwm_empty_focus_border or "#ffffff"
         local border_draw = #leaf.tabs == 0
-            and tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, empty_r)
+            and tb_build_border_widget(is_focused and empty_focus_color or nil, tb_h, bw, empty_r)
             or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw)
 
         local middle_drag
