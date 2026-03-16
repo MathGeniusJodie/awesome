@@ -68,11 +68,18 @@ beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_btn_font       = "monospace bold 14"
 beautiful.titlebar_bg_normal     = "#00000000"
 
--- Wallpaper
-local wallpaper_path = os.getenv("HOME") .. "/background.jpg"
-awful.screen.connect_for_each_screen(function(s)
-    gears.wallpaper.maximized(wallpaper_path, s, true)
-end)
+-- Workspace colors (COLORS indices 0,2,4,6,8 → 1-based: 1,3,5,7,9 = pink,gold,emerald,blue,purple)
+local WORKSPACE_COLORS = {
+    { light = "#eda2b9", dark = "#9e5a70" },
+    { light = "#dbb575", dark = "#8e6b2b" },
+    { light = "#85cea7", dark = "#39825f" },
+    { light = "#83c3f1", dark = "#3879a2" },
+    { light = "#d6a8e0", dark = "#8a6093" },
+}
+local WORKSPACE_BG = {}
+for i, suffix in ipairs({0, 2, 4, 6, 8}) do
+    WORKSPACE_BG[i] = os.getenv("HOME") .. "/background" .. suffix .. ".jpg"
+end
 
 ---------------------------------------------------------------------------
 -- Load splitwm
@@ -165,8 +172,8 @@ local bar_margin     = 3
 local capsule_height = 24
 local wibar_height   = bar_margin * 2 + capsule_height  -- equal top + bottom padding
 
---- Build a single tag button: circle + dots drawn via Cairo below.
-local function make_tag_widget(t)
+--- Build a single tag button: colored circle + dots drawn via Cairo below.
+local function make_tag_widget(t, color)
     -- Custom dot-indicator widget: draws N white circles via Cairo directly.
     -- This avoids all container/layout sizing issues.
     local dots = wibox.widget.base.make_widget()
@@ -222,27 +229,17 @@ local function make_tag_widget(t)
         dots:emit_signal("widget::redraw_needed")
     end
 
-    -- Label
-    local label = wibox.widget.textbox(t.name)
-    label.align  = "center"
-    label.valign = "center"
-    label.font   = "monospace bold 12"
-
-    -- 2px right margin shifts place_c's perceived center 1px left, correcting font offset
-    local place_c = wibox.container.place()
-    place_c.halign = "center"
-    place_c.valign = "center"
-    place_c:set_widget(wibox.container.margin(label, 0, 2, 0, 0))
-
     local circle = wibox.container.background()
     circle.forced_width  = capsule_height
     circle.forced_height = capsule_height
     circle.shape         = gears.shape.circle
-    circle.bg            = "#00000080"
-    circle:set_widget(place_c)
+    circle.bg            = color.light
+    circle.border_width  = 2
+    circle.border_color  = "#00000000"
+    circle:set_widget(wibox.container.place())
 
     local function update_circle()
-        circle.bg     = t.selected and "#000000" or "#00000080"
+        circle.border_color = t.selected and "#ffffff" or "#00000000"
         dots.selected = t.selected
         dots:emit_signal("widget::redraw_needed")
     end
@@ -268,14 +265,35 @@ end
 awful.screen.connect_for_each_screen(function(s)
     awful.tag({ "1", "2", "3", "4", "5" }, s, splitwm.layout)
 
+    -- Per-tag wallpaper: update when selection changes; fall back to solid color
+    local function update_wallpaper()
+        for i, t in ipairs(s.tags) do
+            if t.selected then
+                local path = WORKSPACE_BG[i]
+                if gears.filesystem.file_readable(path) then
+                    gears.wallpaper.maximized(path, s, true)
+                else
+                    gears.wallpaper.set(WORKSPACE_COLORS[i].dark)
+                end
+                break
+            end
+        end
+    end
+    for _, t in ipairs(s.tags) do
+        t:connect_signal("property::selected", function()
+            if t.selected then update_wallpaper() end
+        end)
+    end
+    update_wallpaper()
+
     s.mypromptbox = awful.widget.prompt()
 
     -- Build taglist manually so we have direct widget references (no
     -- get_children_by_id indirection that proved unreliable).
     local taglist_layout = wibox.layout.fixed.horizontal()
     taglist_layout.spacing = 4
-    for _, t in ipairs(s.tags) do
-        taglist_layout:add(make_tag_widget(t))
+    for i, t in ipairs(s.tags) do
+        taglist_layout:add(make_tag_widget(t, WORKSPACE_COLORS[i]))
     end
     s.mytaglist = taglist_layout
 
