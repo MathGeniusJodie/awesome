@@ -69,4 +69,6 @@ function colors.resolve_color_conflict(leaf, c)
     end
 end
 
+colors.COLORS = COLORS
+
 return colors

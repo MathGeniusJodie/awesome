@@ -68,19 +68,6 @@ beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_btn_font       = "monospace bold 14"
 beautiful.titlebar_bg_normal     = "#00000000"
 
--- Workspace colors (COLORS indices 0,2,4,6,8 → 1-based: 1,3,5,7,9 = pink,gold,emerald,blue,purple)
-local WORKSPACE_COLORS = {
-    { light = "#eda2b9", dark = "#9e5a70" },
-    { light = "#dbb575", dark = "#8e6b2b" },
-    { light = "#85cea7", dark = "#39825f" },
-    { light = "#83c3f1", dark = "#3879a2" },
-    { light = "#d6a8e0", dark = "#8a6093" },
-}
-local WORKSPACE_BG = {}
-for i, suffix in ipairs({0, 2, 4, 6, 8}) do
-    WORKSPACE_BG[i] = os.getenv("HOME") .. "/background" .. suffix .. ".jpg"
-end
-
 ---------------------------------------------------------------------------
 -- Load splitwm
 ---------------------------------------------------------------------------
@@ -92,9 +79,27 @@ package.path = config_dir .. "?.lua;"
             .. config_dir .. "?/init.lua;"
             .. package.path
 
-local splitwm = require("splitwm")
-local menu    = require("menu")
-local status  = require("status")
+local splitwm  = require("splitwm")
+local swcolors = require("splitwm.colors")
+local menu     = require("menu")
+local status   = require("status")
+
+-- Workspace colors: COLORS indices 0,2,4,6,8 (1-based: 1,3,5,7,9) = pink,gold,emerald,blue,purple
+-- bg existence is checked once at startup to avoid repeated stat() on every switch
+local _home = os.getenv("HOME")
+local WORKSPACES = {}
+for i, ci in ipairs({1, 3, 5, 7, 9}) do
+    local c = swcolors.COLORS[ci]
+    WORKSPACES[i] = {
+        light  = c.light,
+        dark   = c.dark,
+        bg     = _home .. "/background" .. (ci - 1) .. ".jpg",
+        has_bg = false,
+    }
+end
+for _, ws in ipairs(WORKSPACES) do
+    ws.has_bg = gears.filesystem.file_readable(ws.bg)
+end
 
 ---------------------------------------------------------------------------
 -- Variables
@@ -194,6 +199,8 @@ local function make_tag_widget(t, color)
         return math.ceil(show * 5 + (show - 1) * 3), 7
     end
 
+    local dr, dg, db = parse_hex(color.dark)  -- pre-computed once, reused in draw
+
     function dots:draw(_, cr, w, h)
         if self.n == 0 then return end
         local show  = math.min(self.n, 3)
@@ -205,7 +212,6 @@ local function make_tag_widget(t, color)
         local cap_x = (w - cap_w) / 2
 
         -- Capsule background: dark color variant, opaque when selected else semi-transparent
-        local dr, dg, db = parse_hex(color.dark)
         cr:set_source_rgba(dr, dg, db, self.selected and 1 or 0.5)
         cr:save()
         cr:translate(cap_x, 0)
@@ -253,8 +259,6 @@ local function make_tag_widget(t, color)
     circle:set_widget(wibox.container.place())
 
     local place_inner = wibox.container.place()
-    place_inner.halign = "center"
-    place_inner.valign = "center"
     place_inner:set_widget(circle)
     ring:set_widget(place_inner)
 
@@ -286,26 +290,21 @@ end
 awful.screen.connect_for_each_screen(function(s)
     awful.tag({ "1", "2", "3", "4", "5" }, s, splitwm.layout)
 
-    -- Per-tag wallpaper: update when selection changes; fall back to solid color
-    local function update_wallpaper()
-        for i, t in ipairs(s.tags) do
-            if t.selected then
-                local path = WORKSPACE_BG[i]
-                if gears.filesystem.file_readable(path) then
-                    gears.wallpaper.maximized(path, s, true)
-                else
-                    gears.wallpaper.set(WORKSPACE_COLORS[i].dark)
-                end
-                break
-            end
+    -- Per-tag wallpaper: each tag captures its own workspace entry at creation
+    local function set_wallpaper(ws)
+        if ws.has_bg then
+            gears.wallpaper.maximized(ws.bg, s, true)
+        else
+            gears.wallpaper.set(ws.dark)
         end
     end
-    for _, t in ipairs(s.tags) do
+    for i, t in ipairs(s.tags) do
+        local ws = WORKSPACES[i]
         t:connect_signal("property::selected", function()
-            if t.selected then update_wallpaper() end
+            if t.selected then set_wallpaper(ws) end
         end)
+        if t.selected then set_wallpaper(ws) end
     end
-    update_wallpaper()
 
     s.mypromptbox = awful.widget.prompt()
 
@@ -314,7 +313,7 @@ awful.screen.connect_for_each_screen(function(s)
     local taglist_layout = wibox.layout.fixed.horizontal()
     taglist_layout.spacing = 4
     for i, t in ipairs(s.tags) do
-        taglist_layout:add(make_tag_widget(t, WORKSPACE_COLORS[i]))
+        taglist_layout:add(make_tag_widget(t, WORKSPACES[i]))
     end
     s.mytaglist = taglist_layout
 
