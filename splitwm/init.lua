@@ -25,6 +25,13 @@ local color_icon  -- launcher icon foreground
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 33
 
+-- Button geometry — used to derive split minimum sizes.
+local BTN_SIZE     = 26
+local BTN_SPACING  = 5
+local N_SPLIT_BTNS = 5  -- swap + vsplit + hsplit + close + "+"
+local MIN_SPLIT_W  = N_SPLIT_BTNS * BTN_SIZE + (N_SPLIT_BTNS - 1) * BTN_SPACING
+local MIN_SPLIT_H  = TITLEBAR_HEIGHT
+
 -- Tab shape geometry. TAB_ALPHA is the slant angle from vertical.
 -- The ear arc sweeps from pi/2 down to TAB_ALPHA so its tangent matches the slant,
 -- and the top corner arc starts at pi+TAB_ALPHA for the same reason.
@@ -115,9 +122,9 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)
         if self._dark then
-            cr:set_source_rgba(0, 0, 0, 0.85)
+            cr:set_source_rgba(0, 0, 0, self._disabled and 0.25 or 0.85)
         else
-            cr:set_source_rgba(1, 1, 1, 0.85)
+            cr:set_source_rgba(1, 1, 1, self._disabled and 0.25 or 0.85)
         end
         cr:set_line_width(2)
         cr:set_line_cap(CAIRO_LINE_CAP_ROUND)
@@ -366,7 +373,24 @@ local function resize_focused(t, delta)
     if not parent then return false end
     local new_ratio = parent.ratio
     if idx == 1 then new_ratio = new_ratio + delta else new_ratio = new_ratio - delta end
-    parent.ratio = math.max(0.1, math.min(0.9, new_ratio))
+    local min_r, max_r = 0.1, 0.9
+    local cached = t.screen and geo_cache[t.screen]
+    if cached then
+        local l1 = tree.collect_leaves(parent.children[1])[1]
+        local l2 = tree.collect_leaves(parent.children[2])[1]
+        local g1 = l1 and cached.geos[l1.id]
+        local g2 = l2 and cached.geos[l2.id]
+        if g1 and g2 then
+            local gap = beautiful.splitwm_gap
+            if parent.dir == tree.DIR_H then
+                min_r = MIN_SPLIT_W / (g1.width + g2.width + gap)
+            else
+                min_r = MIN_SPLIT_H / (g1.height + g2.height + gap)
+            end
+            max_r = 1 - min_r
+        end
+    end
+    parent.ratio = math.max(min_r, math.min(max_r, new_ratio))
     return true
 end
 
@@ -546,10 +570,14 @@ local function get_drag_handle(s, i)
                 end
                 local igap = b.parent_gap or 0
                 if b.dir == tree.DIR_H then
-                    b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.x - b.parent_x) / (b.parent_w - igap)))
+                    local usable = b.parent_w - igap
+                    local min_r  = MIN_SPLIT_W / usable
+                    b.branch.ratio = math.max(min_r, math.min(1 - min_r, (mouse.x - b.parent_x) / usable))
                     wb.x = mouse.x - math.floor(hw / 2)
                 else
-                    b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.y - b.parent_y) / (b.parent_h - igap)))
+                    local usable = b.parent_h - igap
+                    local min_r  = MIN_SPLIT_H / usable
+                    b.branch.ratio = math.max(min_r, math.min(1 - min_r, (mouse.y - b.parent_y) / usable))
                     wb.y = mouse.y - math.floor(hw / 2)
                 end
                 awful.layout.arrange(s)
@@ -590,6 +618,14 @@ local function on_hover_fg(w, hover_fg, normal_fg)
     w:connect_signal("mouse::leave", function() w.fg = normal_fg end)
 end
 
+local function set_btn_disabled(w)
+    w._disabled = true
+    w._icon._disabled = true
+    w._icon.cursor = "not-allowed"
+    w._icon:emit_signal("widget::redraw_needed")
+    w:buttons(gears.table.join())
+end
+
 local function tb_get_or_create_entry(s, leaf)
     local cache = titlebar_cache[s]
     local entry = cache[leaf.id]
@@ -603,12 +639,12 @@ local function tb_get_or_create_entry(s, leaf)
     }
     entry.wb:connect_signal("mouse::enter", function()
         entry.titlebar_hovered = true
-        for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = color_bg end
+        for _, btn in ipairs(entry.titlebar_btn_list) do if not btn._disabled then btn.bg = color_bg end end
         if entry.swap_btn and not entry.swap_btn_picked then entry.swap_btn.bg = color_bg end
     end)
     entry.wb:connect_signal("mouse::leave", function()
         entry.titlebar_hovered = false
-        for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = color_bg .. "99" end
+        for _, btn in ipairs(entry.titlebar_btn_list) do if not btn._disabled then btn.bg = color_bg .. "99" end end
         if entry.swap_btn then
             entry.swap_btn.bg = entry.swap_btn_picked and color_fg or color_bg .. "99"
             if entry.swap_btn._icon then
@@ -623,12 +659,14 @@ end
 
 -- Fingerprint check to prevent unneeded heavy redraws.
 -- Tab names are excluded: tooltip text is set dynamically on mouse::enter.
-local function tb_compute_fingerprint(leaf, state)
+local function tb_compute_fingerprint(leaf, state, geo)
     local parts = {
         leaf.active_tab,
         state.focused_leaf_id == leaf.id and 1 or 0,
         tostring(leaf.v_bound_above),
         (pickup.tag == "split" and pickup.split_id == leaf.id) and "S" or "",
+        geo and geo.width or 0,
+        geo and geo.height or 0,
     }
     for _, tc in ipairs(leaf.tabs) do
         parts[#parts+1] = tostring(tc.window)
@@ -669,7 +707,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         bg           = tab_state == "picked" and color_fg or color_bg .. "00",
         fg           = tab_state == "picked" and color_bg or (tab_state == "active" and color_fg or color_bg .. "00"),
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
-        forced_width = 26,
+        forced_width = BTN_SIZE,
         widget       = wibox.container.background,
     }
     local close_btn = wibox.widget {
@@ -677,7 +715,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         bg           = color_bg .. "00",
         fg           = tab_state == "active" and color_fg or color_bg .. "00",
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
-        forced_width = 26,
+        forced_width = BTN_SIZE,
         widget       = wibox.container.background,
     }
     if tab_state == "active" then
@@ -759,17 +797,24 @@ end
 -- Build the right-side split control buttons (vsplit, hsplit, close, swap).
 local function tb_build_split_controls(leaf, entry, ctx)
     local function make_btn(draw_fn, callback)
-        return tb_make_btn(entry, ctx.widget_bc, draw_fn, 26, callback)
+        return tb_make_btn(entry, ctx.widget_bc, draw_fn, BTN_SIZE, callback)
     end
 
     local cb = make_split_action_callbacks(ctx.state, leaf.id, ctx.t, ctx.s)
     local vsplit_btn      = make_btn(icons.vsplit, cb.vsplit)
     local hsplit_btn      = make_btn(icons.hsplit, cb.hsplit)
     local close_split_btn = make_btn(icons.close,  cb.close)
-    on_hover_fg(close_split_btn, color_close, color_fg)
+
+    local gap    = beautiful.splitwm_gap
+    local geo    = ctx.geo
+    local parent = tree.find_parent(ctx.state.root, leaf)
+    if not (geo and geo.width  >= 2 * MIN_SPLIT_W + gap) then set_btn_disabled(vsplit_btn)      end
+    if not (geo and geo.height >= 2 * MIN_SPLIT_H + gap) then set_btn_disabled(hsplit_btn)      end
+    if parent then on_hover_fg(close_split_btn, color_close, color_fg)
+    else           set_btn_disabled(close_split_btn)                                             end
 
     local is_split_picked = (pickup.tag == "split" and pickup.split_id == leaf.id)
-    local swap_btn = make_circle_icon_btn_widget(icons.swap, 26)
+    local swap_btn = make_circle_icon_btn_widget(icons.swap, BTN_SIZE)
     swap_btn.shape_border_color = ctx.widget_bc
     if is_split_picked then swap_btn.bg = color_fg; swap_btn._icon._dark = true end
     entry.swap_btn        = swap_btn
@@ -882,7 +927,7 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
                 {
                     {
                         { spacing = ctx.TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
-                        right = 4 * 26 + 3 * ctx.BTN_SPACING, widget = wibox.container.margin,
+                        right = 4 * BTN_SIZE + 3 * ctx.BTN_SPACING, widget = wibox.container.margin,
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
                 },
@@ -960,7 +1005,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         wb.height  = geo.height + gap
         wb.visible = true
 
-        local fp = tb_compute_fingerprint(leaf, state)
+        local fp = tb_compute_fingerprint(leaf, state, geo)
         if entry.fp == fp then return end
         entry.fp              = fp
         entry.titlebar_btn_list = {}
@@ -976,13 +1021,14 @@ local function update_titlebars(s, t, state, geos, leaves)
             s            = s,
             t            = t,
             state        = state,
+            geo          = geo,
             widget_bc    = is_focused and focus_color or color_bg .. "00",
             bar_bg       = color_bg .. "00",
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
             icon_size    = 20,
             tab_btn_font = "monospace bold 18",
-            BTN_SPACING  = 5,
+            BTN_SPACING  = BTN_SPACING,
             TAB_SPACING  = TAB_SPACING,
         }
 
@@ -1000,7 +1046,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         -- "+" lives at the end of the tab row; tb_split_tab_layers always puts it in
         -- the above layer so it renders on top of the active tab's negative-spacing overlap.
         table.insert(tab_widgets, wibox.widget {
-            tb_make_btn(entry, ctx.widget_bc, icons.plus, 26, function()
+            tb_make_btn(entry, ctx.widget_bc, icons.plus, BTN_SIZE, function()
                 pcall(function() mousegrabber.stop() end)
                 ctx.state.focused_leaf_id = leaf.id
                 if splitwm.on_menu_request then splitwm.on_menu_request() end
