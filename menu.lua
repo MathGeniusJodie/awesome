@@ -98,6 +98,7 @@ function menu.setup(opts)
             { "File Manager", function() awful.spawn(filemanager) end, launcher_icon(filemanager) },
             { "Obsidian",     function() awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
             { "yt-gtk",       function() awful.spawn("/home/jodie/yt-scrape/target/release/yt-gtk") end, lookup({"video"}) },
+            { "Claude",       function() awful.spawn("claude-desktop") end, lookup({"claude-desktop"}) },
             { "─────────────" },
         }
         for i = #quick_items, 1, -1 do
