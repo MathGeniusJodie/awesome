@@ -290,27 +290,6 @@ awful.screen.connect_for_each_screen(function(s)
     local vol_widget  = status.new_volume_widget()
     local chip_widget = status.new_chip_widget()
 
-    -- Tab profile shape helpers (same geometry as splitwm tabs)
-    local _ta   = math.rad(20)
-    local _ear  = 11
-    local _corn = 8
-    local _sa, _ca = math.sin(_ta), math.cos(_ta)
-    local function _tcx(h) return (_corn + _ear) * (1 - _sa) / _ca + h * math.tan(_ta) end
-
-    -- Both sides tab profile
-    local function shape_tab_both(cr, w, h)
-        local cx = _tcx(h)
-        cr:move_to(0, h)
-        cr:arc_negative(0, h - _ear, _ear, math.pi / 2, _ta)
-        cr:line_to(cx - _corn * _ca, _corn * (1 - _sa))
-        cr:arc(cx, _corn, _corn, math.pi + _ta, 1.5 * math.pi)
-        cr:line_to(w - cx, 0)
-        cr:arc(w - cx, _corn, _corn, 1.5 * math.pi, 2 * math.pi - _ta)
-        cr:line_to(w - _ear * _ca, h - _ear * (1 - _sa))
-        cr:arc_negative(w, h - _ear, _ear, math.pi - _ta, math.pi / 2)
-        cr:close_path()
-    end
-
     -- Capsule helper: wraps widget(s) in a black shaped background
     local function capsule(inner, pad_l, pad_r, shape_fn)
         local bg = wibox.container.background()
@@ -328,14 +307,14 @@ awful.screen.connect_for_each_screen(function(s)
     icons_row:add(chip_widget)
     icons_row:add(bat_widget)
     icons_row:add(wibox.container.margin(vol_widget, 0, 0, 0, 1))
-    local status_capsule = capsule(icons_row, 24, 24, shape_tab_both)
+    local status_capsule = capsule(icons_row, 24, 24, splitwm.tab_shape)
 
     -- Date / clock capsule — tab profile on right side
     local dt_row = wibox.layout.fixed.horizontal()
     dt_row.spacing = 8
     dt_row:add(mydate)
     dt_row:add(myclock)
-    local dt_capsule = capsule(dt_row, 24, 24, shape_tab_both)
+    local dt_capsule = capsule(dt_row, 24, 24, splitwm.tab_shape)
 
     local sg = beautiful.splitwm_gap or 16
     s.mywibox = wibox({

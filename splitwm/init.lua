@@ -33,6 +33,19 @@ local function tab_cx(h) return (TAB_CORNER + TAB_EAR) * (1 - TAB_SA) / TAB_CA +
 -- Overlap = 2x slant width for tighter nesting. Using TITLEBAR_HEIGHT as reference.
 local TAB_SPACING = -math.floor((tab_cx(TITLEBAR_HEIGHT) - TAB_EAR * TAB_CA) * 2)
 
+-- Shape function exported so rc.lua wibar capsules can match the tab profile.
+function splitwm.tab_shape(cr, w, h)
+    local cx = tab_cx(h)
+    cr:move_to(0, h)
+    cr:arc_negative(0,     h - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
+    cr:line_to(cx - TAB_CORNER * TAB_CA, TAB_CORNER * (1 - TAB_SA))
+    cr:arc(cx,     TAB_CORNER, TAB_CORNER, math.pi + TAB_ALPHA, 1.5 * math.pi)
+    cr:arc(w - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
+    cr:line_to(w - TAB_EAR * TAB_CA, h - TAB_EAR * (1 - TAB_SA))
+    cr:arc_negative(w, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
+    cr:close_path()
+end
+
 -- Cairo line cap value for rounded ends (cairo.LineCap.ROUND = 1).
 local CAIRO_LINE_CAP_ROUND = 1
 
@@ -542,10 +555,10 @@ end
 
 local titlebar_cache = {}
 
--- Returns true if the menu was open when the current button-press event began.
--- The first caller in the event closes the menu; subsequent callers in the same
--- event see _menu_was_open=true and bail out without calling on_menu_close again.
-local function event_had_menu_open()
+-- Closes the menu if open and returns true; returns false if it was already closed.
+-- Deduplicates within a single event: multiple handlers firing for the same click
+-- all check this, but only the first actually calls on_menu_close().
+local function event_close_menu_if_open()
     if splitwm._menu_just_toggled then return false end
     if splitwm._menu_was_open     then return true  end
     if splitwm.on_menu_close and splitwm.on_menu_close() then
@@ -816,7 +829,6 @@ local function tb_split_tab_layers(tab_widgets, active_tab)
 end
 
 local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
-    local btn_w  = 4 * 26 + 3 * ctx.BTN_SPACING
     local tabs   = { spacing = ctx.TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) }
     -- Rendered on top of tabs in the stack so its background paints over any tab overflow.
     local ctrl_cover = {
@@ -824,7 +836,7 @@ local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
             {
                 { controls.swap, controls.vsplit, controls.hsplit, controls.close,
                   spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
-                left = 0, widget = wibox.container.margin,
+                widget = wibox.container.margin,
             },
             bg = ctx.bar_bg, widget = wibox.container.background,
         },
@@ -967,7 +979,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             middle_drag = wibox.widget { cursor = "sb_v_double_arrow", widget = wibox.container.background }
             middle_drag:buttons(gears.table.join(awful.button({}, 1, function()
                 if not leaf.v_bound_above then return end
-                if event_had_menu_open() then return end
+                if event_close_menu_if_open() then return end
                 run_v_drag(s, function() return leaf.v_bound_above end)
             end)))
         end
@@ -986,7 +998,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
                 if pickup.tag == "split"  then handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
                 if pickup.tag == "client" then try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
-                if event_had_menu_open() then return end
+                if event_close_menu_if_open() then return end
                 ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
             end)))
         else
