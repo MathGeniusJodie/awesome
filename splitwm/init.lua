@@ -622,6 +622,7 @@ local function set_btn_disabled(w)
     w._disabled = true
     w._icon._disabled = true
     w._icon.cursor = "not-allowed"
+    w.cursor = "not-allowed"
     w._icon:emit_signal("widget::redraw_needed")
     w:buttons(gears.table.join())
 end
@@ -636,6 +637,7 @@ local function tb_get_or_create_entry(s, leaf)
         tooltip_objs      = {},
         titlebar_btn_list = {},
         titlebar_hovered  = false,
+        tb_h              = nil,
     }
     entry.wb:connect_signal("mouse::enter", function()
         entry.titlebar_hovered = true
@@ -678,7 +680,7 @@ end
 local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
     local w = make_circle_icon_btn_widget(draw_fn, size)
     w.shape_border_color = widget_bc
-    w:buttons(gears.table.join(awful.button({}, 1, callback)))
+    if callback then w:buttons(gears.table.join(awful.button({}, 1, callback))) end
     table.insert(entry.titlebar_btn_list, w)
     return w
 end
@@ -796,22 +798,27 @@ end
 
 -- Build the right-side split control buttons (vsplit, hsplit, close, swap).
 local function tb_build_split_controls(leaf, entry, ctx)
-    local function make_btn(draw_fn, callback)
-        return tb_make_btn(entry, ctx.widget_bc, draw_fn, BTN_SIZE, callback)
-    end
-
-    local cb = make_split_action_callbacks(ctx.state, leaf.id, ctx.t, ctx.s)
-    local vsplit_btn      = make_btn(icons.vsplit, cb.vsplit)
-    local hsplit_btn      = make_btn(icons.hsplit, cb.hsplit)
-    local close_split_btn = make_btn(icons.close,  cb.close)
-
     local gap    = beautiful.splitwm_gap
     local geo    = ctx.geo
     local parent = tree.find_parent(ctx.state.root, leaf)
-    if not (geo and geo.width  >= 2 * MIN_SPLIT_W + gap) then set_btn_disabled(vsplit_btn)      end
-    if not (geo and geo.height >= 2 * MIN_SPLIT_H + gap) then set_btn_disabled(hsplit_btn)      end
+    local can_vsplit = geo and geo.width  >= 2 * MIN_SPLIT_W + gap
+    local can_hsplit = geo and geo.height >= 2 * MIN_SPLIT_H + gap
+
+    local function make_btn(draw_fn, callback, disabled)
+        return tb_make_btn(entry, ctx.widget_bc, draw_fn, BTN_SIZE,
+            not disabled and callback)
+    end
+
+    local cb = make_split_action_callbacks(ctx.state, leaf.id, ctx.t, ctx.s)
+    local vsplit_btn      = make_btn(icons.vsplit, cb.vsplit, not can_vsplit)
+    local hsplit_btn      = make_btn(icons.hsplit, cb.hsplit, not can_hsplit)
+    local close_split_btn = make_btn(icons.close,  cb.close,  not parent)
+
+    if not can_vsplit then set_btn_disabled(vsplit_btn) end
+    if not can_hsplit then set_btn_disabled(hsplit_btn) end
     if parent then on_hover_fg(close_split_btn, color_close, color_fg)
-    else           set_btn_disabled(close_split_btn)                                             end
+    else           set_btn_disabled(close_split_btn) end
+
 
     local is_split_picked = (pickup.tag == "split" and pickup.split_id == leaf.id)
     local swap_btn = make_circle_icon_btn_widget(icons.swap, BTN_SIZE)
@@ -998,6 +1005,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         if not geo then return end
 
         local entry = tb_get_or_create_entry(s, leaf)
+        entry.tb_h = tb_h
         local wb = entry.wb
         wb.x       = geo.x
         wb.y       = geo.y - gap
@@ -1055,6 +1063,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         })
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
+
         local empty_r     = 14
         local empty_focus_color = color_fg
         local border_draw = #leaf.tabs == 0
@@ -1162,7 +1171,11 @@ local function update_ui(s)
     if not t then
         local pool = drag_handle_pool[s]
         if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
-        hide_cache(titlebar_cache[s], "wb")
+        if titlebar_cache[s] then
+            for _, entry in pairs(titlebar_cache[s]) do
+                entry.wb.visible = false
+            end
+        end
         return
     end
 
