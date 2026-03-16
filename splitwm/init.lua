@@ -532,7 +532,7 @@ local function get_drag_handle(s, i)
         awful.button({}, 1, function()
             if not ref.b then return end
             handle_state = "dragging"
-            wb.bg = beautiful.splitwm_handle_drag_bg or "#7799dd44"
+            wb.bg = beautiful.splitwm_handle_drag_bg or "#ffffff44"
             local b, hw = ref.b, ref.handle_w
             mousegrabber.run(function(mouse)
                 if not mouse.buttons[1] then
@@ -551,7 +551,7 @@ local function get_drag_handle(s, i)
             end, b.dir == tree.DIR_H and "sb_h_double_arrow" or "sb_v_double_arrow")
         end)
     ))
-    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = beautiful.splitwm_handle_hover_bg or "#7799dd22" end end)
+    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = beautiful.splitwm_handle_hover_bg or "#ffffff22" end end)
     wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = "#00000000" end end)
 
     local entry = { wb = wb, ref = ref }
@@ -966,7 +966,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         local active_color  = active_client and colors.get_client_color(active_client)
         local focus_color   = active_picked and "#ffffff"
             or (active_color and active_color.light)
-            or beautiful.splitwm_focus_border or "#7799dd"
+            or beautiful.splitwm_focus_border or "#ffffff"
         local ctx = {
             s            = s,
             t            = t,
