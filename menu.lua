@@ -157,10 +157,21 @@ function menu.setup(opts)
     }
 
     splitwm.on_menu_request = function()
+        splitwm._menu_just_toggled = true
+        gears.timer.delayed_call(function() splitwm._menu_just_toggled = false end)
         app_menu:toggle()
         poll_ready = false
         if menu_poll_timer.started then menu_poll_timer:stop() end
         menu_poll_timer:start()
+    end
+
+    splitwm.on_menu_close = function()
+        if app_menu.wibox and app_menu.wibox.visible then
+            app_menu:hide()
+            pcall(function() mousegrabber.stop() end)
+            return true
+        end
+        return false
     end
 end
 

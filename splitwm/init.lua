@@ -398,15 +398,30 @@ end
 ---------------------------------------------------------------------------
 
 local function run_v_drag(s, get_b)
-    mousegrabber.run(function(mouse)
-        if not mouse.buttons[1] then awful.layout.arrange(s); return false end
-        local b = get_b()
-        if not b then return false end
-        local igap = b.parent_gap or 0
-        b.branch.ratio = math.max(0.1, math.min(0.9, (mouse.y - b.parent_y) / (b.parent_h - igap)))
-        awful.layout.arrange(s)
-        return true
-    end, "sb_v_double_arrow")
+    -- Capture start position before the delayed_call so it reflects the press position.
+    local start_y = mouse.coords().y
+    local moved   = false
+    -- Delay starting the grab until after the current event batch is fully processed.
+    -- This avoids a race where xcb_grab_pointer is enqueued but the button-release
+    -- event has already been read from the X socket, causing the grab to start with
+    -- no button held and no future release event to terminate the callback.
+    gears.timer.delayed_call(function()
+        if not mouse.coords().buttons[1] then return end  -- button already released
+        mousegrabber.run(function(m)
+            if not m.buttons[1] then
+                if moved then awful.layout.arrange(s) end
+                return false
+            end
+            if not moved and math.abs(m.y - start_y) < 4 then return true end
+            moved = true
+            local b = get_b()
+            if not b then return false end
+            local igap = b.parent_gap or 0
+            b.branch.ratio = math.max(0.1, math.min(0.9, (m.y - b.parent_y) / (b.parent_h - igap)))
+            awful.layout.arrange(s)
+            return true
+        end, "sb_v_double_arrow")
+    end)
 end
 
 ---------------------------------------------------------------------------
@@ -526,6 +541,20 @@ local function get_drag_handle(s, i)
 end
 
 local titlebar_cache = {}
+
+-- Returns true if the menu was open when the current button-press event began.
+-- The first caller in the event closes the menu; subsequent callers in the same
+-- event see _menu_was_open=true and bail out without calling on_menu_close again.
+local function event_had_menu_open()
+    if splitwm._menu_just_toggled then return false end
+    if splitwm._menu_was_open     then return true  end
+    if splitwm.on_menu_close and splitwm.on_menu_close() then
+        splitwm._menu_was_open = true
+        gears.timer.delayed_call(function() splitwm._menu_was_open = false end)
+        return true
+    end
+    return false
+end
 
 ---------------------------------------------------------------------------
 -- Titlebars (Wibox based) — helper functions
@@ -923,6 +952,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         -- the above layer so it renders on top of the active tab's negative-spacing overlap.
         table.insert(tab_widgets, wibox.widget {
             tb_make_btn(entry, ctx.widget_bc, icons.plus, 26, function()
+                pcall(function() mousegrabber.stop() end)
                 ctx.state.focused_leaf_id = leaf.id
                 if splitwm.on_menu_request then splitwm.on_menu_request() end
             end),
@@ -937,6 +967,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             middle_drag = wibox.widget { cursor = "sb_v_double_arrow", widget = wibox.container.background }
             middle_drag:buttons(gears.table.join(awful.button({}, 1, function()
                 if not leaf.v_bound_above then return end
+                if event_had_menu_open() then return end
                 run_v_drag(s, function() return leaf.v_bound_above end)
             end)))
         end
@@ -955,6 +986,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
                 if pickup.tag == "split"  then handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
                 if pickup.tag == "client" then try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
+                if event_had_menu_open() then return end
                 ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
             end)))
         else
