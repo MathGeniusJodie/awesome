@@ -618,13 +618,15 @@ local function on_hover_fg(w, hover_fg, normal_fg)
     w:connect_signal("mouse::leave", function() w.fg = normal_fg end)
 end
 
-local function set_btn_disabled(w)
+local function set_btn_disabled(w, wb)
     w._disabled = true
     w._icon._disabled = true
-    w._icon.cursor = "not-allowed"
-    w.cursor = "not-allowed"
     w._icon:emit_signal("widget::redraw_needed")
     w:buttons(gears.table.join())
+    if wb then
+        w:connect_signal("mouse::enter", function() wb.cursor = "circle" end)
+        w:connect_signal("mouse::leave", function() wb.cursor = "left_ptr" end)
+    end
 end
 
 local function tb_get_or_create_entry(s, leaf)
@@ -814,10 +816,10 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local hsplit_btn      = make_btn(icons.hsplit, cb.hsplit, not can_hsplit)
     local close_split_btn = make_btn(icons.close,  cb.close,  not parent)
 
-    if not can_vsplit then set_btn_disabled(vsplit_btn) end
-    if not can_hsplit then set_btn_disabled(hsplit_btn) end
+    if not can_vsplit then set_btn_disabled(vsplit_btn, entry.wb) end
+    if not can_hsplit then set_btn_disabled(hsplit_btn, entry.wb) end
     if parent then on_hover_fg(close_split_btn, color_close, color_fg)
-    else           set_btn_disabled(close_split_btn) end
+    else           set_btn_disabled(close_split_btn, entry.wb) end
 
 
     local is_split_picked = (pickup.tag == "split" and pickup.split_id == leaf.id)
