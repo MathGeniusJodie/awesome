@@ -172,6 +172,13 @@ local bar_margin     = 3
 local capsule_height = 24
 local wibar_height   = bar_margin * 2 + capsule_height  -- equal top + bottom padding
 
+local function parse_hex(hex)
+    hex = hex:gsub("#", "")
+    return tonumber(hex:sub(1,2), 16) / 255,
+           tonumber(hex:sub(3,4), 16) / 255,
+           tonumber(hex:sub(5,6), 16) / 255
+end
+
 --- Build a single tag button: colored circle + dots drawn via Cairo below.
 local function make_tag_widget(t, color)
     -- Custom dot-indicator widget: draws N white circles via Cairo directly.
@@ -197,8 +204,9 @@ local function make_tag_widget(t, color)
         local cap_w = total + pad * 2
         local cap_x = (w - cap_w) / 2
 
-        -- Capsule background: match button opacity (selected = opaque, else semi-transparent)
-        cr:set_source_rgba(0, 0, 0, self.selected and 1 or 0.5)
+        -- Capsule background: dark color variant, opaque when selected else semi-transparent
+        local dr, dg, db = parse_hex(color.dark)
+        cr:set_source_rgba(dr, dg, db, self.selected and 1 or 0.5)
         cr:save()
         cr:translate(cap_x, 0)
         gears.shape.rounded_rect(cr, cap_w, h, h / 2)
@@ -229,24 +237,37 @@ local function make_tag_widget(t, color)
         dots:emit_signal("widget::redraw_needed")
     end
 
+    -- Outer ring: white when selected, transparent otherwise
+    local ring = wibox.container.background()
+    ring.forced_width  = capsule_height
+    ring.forced_height = capsule_height
+    ring.shape         = gears.shape.circle
+    ring.bg            = "#00000000"
+
+    -- Inner colored circle, inset 2px on each side to reveal the ring
     local circle = wibox.container.background()
-    circle.forced_width  = capsule_height
-    circle.forced_height = capsule_height
+    circle.forced_width  = capsule_height - 4
+    circle.forced_height = capsule_height - 4
     circle.shape         = gears.shape.circle
-    circle.bg            = color.light
-    circle.border_width  = 2
-    circle.border_color  = "#00000000"
+    circle.bg            = color.dark
     circle:set_widget(wibox.container.place())
 
+    local place_inner = wibox.container.place()
+    place_inner.halign = "center"
+    place_inner.valign = "center"
+    place_inner:set_widget(circle)
+    ring:set_widget(place_inner)
+
     local function update_circle()
-        circle.border_color = t.selected and "#ffffff" or "#00000000"
+        ring.bg    = t.selected and "#ffffff" or "#00000000"
+        circle.bg  = t.selected and color.light or color.dark
         dots.selected = t.selected
         dots:emit_signal("widget::redraw_needed")
     end
 
     -- Circle pinned to top; dots (self-drawing capsule) pushed to the very bottom
     local tag_layout = wibox.layout.stack()
-    tag_layout:add(wibox.container.margin(circle, 0, 0, bar_margin, bar_margin))
+    tag_layout:add(wibox.container.margin(ring, 0, 0, bar_margin, bar_margin))
     tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - bar_margin - dots.forced_height, 0))
 
     tag_layout:buttons(gears.table.join(
