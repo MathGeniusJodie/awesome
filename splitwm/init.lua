@@ -775,7 +775,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
 end
 
 -- Build the focus border drawn around the client area.
-local function tb_build_border_widget(border_color, tb_h, bw)
+local function tb_build_border_widget(border_color, tb_h, bw, radius)
     local w   = wibox.widget.base.make_widget()
     w._bc     = border_color
     w._tb_h   = tb_h
@@ -789,7 +789,7 @@ local function tb_build_border_widget(border_color, tb_h, bw)
         local y    = self._tb_h - half
         local wd   = width - self._bw
         local h    = height - self._tb_h
-        local r    = beautiful.splitwm_focus_border_radius or 2
+        local r    = radius or beautiful.splitwm_focus_border_radius or 2
         cr:new_sub_path()
         cr:arc(x + wd - r, y + r,     r, -math.pi / 2, 0)
         cr:arc(x + wd - r, y + h - r, r,  0,           math.pi / 2)
@@ -881,16 +881,35 @@ end
 
 -- Assemble the titlebar wibox for an empty leaf: bar strip + background + launchers.
 local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
+    -- Split launchers into two rows
+    local row1, row2 = {}, {}
+    local mid = math.ceil(#launcher_ws / 2)
+    for i, w in ipairs(launcher_ws) do
+        if i <= mid then table.insert(row1, w) else table.insert(row2, w) end
+    end
+    local icon_grid
+    if #row2 > 0 then
+        icon_grid = {
+            { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(row1) },
+            { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(row2) },
+            spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.vertical,
+        }
+    else
+        icon_grid = { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) }
+    end
+    local corner_r = beautiful.splitwm_focus_border_radius or 14
     entry.wb:setup {
         -- Layer 1: content background (spacer over bar area, colored content fills the rest)
         {
             { forced_height = ctx.tb_h, widget = wibox.container.background },
             {
                 {
-                    { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) },
-                    halign = "center", valign = "center", widget = wibox.container.place,
+                    { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
+                    widget = wibox.container.background,
                 },
-                bg = beautiful.splitwm_inactive_bg, widget = wibox.container.background,
+                bg    = beautiful.splitwm_inactive_bg,
+                shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, corner_r) end,
+                widget = wibox.container.background,
             },
             layout = wibox.layout.align.vertical,
         },
@@ -972,7 +991,10 @@ local function update_titlebars(s, t, state, geos, leaves)
         })
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
-        local border_draw = tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw)
+        local empty_r     = 14
+        local border_draw = #leaf.tabs == 0
+            and tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, empty_r)
+            or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw)
 
         local middle_drag
         if leaf.v_bound_above then

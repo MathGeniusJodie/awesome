@@ -15,7 +15,7 @@ function menu.setup(opts)
         items = {
             { "Loading apps...", nil },
         },
-        theme = { width = 200, height = 24 },
+        theme = { width = 200, height = 24, border_width = 8, bg_normal = "#000000", bg_focus = "#000000", border_color = "#000000" },
     }
 
     menu_gen.generate(function(entries)
@@ -86,10 +86,18 @@ function menu.setup(opts)
                 if l.cmd == cmd then return l.icon end
             end
         end
+        local function lookup(names)
+            for _, n in ipairs(names) do
+                local p = menubar_utils.lookup_icon(n)
+                if p and p ~= false then return p end
+            end
+        end
         local quick_items = {
-            { "Terminal",     function() awful.spawn(terminal)     end, launcher_icon(terminal)     },
-            { "Browser",      function() awful.spawn(browser)      end, launcher_icon(browser)      },
-            { "File Manager", function() awful.spawn(filemanager)  end, launcher_icon(filemanager)  },
+            { "Terminal",     function() awful.spawn(terminal)    end, launcher_icon(terminal)    },
+            { "Browser",      function() awful.spawn(browser)     end, launcher_icon(browser)     },
+            { "File Manager", function() awful.spawn(filemanager) end, launcher_icon(filemanager) },
+            { "Obsidian",     function() awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
+            { "yt-gtk",       function() awful.spawn("yt-gtk")    end, lookup({"yt-gtk", "youtube"}) },
             { "─────────────" },
         }
         for i = #quick_items, 1, -1 do
@@ -99,7 +107,7 @@ function menu.setup(opts)
         -- Replace the placeholder menu
         app_menu = awful.menu {
             items = menu_items,
-            theme = { width = 200, height = 24 },
+            theme = { width = 200, height = 24, border_width = 8, menu_bg_normal = "#000000", border_color = "#000000" },
         }
 
         -- Flush render caches so overlays and titlebars rebuild with the new icons

@@ -122,6 +122,16 @@ splitwm.launchers = {
         icon       = "/usr/share/icons/Adwaita/scalable/places/folder.svg",
         cmd        = filemanager,
     },
+    {
+        label      = "O",
+        icon_names = {"obsidian", "md.obsidian.Obsidian"},
+        cmd        = "obsidian",
+    },
+    {
+        label      = "YT",
+        icon_names = {"yt-gtk", "youtube"},
+        cmd        = "yt-gtk",
+    },
 }
 
 splitwm.setup()
