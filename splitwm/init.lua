@@ -16,6 +16,12 @@ local colors    = require("splitwm.colors")
 
 local splitwm = {}
 
+-- Color constants read from theme (mandatory — no fallbacks)
+local color_bg    -- pure black
+local color_fg    -- pure white
+local color_close -- close-button hover
+local color_icon  -- launcher icon foreground
+
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 33
 
@@ -95,12 +101,12 @@ local function make_launcher_widget(entry, size, callback)
             left = 4, right = 4, top = 2, bottom = 2,
             widget = wibox.container.margin,
         },
-        bg     = "#00000000",
-        fg     = "#cccccc",
+        bg     = color_bg .. "00",
+        fg     = color_icon,
         widget = wibox.container.background,
     }
-    w:connect_signal("mouse::enter", function() w.bg = "#ffffff15" end)
-    w:connect_signal("mouse::leave", function() w.bg = "#00000000" end)
+    w:connect_signal("mouse::enter", function() w.bg = color_fg .. "15" end)
+    w:connect_signal("mouse::leave", function() w.bg = color_bg .. "00" end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
 end
@@ -120,7 +126,7 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     function icon:fit(_, w, h) return w, h end
     local w = wibox.widget {
         icon,
-        bg                 = beautiful.splitwm_inactive_bg,
+        bg                 = color_bg .. "80",
         shape              = gears.shape.circle,
         forced_width       = size,
         forced_height      = size,
@@ -460,7 +466,7 @@ local function arrange(p)
     local state = get_state(tag)
     local wa    = p.workarea
     local cls   = p.clients
-    local gap   = beautiful.splitwm_gap or 16
+    local gap   = beautiful.splitwm_gap
 
     local root = state.root
     local pinned = {}
@@ -476,7 +482,7 @@ local function arrange(p)
     local s = p.screen
     if type(s) == "number" then s = screen[s] end
     if s then geo_cache[s] = { geos = geos, bounds = bounds } end
-    local bw   = beautiful.splitwm_focus_border_width or 2
+    local bw   = beautiful.splitwm_focus_border_width
     local tb_h = math.max(TITLEBAR_HEIGHT, gap)
 
     for _, leaf in ipairs(tree.collect_leaves(root)) do
@@ -526,17 +532,17 @@ local function get_drag_handle(s, i)
 
     local ref = { b = nil, handle_w = 1 }
     local handle_state = "idle"
-    local wb  = wibox { x = 0, y = 0, width = 1, height = 1, bg = "#00000000", visible = false, ontop = true, type = "utility" }
+    local wb  = wibox { x = 0, y = 0, width = 1, height = 1, bg = color_bg .. "00", visible = false, ontop = true, type = "utility" }
 
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
             if not ref.b then return end
             handle_state = "dragging"
-            wb.bg = beautiful.splitwm_handle_drag_bg or "#ffffff44"
+            wb.bg = color_fg .. "44"
             local b, hw = ref.b, ref.handle_w
             mousegrabber.run(function(mouse)
                 if not mouse.buttons[1] then
-                    handle_state = "idle"; wb.bg = "#00000000"; awful.layout.arrange(s); return false
+                    handle_state = "idle"; wb.bg = color_bg .. "00"; awful.layout.arrange(s); return false
                 end
                 local igap = b.parent_gap or 0
                 if b.dir == tree.DIR_H then
@@ -551,8 +557,8 @@ local function get_drag_handle(s, i)
             end, b.dir == tree.DIR_H and "sb_h_double_arrow" or "sb_v_double_arrow")
         end)
     ))
-    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = beautiful.splitwm_handle_hover_bg or "#ffffff22" end end)
-    wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = "#00000000" end end)
+    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = color_fg .. "22" end end)
+    wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = color_bg .. "00" end end)
 
     local entry = { wb = wb, ref = ref }
     drag_handle_pool[s][i] = entry
@@ -589,22 +595,22 @@ local function tb_get_or_create_entry(s, leaf)
     local entry = cache[leaf.id]
     if entry then return entry end
     entry = {
-        wb                = wibox { screen = s, bg = "#00000000", visible = true, ontop = false, type = "utility" },
-        tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12", bg = "#000000", fg = "#ffffff", border_width = 0 },
+        wb                = wibox { screen = s, bg = color_bg .. "00", visible = true, ontop = false, type = "utility" },
+        tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12", bg = color_bg, fg = color_fg, border_width = 0 },
         tooltip_objs      = {},
         titlebar_btn_list = {},
         titlebar_hovered  = false,
     }
     entry.wb:connect_signal("mouse::enter", function()
         entry.titlebar_hovered = true
-        for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = "#000000" end
-        if entry.swap_btn and not entry.swap_btn_picked then entry.swap_btn.bg = "#000000" end
+        for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = color_bg end
+        if entry.swap_btn and not entry.swap_btn_picked then entry.swap_btn.bg = color_bg end
     end)
     entry.wb:connect_signal("mouse::leave", function()
         entry.titlebar_hovered = false
-        for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = "#00000099" end
+        for _, btn in ipairs(entry.titlebar_btn_list) do btn.bg = color_bg .. "99" end
         if entry.swap_btn then
-            entry.swap_btn.bg = entry.swap_btn_picked and "#ffffff" or "#00000099"
+            entry.swap_btn.bg = entry.swap_btn_picked and color_fg or color_bg .. "99"
             if entry.swap_btn._icon then
                 entry.swap_btn._icon._dark = entry.swap_btn_picked
                 entry.swap_btn._icon:emit_signal("widget::redraw_needed")
@@ -660,23 +666,23 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             { text = tab_state == "picked" and "↗" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
             bottom = 2, widget = wibox.container.margin,
         },
-        bg           = tab_state == "picked" and "#ffffff" or "#00000000",
-        fg           = tab_state == "picked" and "#000000" or (tab_state == "active" and "#ffffff" or "#00000000"),
+        bg           = tab_state == "picked" and color_fg or color_bg .. "00",
+        fg           = tab_state == "picked" and color_bg or (tab_state == "active" and color_fg or color_bg .. "00"),
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = 26,
         widget       = wibox.container.background,
     }
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-        bg           = "#00000000",
-        fg           = tab_state == "active" and "#ffffff" or "#00000000",
+        bg           = color_bg .. "00",
+        fg           = tab_state == "active" and color_fg or color_bg .. "00",
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = 26,
         widget       = wibox.container.background,
     }
     if tab_state == "active" then
-        move_btn:connect_signal("mouse::enter", function() move_btn.bg = "#ffffff22" end)
-        move_btn:connect_signal("mouse::leave", function() move_btn.bg = "#00000000" end)
+        move_btn:connect_signal("mouse::enter", function() move_btn.bg = color_fg .. "22" end)
+        move_btn:connect_signal("mouse::leave", function() move_btn.bg = color_bg .. "00" end)
         move_btn:buttons(gears.table.join(awful.button({}, 1, function()
             if pickup.tag == "client" and pickup.client == tc then
                 pickup = pickup_idle()
@@ -685,15 +691,14 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end
             awful.layout.arrange(ctx.s)
         end)))
-        on_hover_fg(close_btn, "#ff6666", "#ffffff")
         close_btn:buttons(gears.table.join(awful.button({}, 1, function() tc:kill() end)))
     end
 
     local client_color = colors.get_client_color(tc)
-    local tab_bg = tab_state == "picked" and "#ffffff"
+    local tab_bg = tab_state == "picked" and color_fg
         or (client_color and client_color.dark)
-        or (tab_state == "active" and (beautiful.splitwm_tab_active_bg))
-        or beautiful.splitwm_inactive_bg
+        or (tab_state == "active" and color_bg)
+        or color_bg .. "80"
     local tab_bg_pat   = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
 
@@ -712,7 +717,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         cr:fill()
         if tab_state == "active" or tab_state == "picked" then
             draw_tab_border(cr, w2, h2)
-            cr:set_source(tab_state == "picked" and gears.color("#ffffff") or widget_bc_pat)
+            cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
             cr:set_line_width(2)
             cr:stroke()
         end
@@ -761,12 +766,12 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local vsplit_btn      = make_btn(icons.vsplit, cb.vsplit)
     local hsplit_btn      = make_btn(icons.hsplit, cb.hsplit)
     local close_split_btn = make_btn(icons.close,  cb.close)
-    on_hover_fg(close_split_btn, "#ff6666", "#ffffff")
+    on_hover_fg(close_split_btn, color_close, color_fg)
 
     local is_split_picked = (pickup.tag == "split" and pickup.split_id == leaf.id)
     local swap_btn = make_circle_icon_btn_widget(icons.swap, 26)
     swap_btn.shape_border_color = ctx.widget_bc
-    if is_split_picked then swap_btn.bg = "#ffffff"; swap_btn._icon._dark = true end
+    if is_split_picked then swap_btn.bg = color_fg; swap_btn._icon._dark = true end
     entry.swap_btn        = swap_btn
     entry.swap_btn_picked = is_split_picked
     swap_btn:buttons(gears.table.join(awful.button({}, 1, function()
@@ -799,7 +804,7 @@ local function tb_build_border_widget(border_color, tb_h, bw, radius)
         local y    = self._tb_h - half
         local wd   = width - self._bw
         local h    = height - self._tb_h
-        local r    = radius or beautiful.splitwm_focus_border_radius or 2
+        local r    = radius or beautiful.splitwm_border_radius
         cr:new_sub_path()
         cr:arc(x + wd - r, y + r,     r, -math.pi / 2, 0)
         cr:arc(x + wd - r, y + h - r, r,  0,           math.pi / 2)
@@ -907,7 +912,7 @@ local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw
     else
         icon_grid = { spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) }
     end
-    local corner_r = beautiful.splitwm_focus_border_radius or 14
+    local corner_r = beautiful.splitwm_empty_radius
     entry.wb:setup {
         -- Layer 1: content background (spacer over bar area, colored content fills the rest)
         {
@@ -917,7 +922,7 @@ local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw
                     { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
                     widget = wibox.container.background,
                 },
-                bg    = beautiful.splitwm_inactive_bg,
+                bg    = color_bg .. "80",
                 shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, corner_r) end,
                 widget = wibox.container.background,
             },
@@ -938,9 +943,9 @@ end
 local function update_titlebars(s, t, state, geos, leaves)
     if not titlebar_cache[s] then titlebar_cache[s] = {} end
 
-    local gap  = beautiful.splitwm_gap or 16
+    local gap  = beautiful.splitwm_gap
     local tb_h = math.max(TITLEBAR_HEIGHT, gap)
-    local bw   = beautiful.splitwm_focus_border_width or 2
+    local bw   = beautiful.splitwm_focus_border_width
     local alive = {}
 
     local function update_leaf(leaf)
@@ -964,15 +969,15 @@ local function update_titlebars(s, t, state, geos, leaves)
         local active_client = leaf.tabs[leaf.active_tab]
         local active_picked = pickup.tag == "client" and pickup.client == active_client
         local active_color  = active_client and colors.get_client_color(active_client)
-        local focus_color   = active_picked and "#ffffff"
+        local focus_color   = active_picked and color_fg
             or (active_color and active_color.light)
-            or beautiful.splitwm_focus_border or "#ffffff"
+            or color_fg
         local ctx = {
             s            = s,
             t            = t,
             state        = state,
-            widget_bc    = is_focused and focus_color or "#00000000",
-            bar_bg       = beautiful.titlebar_bg_normal,
+            widget_bc    = is_focused and focus_color or color_bg .. "00",
+            bar_bg       = color_bg .. "00",
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
             icon_size    = 20,
@@ -1005,7 +1010,7 @@ local function update_titlebars(s, t, state, geos, leaves)
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
         local empty_r     = 14
-        local empty_focus_color = beautiful.splitwm_empty_focus_border or "#ffffff"
+        local empty_focus_color = color_fg
         local border_draw = #leaf.tabs == 0
             and tb_build_border_widget(is_focused and empty_focus_color or nil, tb_h, bw, empty_r)
             or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw)
@@ -1064,7 +1069,7 @@ end
 ---------------------------------------------------------------------------
 
 local function update_drag_handles(s, state, bounds)
-    local gap      = beautiful.splitwm_gap or 16
+    local gap      = beautiful.splitwm_gap
     local handle_w = gap - 4
     local hi       = 0
 
@@ -1115,7 +1120,7 @@ local function update_ui(s)
         return
     end
 
-    local gap    = beautiful.splitwm_gap or 16
+    local gap    = beautiful.splitwm_gap
     local cached = geo_cache[s]
     local geos, bounds
     if cached then
@@ -1180,6 +1185,11 @@ end
 ---------------------------------------------------------------------------
 
 function splitwm.setup()
+    color_bg    = beautiful.splitwm_color_bg
+    color_fg    = beautiful.splitwm_color_fg
+    color_close = beautiful.splitwm_close_fg
+    color_icon  = beautiful.splitwm_icon_fg
+
     awesome.register_xproperty("splitwm_color", "string")
 
     client.connect_signal("manage", function(c)

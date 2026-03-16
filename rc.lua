@@ -57,16 +57,20 @@ beautiful.init(gears.filesystem.get_themes_dir() .. "default/theme.lua")
 -- The actual gap size is splitwm_gap.
 beautiful.useless_gap        = 0
 beautiful.border_width       = 0
-beautiful.splitwm_gap        = 34
-beautiful.splitwm_inactive_bg  = "#00000080"
-beautiful.splitwm_focus_border = "#ffffff"
-beautiful.splitwm_tab_active_bg = "#000000"
-beautiful.splitwm_tab_active_fg = "#ffffff"
-beautiful.splitwm_handle_hover_bg = "#ffffff22"
-beautiful.splitwm_handle_drag_bg  = "#ffffff44"
+beautiful.titlebar_bg_normal = "#00000000"
+
+-- Splitwm colors
+beautiful.splitwm_color_bg   = "#000000"
+beautiful.splitwm_color_fg   = "#ffffff"
+beautiful.splitwm_close_fg   = "#ff6666"
+beautiful.splitwm_icon_fg    = "#cccccc"
+
+-- Splitwm layout
+beautiful.splitwm_gap              = 34
 beautiful.splitwm_focus_border_width = 2
-beautiful.splitwm_btn_font       = "monospace bold 14"
-beautiful.titlebar_bg_normal     = "#00000000"
+beautiful.splitwm_border_radius    = 2
+beautiful.splitwm_empty_radius     = 14
+beautiful.splitwm_btn_font         = "monospace bold 14"
 
 ---------------------------------------------------------------------------
 -- Load splitwm
@@ -364,7 +368,7 @@ awful.screen.connect_for_each_screen(function(s)
     dt_row:add(myclock)
     local dt_capsule = capsule(dt_row, 24, 24, splitwm.tab_shape)
 
-    local sg = beautiful.splitwm_gap or 16
+    local sg = beautiful.splitwm_gap
     s.mywibox = wibox({
         x       = s.geometry.x + sg,
         y       = s.geometry.y + s.geometry.height - wibar_height,
