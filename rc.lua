@@ -129,8 +129,8 @@ splitwm.launchers = {
     },
     {
         label      = "YT",
-        icon_names = {"yt-gtk", "youtube"},
-        cmd        = "yt-gtk",
+        icon_names = {"video"},
+        cmd        = "/home/jodie/yt-scrape/target/release/yt-gtk",
     },
 }
 

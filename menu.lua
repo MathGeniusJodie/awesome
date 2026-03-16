@@ -97,7 +97,7 @@ function menu.setup(opts)
             { "Browser",      function() awful.spawn(browser)     end, launcher_icon(browser)     },
             { "File Manager", function() awful.spawn(filemanager) end, launcher_icon(filemanager) },
             { "Obsidian",     function() awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
-            { "yt-gtk",       function() awful.spawn("yt-gtk")    end, lookup({"yt-gtk", "youtube"}) },
+            { "yt-gtk",       function() awful.spawn("/home/jodie/yt-scrape/target/release/yt-gtk") end, lookup({"video"}) },
             { "─────────────" },
         }
         for i = #quick_items, 1, -1 do
