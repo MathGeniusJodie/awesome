@@ -17,11 +17,15 @@ local colors    = require("splitwm.colors")
 local splitwm = {}
 
 -- Color constants read from theme (mandatory — no fallbacks)
-local color_bg          -- pure black
-local color_fg          -- pure white
-local color_fg_disabled -- dimmed foreground for disabled icons
-local color_close       -- close-button hover
-local color_icon        -- launcher icon foreground
+local color_bg             -- pure black
+local color_fg             -- pure white
+local color_fg_disabled    -- dimmed foreground for disabled icons
+local color_close          -- close-button hover
+local color_icon           -- launcher icon foreground
+local color_btn_bg         -- transparent circle button bg
+local color_transparent    -- fully transparent
+local color_fg_hover       -- hover highlight
+local color_fg        -- drag/active highlight
 
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 30
@@ -111,12 +115,12 @@ local function make_launcher_widget(entry, size, callback)
             left = 4, right = 4, top = 2, bottom = 2,
             widget = wibox.container.margin,
         },
-        bg     = color_bg .. "00",
+        bg     = color_transparent,
         fg     = color_icon,
         widget = wibox.container.background,
     }
-    w:connect_signal("mouse::enter", function() w.bg = color_fg .. "15" end)
-    w:connect_signal("mouse::leave", function() w.bg = color_bg .. "00" end)
+    w:connect_signal("mouse::enter", function() w.bg = color_fg_hover end)
+    w:connect_signal("mouse::leave", function() w.bg = color_transparent end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
 end
@@ -134,7 +138,7 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     function icon:fit(_, w, h) return w, h end
     local w = wibox.widget {
         icon,
-        bg                 = color_bg .. "80",
+        bg                 = color_btn_bg,
         shape              = gears.shape.circle,
         forced_width       = size,
         forced_height      = size,
@@ -559,17 +563,17 @@ local function get_drag_handle(s, i)
 
     local ref = { b = nil, handle_w = 1 }
     local handle_state = "idle"
-    local wb  = wibox { x = 0, y = 0, width = 1, height = 1, bg = color_bg .. "00", visible = false, ontop = true, type = "utility" }
+    local wb  = wibox { x = 0, y = 0, width = 1, height = 1, bg = color_transparent, visible = false, ontop = true, type = "utility" }
 
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
             if not ref.b then return end
             handle_state = "dragging"
-            wb.bg = color_fg .. "44"
+            wb.bg = color_fg
             local b, hw = ref.b, ref.handle_w
             mousegrabber.run(function(mouse)
                 if not mouse.buttons[1] then
-                    handle_state = "idle"; wb.bg = color_bg .. "00"; awful.layout.arrange(s); return false
+                    handle_state = "idle"; wb.bg = color_transparent; awful.layout.arrange(s); return false
                 end
                 local igap = b.parent_gap or 0
                 if b.dir == tree.DIR_H then
@@ -588,8 +592,8 @@ local function get_drag_handle(s, i)
             end, b.dir == tree.DIR_H and "sb_h_double_arrow" or "sb_v_double_arrow")
         end)
     ))
-    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = color_fg .. "22" end end)
-    wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = color_bg .. "00" end end)
+    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = color_fg_hover end end)
+    wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = color_transparent end end)
 
     local entry = { wb = wb, ref = ref }
     drag_handle_pool[s][i] = entry
@@ -637,7 +641,7 @@ local function tb_get_or_create_entry(s, leaf)
     local entry = cache[leaf.id]
     if entry then return entry end
     entry = {
-        wb                = wibox { screen = s, bg = color_bg .. "00", visible = true, ontop = false, type = "utility" },
+        wb                = wibox { screen = s, bg = color_transparent, visible = true, ontop = false, type = "utility" },
         tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12", bg = color_bg, fg = color_fg, border_width = 0 },
         tooltip_objs      = {},
         titlebar_btn_list = {},
@@ -651,9 +655,9 @@ local function tb_get_or_create_entry(s, leaf)
     end)
     entry.wb:connect_signal("mouse::leave", function()
         entry.titlebar_hovered = false
-        for _, btn in ipairs(entry.titlebar_btn_list) do if not btn._disabled then btn.bg = color_bg .. "99" end end
+        for _, btn in ipairs(entry.titlebar_btn_list) do if not btn._disabled then btn.bg = color_btn_bg end end
         if entry.swap_btn then
-            entry.swap_btn.bg = entry.swap_btn_picked and color_fg or color_bg .. "99"
+            entry.swap_btn.bg = entry.swap_btn_picked and color_fg or color_btn_bg
             if entry.swap_btn._icon then
                 entry.swap_btn._icon._dark = entry.swap_btn_picked
                 entry.swap_btn._icon:emit_signal("widget::redraw_needed")
@@ -711,23 +715,23 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             { text = tab_state == "picked" and "↗" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
             bottom = 2, widget = wibox.container.margin,
         },
-        bg           = tab_state == "picked" and color_fg or color_bg .. "00",
-        fg           = tab_state == "picked" and color_bg or (tab_state == "active" and color_fg or color_bg .. "00"),
+        bg           = tab_state == "picked" and color_fg or color_transparent,
+        fg           = tab_state == "picked" and color_bg or (tab_state == "active" and color_fg or color_transparent),
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = BTN_SIZE,
         widget       = wibox.container.background,
     }
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-        bg           = color_bg .. "00",
-        fg           = tab_state == "active" and color_fg or color_bg .. "00",
+        bg           = color_transparent,
+        fg           = tab_state == "active" and color_fg or color_transparent,
         shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = BTN_SIZE,
         widget       = wibox.container.background,
     }
     if tab_state == "active" then
-        move_btn:connect_signal("mouse::enter", function() move_btn.bg = color_fg .. "22" end)
-        move_btn:connect_signal("mouse::leave", function() move_btn.bg = color_bg .. "00" end)
+        move_btn:connect_signal("mouse::enter", function() move_btn.bg = color_fg_hover end)
+        move_btn:connect_signal("mouse::leave", function() move_btn.bg = color_transparent end)
         move_btn:buttons(gears.table.join(awful.button({}, 1, function()
             if pickup.tag == "client" and pickup.client == tc then
                 pickup = pickup_idle()
@@ -743,7 +747,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_bg = tab_state == "picked" and color_fg
         or (client_color and client_color.dark)
         or (tab_state == "active" and color_bg)
-        or color_bg .. "80"
+        or color_btn_bg
     local tab_bg_pat   = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
 
@@ -984,7 +988,7 @@ local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw
                     { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
                     widget = wibox.container.background,
                 },
-                bg    = color_bg .. "80",
+                bg    = color_btn_bg,
                 shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, corner_r) end,
                 widget = wibox.container.background,
             },
@@ -1045,8 +1049,8 @@ local function update_titlebars(s, t, state, geos, leaves)
             t            = t,
             state        = state,
             geo          = geo,
-            widget_bc    = is_focused and focus_color or color_bg .. "00",
-            bar_bg       = color_bg .. "00",
+            widget_bc    = is_focused and focus_color or color_transparent,
+            bar_bg       = color_transparent,
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
             tb_bar_h     = tb_h,
@@ -1260,11 +1264,14 @@ end
 ---------------------------------------------------------------------------
 
 function splitwm.setup()
-    color_bg          = beautiful.splitwm_color_bg
-    color_fg          = beautiful.splitwm_color_fg
-    color_fg_disabled = beautiful.splitwm_fg_disabled
-    color_close       = beautiful.splitwm_close_fg
-    color_icon        = beautiful.splitwm_color_fg
+    color_bg             = beautiful.splitwm_color_bg
+    color_fg             = beautiful.splitwm_color_fg
+    color_fg_disabled    = beautiful.splitwm_fg_disabled
+    color_close          = beautiful.splitwm_close_fg
+    color_icon           = beautiful.splitwm_color_fg
+    color_btn_bg         = beautiful.splitwm_btn_bg
+    color_transparent    = beautiful.splitwm_transparent
+    color_fg_hover       = beautiful.splitwm_fg_hover
 
     awesome.register_xproperty("splitwm_color", "string")
 
