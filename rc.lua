@@ -60,9 +60,10 @@ beautiful.border_width       = 0
 beautiful.titlebar_bg_normal = "#00000000"
 
 -- Splitwm colors
-beautiful.splitwm_color_bg   = "#000000"
-beautiful.splitwm_color_fg   = "#ffffff"
-beautiful.splitwm_close_fg   = "#ff6666"
+beautiful.splitwm_color_bg    = "#000000"
+beautiful.splitwm_color_fg    = "#ffffff"
+beautiful.splitwm_fg_disabled = "#ffffff40"
+beautiful.splitwm_close_fg    = "#ff6666"
 beautiful.splitwm_btn_bg       = "#000000cc"  -- semitransparent circle button background (RRGGBBAA)
 
 -- Splitwm layout

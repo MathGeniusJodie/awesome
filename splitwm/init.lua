@@ -17,10 +17,11 @@ local colors    = require("splitwm.colors")
 local splitwm = {}
 
 -- Color constants read from theme (mandatory — no fallbacks)
-local color_bg    -- pure black
-local color_fg    -- pure white
-local color_close -- close-button hover
-local color_icon  -- launcher icon foreground
+local color_bg          -- pure black
+local color_fg          -- pure white
+local color_fg_disabled -- dimmed foreground for disabled icons
+local color_close       -- close-button hover
+local color_icon        -- launcher icon foreground
 
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 30
@@ -123,11 +124,9 @@ end
 local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)
-        if self._dark then
-            cr:set_source_rgba(0, 0, 0, self._disabled and 0.25 or 0.85)
-        else
-            cr:set_source_rgba(1, 1, 1, self._disabled and 0.25 or 0.85)
-        end
+        local col = self._disabled and color_fg_disabled
+                    or (self._dark and color_bg or color_fg)
+        cr:set_source(gears.color(col))
         cr:set_line_width(2)
         cr:set_line_cap(CAIRO_LINE_CAP_ROUND)
         draw_fn(cr, w, h)
@@ -1261,10 +1260,11 @@ end
 ---------------------------------------------------------------------------
 
 function splitwm.setup()
-    color_bg    = beautiful.splitwm_color_bg
-    color_fg    = beautiful.splitwm_color_fg
-    color_close = beautiful.splitwm_close_fg
-    color_icon  = beautiful.splitwm_color_fg
+    color_bg          = beautiful.splitwm_color_bg
+    color_fg          = beautiful.splitwm_color_fg
+    color_fg_disabled = beautiful.splitwm_fg_disabled
+    color_close       = beautiful.splitwm_close_fg
+    color_icon        = beautiful.splitwm_color_fg
 
     awesome.register_xproperty("splitwm_color", "string")
 
