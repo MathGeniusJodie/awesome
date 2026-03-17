@@ -408,6 +408,8 @@ local function cycle_tab(t, offset)
     local leaf = get_focused_leaf(state)
     if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
+    local c = leaf.tabs[leaf.active_tab]
+    if c and c.valid then client.focus = c; c:raise() end
     return true
 end
 
