@@ -99,7 +99,7 @@ local function make_launcher_widget(entry, size, callback)
         inner = wibox.widget {
             text   = entry.label or "?",
             align  = "center",
-            font   = "monospace bold " .. math.floor(size * 0.7),
+            font   = "monospace bold " .. math.floor(size * 0.7) .. "px",
             widget = wibox.widget.textbox,
         }
     end
@@ -642,7 +642,7 @@ local function tb_get_or_create_entry(s, leaf)
     if entry then return entry end
     entry = {
         wb                = wibox { screen = s, bg = color_transparent, visible = true, ontop = false, type = "utility" },
-        tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12", bg = color_bg, fg = color_fg, border_width = 0 },
+        tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12px", bg = color_bg, fg = color_fg, border_width = 0 },
         tooltip_objs      = {},
         titlebar_btn_list = {},
         titlebar_hovered  = false,
@@ -1055,7 +1055,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             tb_h         = tb_h,
             tb_bar_h     = tb_h,
             icon_size    = 20,
-            tab_btn_font = "monospace bold 18",
+            tab_btn_font = "monospace bold 18px",
             BTN_SPACING  = BTN_SPACING,
             TAB_SPACING  = TAB_SPACING,
         }

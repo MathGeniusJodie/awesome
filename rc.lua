@@ -73,7 +73,7 @@ beautiful.splitwm_gap              = 34
 beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_border_radius    = 2
 beautiful.splitwm_empty_radius     = 14
-beautiful.splitwm_btn_font         = "monospace bold 14"
+beautiful.splitwm_btn_font         = "monospace bold 14px"
 
 ---------------------------------------------------------------------------
 -- Load splitwm
@@ -181,7 +181,7 @@ awful.layout.layouts = {
 ---------------------------------------------------------------------------
 
 -- Wibar font and color overrides (must be before wibar creation)
-beautiful.font           = "monospace bold 12"
+beautiful.font           = "monospace bold 12px"
 beautiful.fg_normal      = "#ffffff"
 beautiful.fg_focus       = "#ffffff"
 
@@ -333,7 +333,7 @@ awful.screen.connect_for_each_screen(function(s)
     local mon_codes = { "Ja", "Fe", "Mr", "Ap", "My", "Jn", "Jl", "Au", "Se", "Oc", "Nv", "De" }
 
     local mydate = wibox.widget.textbox()
-    mydate.font = "monospace 12"
+    mydate.font = "monospace 12px"
     local function update_date()
         local t = os.date("*t")
         mydate.text = dow_codes[t.wday] .. " " .. mon_codes[t.month]
@@ -344,7 +344,7 @@ awful.screen.connect_for_each_screen(function(s)
     gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_date }
 
     local myclock = wibox.widget.textclock("%I:%M %p")
-    myclock.font = "monospace bold 12"
+    myclock.font = "monospace bold 12px"
 
     local bat_widget  = status.new_battery_widget()
     local vol_widget  = status.new_volume_widget()
