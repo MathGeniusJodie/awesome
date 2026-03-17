@@ -1144,6 +1144,15 @@ end
 ---------------------------------------------------------------------------
 
 local function update_drag_handles(s, state, bounds)
+    -- Hide all drag handles when any client is fullscreen (handles are ontop and would overdraw).
+    for _, c in ipairs(s.clients) do
+        if c.fullscreen then
+            local pool = drag_handle_pool[s]
+            if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
+            return
+        end
+    end
+
     local gap      = beautiful.splitwm_gap
     local handle_w = gap - 4
     local hi       = 0
