@@ -706,9 +706,21 @@ end
 local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_state = get_tab_state(tab_idx, leaf, tc)
 
-    local tab_icon = awful.widget.clienticon(tc)
-    tab_icon.forced_width  = ctx.icon_size
-    tab_icon.forced_height = ctx.icon_size
+    local tab_icon
+    if tc.icon then
+        tab_icon = awful.widget.clienticon(tc)
+        tab_icon.forced_width  = ctx.icon_size
+        tab_icon.forced_height = ctx.icon_size
+    else
+        tab_icon = wibox.widget {
+            text          = string.sub(tc.class or tc.instance or "?", 1, 2),
+            align         = "center",
+            valign        = "center",
+            forced_width  = ctx.icon_size,
+            forced_height = ctx.icon_size,
+            widget        = wibox.widget.textbox,
+        }
+    end
 
     local move_btn = wibox.widget {
         {
