@@ -373,6 +373,9 @@ awful.screen.connect_for_each_screen(function(s)
     dt_row:add(myclock)
     local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 1, 0), 24, 24, splitwm.tab_shape)
 
+    local lock_capsule = wibox.container.margin(
+        status.new_lock_widget(capsule_height), 0, 0, wibar_height - capsule_height - 2, 0)
+
     local sg = beautiful.splitwm_gap
     s.mywibox = wibox({
         x       = s.geometry.x + sg,
@@ -398,7 +401,8 @@ awful.screen.connect_for_each_screen(function(s)
             spacing = bar_margin,
             wibox.widget.systray(),
             status_capsule,
-            wibox.container.margin(dt_capsule, 0, bar_margin, 0, 0),
+            dt_capsule,
+            wibox.container.margin(lock_capsule, 0, bar_margin, 0, 0),
         },
     }
 end)

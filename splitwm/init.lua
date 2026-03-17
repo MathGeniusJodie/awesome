@@ -23,11 +23,13 @@ local color_close -- close-button hover
 local color_icon  -- launcher icon foreground
 
 -- Base height of the tab bar.
-local TITLEBAR_HEIGHT = 33
+local TITLEBAR_HEIGHT = 30
 
 -- Button geometry — used to derive split minimum sizes.
 local BTN_SIZE     = 26
 local BTN_SPACING  = 5
+-- Bottom padding applied to round buttons so they sit 2px above center (raise = padding / 2).
+local BTN_V_RAISE  = 4
 local N_SPLIT_BTNS = 5  -- swap + vsplit + hsplit + close + "+"
 local MIN_SPLIT_W  = N_SPLIT_BTNS * BTN_SIZE + (N_SPLIT_BTNS - 1) * BTN_SPACING
 local MIN_SPLIT_H  = TITLEBAR_HEIGHT
@@ -746,19 +748,21 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     local tab_draw = wibox.widget.base.make_widget()
     function tab_draw:draw(_, cr, w2, h2)
-        local cx = tab_cx(h2)
-        cr:move_to(0, h2)
-        cr:arc_negative(0,      h2 - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
+        local h = h2 - 1  -- 1px breathing room at top so the border stroke isn't clipped
+        cr:translate(0, 1)
+        local cx = tab_cx(h)
+        cr:move_to(0, h)
+        cr:arc_negative(0,      h - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
         cr:line_to(cx - TAB_CORNER * TAB_CA, TAB_CORNER * (1 - TAB_SA))
         cr:arc(cx,      TAB_CORNER, TAB_CORNER, math.pi + TAB_ALPHA, 1.5 * math.pi)
         cr:arc(w2 - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
-        cr:line_to(w2 - TAB_EAR * TAB_CA, h2 - TAB_EAR * (1 - TAB_SA))
-        cr:arc_negative(w2, h2 - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
+        cr:line_to(w2 - TAB_EAR * TAB_CA, h - TAB_EAR * (1 - TAB_SA))
+        cr:arc_negative(w2, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
         cr:close_path()
         cr:set_source(tab_bg_pat)
         cr:fill()
         if tab_state == "active" or tab_state == "picked" then
-            draw_tab_border(cr, w2, h2)
+            draw_tab_border(cr, w2, h)
             cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
             cr:set_line_width(2)
             cr:stroke()
@@ -773,7 +777,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 { { tab_icon, halign = "center", valign = "center", widget = wibox.container.place }, right = 3, widget = wibox.container.margin },
                 move_btn, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
             },
-            left = 20, right = 20, top = 3, bottom = 3, widget = wibox.container.margin,
+            left = 21, right = 21, top = 1, bottom = 1, widget = wibox.container.margin,
         },
         layout = wibox.layout.stack,
     }
@@ -903,11 +907,14 @@ local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
     local ctrl_cover = {
         {
             {
-                { controls.swap, controls.vsplit, controls.hsplit, controls.close,
-                  spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
-                widget = wibox.container.margin,
+                {
+                    { controls.swap, controls.vsplit, controls.hsplit, controls.close,
+                      spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
+                    widget = wibox.container.margin,
+                },
+                bg = ctx.bar_bg, widget = wibox.container.background,
             },
-            bg = ctx.bar_bg, widget = wibox.container.background,
+            bottom = BTN_V_RAISE, widget = wibox.container.margin,
         },
         halign = "right", widget = wibox.container.place,
     }
@@ -917,7 +924,7 @@ local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
     return {
         {
             { layers, top = ctx.top_pad, widget = wibox.container.margin },
-            bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_h, widget = wibox.container.background,
+            bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_bar_h, widget = wibox.container.background,
         },
         layout = wibox.layout.fixed.vertical,
     }
@@ -940,7 +947,7 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
                 },
-                forced_height = ctx.tb_h, widget = wibox.container.background,
+                forced_height = ctx.tb_bar_h, widget = wibox.container.background,
             },
             layout = wibox.layout.fixed.vertical,
         },
@@ -970,7 +977,7 @@ local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw
     entry.wb:setup {
         -- Layer 1: content background (spacer over bar area, colored content fills the rest)
         {
-            { forced_height = ctx.tb_h, widget = wibox.container.background },
+            { forced_height = ctx.tb_bar_h, widget = wibox.container.background },
             {
                 {
                     { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
@@ -1036,6 +1043,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             bar_bg       = color_bg .. "00",
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
+            tb_bar_h     = tb_h,
             icon_size    = 20,
             tab_btn_font = "monospace bold 18",
             BTN_SPACING  = BTN_SPACING,
@@ -1061,7 +1069,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 ctx.state.focused_leaf_id = leaf.id
                 if splitwm.on_menu_request then splitwm.on_menu_request() end
             end),
-            left = #leaf.tabs > 0 and 24 or 0, widget = wibox.container.margin,
+            left = #leaf.tabs > 0 and 24 or 0, bottom = BTN_V_RAISE, widget = wibox.container.margin,
         })
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)

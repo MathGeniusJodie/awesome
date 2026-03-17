@@ -73,6 +73,24 @@ function icons.chip(cr, w, h)
     cr:stroke()
 end
 
+function icons.lock(cr, w, h)
+    local cx = w / 2
+    -- Shackle: arc on top
+    cr:set_line_width(w * 0.165)
+    local sy = h * 0.465
+    local sr = w * 0.275
+    cr:arc(cx, sy, sr, math.pi, 0)
+    cr:stroke()
+    -- Body: rounded rect, lower portion
+    local bx, by = w * 0.09, h * 0.41
+    local bw, bh = w * 0.82, h * 0.56
+    cr:save()
+    cr:translate(bx, by)
+    gears.shape.rounded_rect(cr, bw, bh, bw * 0.18)
+    cr:restore()
+    cr:fill()
+end
+
 function icons.speaker(cr, _, h)
     local s  = h / 32.0
     local cy = h / 2

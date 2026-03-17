@@ -1,7 +1,8 @@
-local awful  = require("awful")
-local gears  = require("gears")
-local wibox  = require("wibox")
-local icons  = require("splitwm.icons")
+local awful     = require("awful")
+local gears     = require("gears")
+local wibox     = require("wibox")
+local beautiful = require("beautiful")
+local icons     = require("splitwm.icons")
 
 local status = {}
 
@@ -196,6 +197,47 @@ function status.new_chip_widget()
     table.insert(chip_widgets, w)
     gears.timer.delayed_call(function() refresh_chip() end)
     return w
+end
+
+function status.new_lock_widget(size)
+    local icon = wibox.widget.base.make_widget()
+    icon.forced_width  = math.floor(size * 0.54)
+    icon.forced_height = math.floor(size * 0.54)
+    icon._lit = false
+
+    function icon:fit(_, w, h) return self.forced_width, self.forced_height end
+
+    function icon:draw(_, cr, w, h)
+        local fg = beautiful.splitwm_color_fg or "#ffffff"
+        local r  = tonumber(fg:sub(2, 3), 16) / 255
+        local g  = tonumber(fg:sub(4, 5), 16) / 255
+        local b  = tonumber(fg:sub(6, 7), 16) / 255
+        cr:set_source_rgba(r, g, b, self._lit and 1.0 or 0.72)
+        icons.lock(cr, w, h)
+    end
+
+    local bg = wibox.container.background()
+    bg.bg           = beautiful.splitwm_color_bg or "#000000"
+    bg.shape        = gears.shape.circle
+    bg.forced_width  = size
+    bg.forced_height = size
+    bg:set_widget(wibox.container.margin(wibox.container.place(icon), 0, 0, 0, 2))
+
+    bg:connect_signal("mouse::enter", function()
+        icon._lit = true
+        icon:emit_signal("widget::redraw_needed")
+    end)
+    bg:connect_signal("mouse::leave", function()
+        icon._lit = false
+        icon:emit_signal("widget::redraw_needed")
+    end)
+    bg:buttons(gears.table.join(
+        awful.button({}, 1, function()
+            awful.spawn(os.getenv("HOME") .. "/.local/bin/xflock4")
+        end)
+    ))
+
+    return bg
 end
 
 ---------------------------------------------------------------------------
