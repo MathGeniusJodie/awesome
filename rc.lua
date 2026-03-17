@@ -594,9 +594,34 @@ awful.rules.rules = {
 -- Signals
 ---------------------------------------------------------------------------
 
+local function update_wibar_visibility(s)
+    if not s or not s.valid then return end
+    local any_fullscreen = false
+    for _, c in ipairs(s.clients) do
+        if c.fullscreen then any_fullscreen = true; break end
+    end
+    if s.mywibox then s.mywibox.visible = not any_fullscreen end
+end
+
 client.connect_signal("manage", function(c)
     if awesome.startup and not c.size_hints.user_position
        and not c.size_hints.program_position then
         awful.placement.no_offscreen(c)
     end
+    gears.timer.delayed_call(function()
+        if c.valid then update_wibar_visibility(c.screen) end
+    end)
+end)
+
+client.connect_signal("property::fullscreen", function(c)
+    gears.timer.delayed_call(function()
+        if c.valid then update_wibar_visibility(c.screen) end
+    end)
+end)
+
+client.connect_signal("unmanage", function(c)
+    local s = c.screen
+    gears.timer.delayed_call(function()
+        update_wibar_visibility(s)
+    end)
 end)
