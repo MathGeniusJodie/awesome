@@ -1264,7 +1264,7 @@ function splitwm.setup()
     color_bg    = beautiful.splitwm_color_bg
     color_fg    = beautiful.splitwm_color_fg
     color_close = beautiful.splitwm_close_fg
-    color_icon  = beautiful.splitwm_icon_fg
+    color_icon  = beautiful.splitwm_color_fg
 
     awesome.register_xproperty("splitwm_color", "string")
 
