@@ -525,13 +525,15 @@ local function arrange(p)
             if i == leaf.active_tab then
                 c.hidden = false
                 c.border_width = 0
-                -- Content precisely sits below the external titlebar Wibox cache
-                c:geometry({
-                    x      = geo.x + bw,
-                    y      = geo.y - gap + tb_h,
-                    width  = math.max(1, geo.width - bw * 2),
-                    height = math.max(1, geo.height + gap - bw - tb_h),
-                })
+                if not c.fullscreen then
+                    -- Content precisely sits below the external titlebar Wibox cache
+                    c:geometry({
+                        x      = geo.x + bw,
+                        y      = geo.y - gap + tb_h,
+                        width  = math.max(1, geo.width - bw * 2),
+                        height = math.max(1, geo.height + gap - bw - tb_h),
+                    })
+                end
             else
                 c.hidden = true
             end
@@ -1016,6 +1018,11 @@ local function update_titlebars(s, t, state, geos, leaves)
         local entry = tb_get_or_create_entry(s, leaf)
         entry.tb_h = tb_h
         local wb = entry.wb
+        local active_client = leaf.tabs[leaf.active_tab]
+        if active_client and active_client.fullscreen then
+            wb.visible = false
+            return
+        end
         wb.x       = geo.x
         wb.y       = geo.y - gap
         wb.width   = geo.width
@@ -1282,6 +1289,10 @@ function splitwm.setup()
             state.focused_leaf_id = leaf.id
             awful.layout.arrange(c.screen)
         end
+    end)
+
+    client.connect_signal("property::fullscreen", function(c)
+        awful.layout.arrange(c.screen)
     end)
 
     client.connect_signal("button::press", function(c)
