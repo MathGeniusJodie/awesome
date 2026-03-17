@@ -64,6 +64,7 @@ beautiful.splitwm_color_bg   = "#000000"
 beautiful.splitwm_color_fg   = "#ffffff"
 beautiful.splitwm_close_fg   = "#ff6666"
 beautiful.splitwm_icon_fg    = "#cccccc"
+beautiful.splitwm_btn_bg       = "#000000cc"  -- semitransparent circle button background (RRGGBBAA)
 
 -- Splitwm layout
 beautiful.splitwm_gap              = 34

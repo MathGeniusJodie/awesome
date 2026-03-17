@@ -6,6 +6,8 @@ local icons     = require("splitwm.icons")
 
 local status = {}
 
+local _home = os.getenv("HOME")
+
 local battery_widgets = {}
 local volume_widgets  = {}
 local chip_widgets    = {}
@@ -199,45 +201,33 @@ function status.new_chip_widget()
     return w
 end
 
-function status.new_lock_widget(size)
+local function make_circle_icon_btn_widget(size, icon_fn, cmd)
     local icon = wibox.widget.base.make_widget()
     icon.forced_width  = math.floor(size * 0.54)
     icon.forced_height = math.floor(size * 0.54)
-    icon._lit = false
 
     function icon:fit(_, w, h) return self.forced_width, self.forced_height end
 
     function icon:draw(_, cr, w, h)
-        local fg = beautiful.splitwm_color_fg or "#ffffff"
-        local r  = tonumber(fg:sub(2, 3), 16) / 255
-        local g  = tonumber(fg:sub(4, 5), 16) / 255
-        local b  = tonumber(fg:sub(6, 7), 16) / 255
-        cr:set_source_rgba(r, g, b, self._lit and 1.0 or 0.72)
-        icons.lock(cr, w, h)
+        cr:set_source(gears.color(beautiful.splitwm_color_fg))
+        icon_fn(cr, w, h)
     end
 
     local bg = wibox.container.background()
-    bg.bg           = beautiful.splitwm_color_bg or "#000000"
+    bg.bg           = beautiful.splitwm_btn_bg
     bg.shape        = gears.shape.circle
     bg.forced_width  = size
     bg.forced_height = size
     bg:set_widget(wibox.container.margin(wibox.container.place(icon), 0, 0, 0, 2))
 
-    bg:connect_signal("mouse::enter", function()
-        icon._lit = true
-        icon:emit_signal("widget::redraw_needed")
-    end)
-    bg:connect_signal("mouse::leave", function()
-        icon._lit = false
-        icon:emit_signal("widget::redraw_needed")
-    end)
-    bg:buttons(gears.table.join(
-        awful.button({}, 1, function()
-            awful.spawn(os.getenv("HOME") .. "/.local/bin/xflock4")
-        end)
-    ))
+    bg:buttons(gears.table.join(awful.button({}, 1, cmd)))
 
     return bg
+end
+
+function status.new_lock_widget(size)
+    return make_circle_icon_btn_widget(size, icons.lock,
+        function() awful.spawn(_home .. "/.local/bin/xflock4") end)
 end
 
 ---------------------------------------------------------------------------
