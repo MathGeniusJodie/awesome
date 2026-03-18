@@ -90,6 +90,7 @@ local splitwm  = require("splitwm")
 local swcolors = require("splitwm.colors")
 local menu     = require("menu")
 local status   = require("status")
+local timebar  = require("timebar")
 
 -- Workspace colors: COLORS indices 0,2,4,6,8 (1-based: 1,3,5,7,9) = pink,gold,emerald,blue,purple
 -- bg existence is checked once at startup to avoid repeated stat() on every switch
@@ -317,6 +318,8 @@ awful.screen.connect_for_each_screen(function(s)
         end)
         if t.selected then set_wallpaper(ws) end
     end
+
+    timebar.setup(s)
 
     s.mypromptbox = awful.widget.prompt()
 
