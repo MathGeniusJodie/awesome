@@ -66,8 +66,8 @@ function M.setup(s)
             cr:fill()
             cr:restore()
         elseif remaining > 0 then
-            -- White pills stacked from the bottom upward, 1px apart.
-            cr:set_source_rgb(1, 1, 1)
+            -- Black pills stacked from the bottom upward, 1px apart.
+            cr:set_source_rgb(0, 0, 0)
             local gap    = 1
             local pill_h = (usable - 101 * gap) / 102
             local r      = math.min(1.5, pill_h * 0.5)
