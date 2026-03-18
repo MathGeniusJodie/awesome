@@ -215,8 +215,9 @@ local function pin_client(t, c)
     local leaf = get_focused_leaf(state)
     if not leaf then leaf = tree.collect_leaves(state.root)[1] end
     for _, tc in ipairs(leaf.tabs) do if tc == c then return end end
-    table.insert(leaf.tabs, c)
-    leaf.active_tab = #leaf.tabs
+    local insert_pos = leaf.active_tab + 1
+    table.insert(leaf.tabs, insert_pos, c)
+    leaf.active_tab = insert_pos
 end
 
 local function unpin_client(root, c)
@@ -227,9 +228,10 @@ local function unpin_client(root, c)
             table.remove(leaf.tabs, i)
             if i < leaf.active_tab then
                 leaf.active_tab = leaf.active_tab - 1
-            else
-                leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
+            elseif i == leaf.active_tab then
+                leaf.active_tab = math.min(math.max(1, i - 1), #leaf.tabs)
             end
+            -- i > active_tab: no index change needed
             return
         end
     end
@@ -238,8 +240,9 @@ end
 local function move_client_to_leaf(root, c, target_leaf)
     unpin_client(root, c)
     for _, tc in ipairs(target_leaf.tabs) do if tc == c then return end end
-    table.insert(target_leaf.tabs, c)
-    target_leaf.active_tab = #target_leaf.tabs
+    local insert_pos = target_leaf.active_tab + 1
+    table.insert(target_leaf.tabs, insert_pos, c)
+    target_leaf.active_tab = insert_pos
 end
 
 local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
