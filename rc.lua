@@ -354,9 +354,10 @@ awful.screen.connect_for_each_screen(function(s)
     local chip_widget = status.new_chip_widget()
 
     -- Capsule helper: wraps widget(s) in a black shaped background
-    local function capsule(inner, pad_l, pad_r, shape_fn)
+    local function capsule(inner, pad_l, pad_r, shape_fn, bgc)
+        bgc = bgc or "#00000000"
         local bg = wibox.container.background()
-        bg.bg    = "#000000"
+        bg.bg    = bgc
         bg.shape = shape_fn or function(cr, w, h)
             gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
         end
@@ -370,14 +371,14 @@ awful.screen.connect_for_each_screen(function(s)
     icons_row:add(chip_widget)
     icons_row:add(bat_widget)
     icons_row:add(wibox.container.margin(vol_widget, 0, 0, 0, 1))
-    local status_capsule = capsule(icons_row, 24, 24, splitwm.tab_shape)
+    local status_capsule = capsule(icons_row, 24, 24, splitwm.tab_shape, "#000000ff")
 
     -- Date / clock capsule — tab profile on right side
     local dt_row = wibox.layout.fixed.horizontal()
     dt_row.spacing = 8
     dt_row:add(mydate)
     dt_row:add(myclock)
-    local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 1, 0), 24, 24, splitwm.tab_shape)
+    local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 1, 0), 24, 24, splitwm.tab_shape, "#000000ff")
 
     local lock_capsule = wibox.container.margin(
         status.new_lock_widget(capsule_height), 0, 0, wibar_height - capsule_height - 2, 0)
