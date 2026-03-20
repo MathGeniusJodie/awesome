@@ -113,9 +113,11 @@ function M.switch(s, new_tag)
 
     cancel_active(s)
 
-    local old_idx = old_tag and old_tag.index or new_tag.index
-    local new_idx = new_tag.index
-    local dx      = (new_idx > old_idx) and -s.geometry.width or s.geometry.width
+    local old_idx      = old_tag and old_tag.index or new_tag.index
+    local new_idx      = new_tag.index
+    local n            = #s.tags
+    local forward_dist = (new_idx - old_idx) % n
+    local dx           = (forward_dist <= n - forward_dist) and -s.geometry.width or s.geometry.width
 
     -- Capture current screen state synchronously before switching
     local old_surf = capture_screen(s)
