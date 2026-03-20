@@ -1508,13 +1508,11 @@ function splitwm.setup()
     awesome.connect_signal("startup", function()
         for t, state in pairs(tag_state) do
             if state._restore_ptl then
-                for _, leaf in ipairs(tree.collect_leaves(state.root)) do
-                    if leaf._restore_active_tab ~= nil then
-                        leaf.active_tab = #leaf.tabs > 0
-                            and math.max(1, math.min(leaf._restore_active_tab, #leaf.tabs))
-                            or 0
-                        leaf._restore_active_tab = nil
-                    end
+                for _, leaf in pairs(state._restore_ptl) do
+                    leaf.active_tab = #leaf.tabs > 0
+                        and math.max(1, math.min(leaf._restore_active_tab, #leaf.tabs))
+                        or 0
+                    leaf._restore_active_tab = nil
                 end
                 state._restore_ptl = nil
             end
