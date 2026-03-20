@@ -708,13 +708,12 @@ local underlay_cache = {}
 local function make_wallpaper_widget()
     local w = wibox.widget.base.make_widget()
     w._surface = nil
+    w._sw, w._sh = 0, 0  -- cached dimensions, updated when surface changes
     function w:draw(_, cr, width, height)
         if not self._surface then return end
-        local sw = self._surface:get_width()
-        local sh = self._surface:get_height()
-        local scale = math.max(width / sw, height / sh)
+        local scale = math.max(width / self._sw, height / self._sh)
         cr:save()
-        cr:translate((width - sw * scale) / 2, (height - sh * scale) / 2)
+        cr:translate((width - self._sw * scale) / 2, (height - self._sh * scale) / 2)
         cr:scale(scale, scale)
         cr:set_source_surface(self._surface, 0, 0)
         cr:paint()
@@ -749,8 +748,9 @@ end
 -- Supports .x/.y/.width/.height/.visible and :setup()/:buttons()/:connect_signal().
 local function make_wb_proxy(layer, s)
     local container = wibox.container.background()
-    local px, py, rw, rh, vis = 0, 0, 0, 0, false
-    container.point         = function() return { x = px, y = py } end
+    local px, py, rw, rh = 0, 0, 0, 0
+    local pt = { x = px, y = py }  -- reused table, mutated in place
+    container.point         = function() return pt end
     container.forced_width  = 0
     container.forced_height = 0
     layer:add(container)
@@ -769,26 +769,32 @@ local function make_wb_proxy(layer, s)
             elseif k == "y"       then return py + s.geometry.y
             elseif k == "width"   then return rw
             elseif k == "height"  then return rh
-            elseif k == "visible" then return vis
+            elseif k == "visible" then return container.visible
             else                       return container[k] end
         end,
         __newindex = function(_, k, v)
             if k == "x" then
-                px = v - s.geometry.x
+                local new = v - s.geometry.x
+                if new == px then return end
+                px = new; pt.x = new
                 container:emit_signal("widget::layout_changed")
             elseif k == "y" then
-                py = v - s.geometry.y
+                local new = v - s.geometry.y
+                if new == py then return end
+                py = new; pt.y = new
                 container:emit_signal("widget::layout_changed")
             elseif k == "width" then
+                if v == rw then return end
                 rw = v
-                container.forced_width = vis and v or 0
+                container.forced_width = container.visible and v or 0
                 container:emit_signal("widget::layout_changed")
             elseif k == "height" then
+                if v == rh then return end
                 rh = v
-                container.forced_height = vis and v or 0
+                container.forced_height = container.visible and v or 0
                 container:emit_signal("widget::layout_changed")
             elseif k == "visible" then
-                vis = v
+                if v == container.visible then return end
                 container.visible       = v
                 container.forced_width  = v and rw or 0
                 container.forced_height = v and rh or 0
@@ -806,18 +812,16 @@ function splitwm.set_wallpaper(s, ws)
     local u = get_or_create_underlay(s)
     u.wb.bg = ws.dark
     if ws.has_bg then
-        u.wallpaper_w._surface = gears.surface.load(ws.bg)
-    else
-        u.wallpaper_w._surface = nil
-    end
-    u.wallpaper_w:emit_signal("widget::redraw_needed")
-    -- Fallback: also set the X root window so compositors that don't honour
-    -- _NET_WM_WINDOW_TYPE_DESKTOP still show the correct wallpaper.
-    if ws.has_bg then
+        local surf = gears.surface.load(ws.bg)
+        u.wallpaper_w._surface = surf
+        u.wallpaper_w._sw      = surf:get_width()
+        u.wallpaper_w._sh      = surf:get_height()
         gears.wallpaper.maximized(ws.bg, s, true)
     else
+        u.wallpaper_w._surface = nil
         gears.wallpaper.set(ws.dark)
     end
+    u.wallpaper_w:emit_signal("widget::redraw_needed")
 end
 
 ---------------------------------------------------------------------------
