@@ -163,6 +163,10 @@ splitwm.launchers = {
 splitwm.setup()
 transitions.setup({ workspaces = WORKSPACES })
 
+-- Expose for external callers e.g. awesome-client "tag_next()"
+tag_prev = transitions.switch_prev  -- luacheck: ignore
+tag_next = transitions.switch_next  -- luacheck: ignore
+
 menu.setup({
     terminal    = terminal,
     browser     = browser,
