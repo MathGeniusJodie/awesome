@@ -1045,10 +1045,6 @@ local function update_titlebars(s, t, state, geos, leaves)
         entry.tb_h = tb_h
         local wb = entry.wb
         local active_client = leaf.tabs[leaf.active_tab]
-        if active_client and active_client.fullscreen then
-            wb.visible = false
-            return
-        end
         wb.x       = geo.x
         wb.y       = geo.y - gap
         wb.width   = geo.width

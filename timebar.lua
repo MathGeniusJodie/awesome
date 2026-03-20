@@ -109,7 +109,7 @@ function M.setup(s)
         width            = BAR_WIDTH * 2 + BAR_SPACING,
         height           = sh,
         bg               = "#00000000",
-        ontop            = true,
+        ontop            = false,
         screen           = s,
         visible          = true,
         type             = "dock",
