@@ -215,7 +215,13 @@ local function pin_client(t, c)
     local leaf = get_focused_leaf(state)
     if not leaf then leaf = tree.collect_leaves(state.root)[1] end
     for _, tc in ipairs(leaf.tabs) do if tc == c then return end end
-    local insert_pos = leaf.active_tab + 1
+    local insert_pos
+    if splitwm._append_next_client then
+        splitwm._append_next_client = false
+        insert_pos = #leaf.tabs + 1
+    else
+        insert_pos = leaf.active_tab + 1
+    end
     table.insert(leaf.tabs, insert_pos, c)
     leaf.active_tab = insert_pos
 end

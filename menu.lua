@@ -28,9 +28,10 @@ function menu.setup(opts)
                 categories[cat] = {}
                 table.insert(cat_names, cat)
             end
+            local cmdline = entry.cmdline
             table.insert(categories[cat], {
                 entry.name,
-                entry.cmdline,
+                function() splitwm._append_next_client = true; awful.spawn(cmdline) end,
                 entry.icon,
             })
         end
@@ -93,12 +94,12 @@ function menu.setup(opts)
             end
         end
         local quick_items = {
-            { "Terminal",     function() awful.spawn(terminal)    end, launcher_icon(terminal)    },
-            { "Browser",      function() awful.spawn(browser)     end, launcher_icon(browser)     },
-            { "File Manager", function() awful.spawn(filemanager) end, launcher_icon(filemanager) },
-            { "Obsidian",     function() awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
-            { "yt-gtk",       function() awful.spawn("/home/jodie/yt-scrape/target/release/yt-gtk") end, lookup({"video"}) },
-            { "Claude",       function() awful.spawn("claude-desktop") end, lookup({"claude-desktop"}) },
+            { "Terminal",     function() splitwm._append_next_client = true; awful.spawn(terminal)    end, launcher_icon(terminal)    },
+            { "Browser",      function() splitwm._append_next_client = true; awful.spawn(browser)     end, launcher_icon(browser)     },
+            { "File Manager", function() splitwm._append_next_client = true; awful.spawn(filemanager) end, launcher_icon(filemanager) },
+            { "Obsidian",     function() splitwm._append_next_client = true; awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
+            { "yt-gtk",       function() splitwm._append_next_client = true; awful.spawn("/home/jodie/yt-scrape/target/release/yt-gtk") end, lookup({"video"}) },
+            { "Claude",       function() splitwm._append_next_client = true; awful.spawn("claude-desktop") end, lookup({"claude-desktop"}) },
             { "─────────────" },
         }
         for i = #quick_items, 1, -1 do
