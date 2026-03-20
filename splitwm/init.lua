@@ -185,6 +185,11 @@ local tag_state = setmetatable({}, { __mode = "k" })
 
 local PERSIST_FILE = (os.getenv("HOME") or "") .. "/.cache/awesome/splitwm_state.lua"
 
+local geo_cache          = {}   -- [screen] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
+local split_anim_pending = {}   -- [screen] = {old_geo, a_id, b_id, dir}
+local close_anim_pending = {}   -- [screen] = {old_geos, leaf_ids}
+local split_anim_active  = {}   -- [screen] = {timer}
+
 -- Per-tag restore data loaded from file at startup.
 -- key: "<screen_index>:<tag_name>"  (unique across screens)
 -- consumed entry by entry as tags are first accessed.
@@ -455,7 +460,7 @@ local function split_leaf(t, direction)
         parent.children[idx] = new_branch
     end
     state.focused_leaf_id = child_a.id
-    return true
+    return child_a.id, child_b.id
 end
 
 local function close_leaf(t, leaf_id)
@@ -505,10 +510,40 @@ end
 
 -- Returns callbacks table for the three split control actions (vsplit, hsplit, close).
 local function make_split_action_callbacks(state, leaf_id, t, s)
+    local function do_split(dir)
+        state.focused_leaf_id = leaf_id
+        local old_geo = geo_cache[s] and geo_cache[s].geos[leaf_id]
+        local a_id, b_id = split_leaf(t, dir)
+        awful.layout.arrange(s)
+        if old_geo and a_id then
+            split_anim_pending[s] = { old_geo = old_geo, a_id = a_id, b_id = b_id, dir = dir }
+        end
+    end
+    local function do_close()
+        local leaf = state.leaf_map[leaf_id]
+        local parent, pidx = leaf and tree.find_parent(state.root, leaf)
+        local old_geos, sibling_ids
+        if parent then
+            local slvs = tree.collect_leaves(parent.children[pidx == 1 and 2 or 1])
+            local cached = geo_cache[s]
+            if cached and #slvs > 0 then
+                sibling_ids = {}; old_geos = {}
+                for _, l in ipairs(slvs) do
+                    sibling_ids[#sibling_ids + 1] = l.id
+                    old_geos[l.id] = cached.geos[l.id]
+                end
+            end
+        end
+        if close_leaf(t, leaf_id) == false then return end
+        awful.layout.arrange(s)
+        if old_geos then
+            close_anim_pending[s] = { old_geos = old_geos, leaf_ids = sibling_ids }
+        end
+    end
     return {
-        vsplit = function() state.focused_leaf_id = leaf_id; split_leaf(t, tree.DIR_H); awful.layout.arrange(s) end,
-        hsplit = function() state.focused_leaf_id = leaf_id; split_leaf(t, tree.DIR_V); awful.layout.arrange(s) end,
-        close  = function() close_leaf(t, leaf_id); awful.layout.arrange(s) end,
+        vsplit = function() do_split(tree.DIR_H) end,
+        hsplit = function() do_split(tree.DIR_V) end,
+        close  = do_close,
     }
 end
 
@@ -625,8 +660,6 @@ end
 ---------------------------------------------------------------------------
 -- The layout "arrange" function
 ---------------------------------------------------------------------------
-
-local geo_cache = {}   -- [screen] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
 
 local function arrange(p)
     local tag = p.tag
@@ -1477,6 +1510,9 @@ local function hide_cache(cache, wb_key)
     end
 end
 
+local start_split_anim  -- forward declaration (defined below)
+local start_close_anim  -- forward declaration (defined below)
+
 local function update_ui(s)
     local t, state = get_active_state(s)
     if not t then
@@ -1504,6 +1540,160 @@ local function update_ui(s)
     local leaves = tree.collect_leaves(state.root)
     update_titlebars(s, t, state, geos, leaves)
     update_drag_handles(s, state, bounds)
+
+    local pending = split_anim_pending[s]
+    if pending then
+        split_anim_pending[s] = nil
+        start_split_anim(s, pending.old_geo, pending.a_id, pending.b_id, pending.dir)
+        return
+    end
+    local cpending = close_anim_pending[s]
+    if cpending then
+        close_anim_pending[s] = nil
+        start_close_anim(s, cpending.old_geos, cpending.leaf_ids)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Split animation
+---------------------------------------------------------------------------
+
+local SPLIT_ANIM_FPS      = 60
+local SPLIT_ANIM_DURATION = 0.28
+
+local function ease_out_back(t)
+    local c = 1.1
+    t = t - 1
+    return t * t * ((c + 1) * t + c) + 1
+end
+
+local function apply_leaf_geo(s, leaf_id, geo)
+    local _, state = get_active_state(s)
+    if not state then return end
+    local gap  = beautiful.splitwm_gap
+    local bw   = beautiful.splitwm_focus_border_width
+    local tb_h = math.max(TITLEBAR_HEIGHT, gap)
+    local tc   = titlebar_cache[s] and titlebar_cache[s][leaf_id]
+    if tc then
+        tc.wb.x      = geo.x
+        tc.wb.y      = geo.y - gap
+        tc.wb.width  = math.max(1, geo.width)
+        tc.wb.height = math.max(1, geo.height + gap)
+    end
+    local leaf = state.leaf_map[leaf_id]
+    if leaf then
+        local c = leaf.tabs[leaf.active_tab]
+        if c and c.valid and not c.fullscreen then
+            c:geometry({
+                x      = geo.x + bw,
+                y      = geo.y - gap + tb_h,
+                width  = math.max(1, geo.width  - bw * 2),
+                height = math.max(1, geo.height + gap - bw - tb_h),
+            })
+        end
+    end
+end
+
+local function cancel_split_anim(s)
+    local a = split_anim_active[s]
+    if not a then return end
+    a.timer:stop()
+    split_anim_active[s] = nil
+end
+
+start_split_anim = function(s, old_geo, a_id, b_id, dir)
+    cancel_split_anim(s)
+    local cached = geo_cache[s]
+    if not cached then return end
+    local geo_a = cached.geos[a_id]
+    local geo_b = cached.geos[b_id]
+    if not geo_a or not geo_b then return end
+
+    local start_a = old_geo
+    local start_b
+    if dir == tree.DIR_H then
+        start_b = { x = geo_b.x + geo_b.width, y = geo_b.y, width = 1, height = geo_b.height }
+    else
+        start_b = { x = geo_b.x, y = geo_b.y + geo_b.height, width = geo_b.width, height = 1 }
+    end
+
+    apply_leaf_geo(s, a_id, start_a)
+    apply_leaf_geo(s, b_id, start_b)
+
+    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
+    local frame  = 0
+    local tim
+    tim = gears.timer {
+        timeout   = 1 / SPLIT_ANIM_FPS,
+        autostart = true,
+        call_now  = false,
+        callback  = function()
+            frame = frame + 1
+            local p = ease_out_back(math.min(frame / frames, 1.0))
+            local function lg(g0, g1)
+                return {
+                    x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
+                    y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
+                    width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
+                    height = math.floor(g0.height + (g1.height - g0.height) * p),
+                }
+            end
+            apply_leaf_geo(s, a_id, lg(start_a, geo_a))
+            apply_leaf_geo(s, b_id, lg(start_b, geo_b))
+            if frame >= frames then
+                tim:stop()
+                split_anim_active[s] = nil
+                update_ui(s)
+            end
+        end,
+    }
+    split_anim_active[s] = { timer = tim }
+end
+
+start_close_anim = function(s, old_geos, leaf_ids)
+    cancel_split_anim(s)
+    local cached = geo_cache[s]
+    if not cached then return end
+    local end_geos = {}
+    for _, id in ipairs(leaf_ids) do
+        local g = cached.geos[id]
+        if not g then return end
+        end_geos[id] = g
+    end
+    for _, id in ipairs(leaf_ids) do
+        if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
+    end
+    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
+    local frame  = 0
+    local tim
+    tim = gears.timer {
+        timeout   = 1 / SPLIT_ANIM_FPS,
+        autostart = true,
+        call_now  = false,
+        callback  = function()
+            frame = frame + 1
+            local p = ease_out_back(math.min(frame / frames, 1.0))
+            local function lg(g0, g1)
+                return {
+                    x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
+                    y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
+                    width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
+                    height = math.floor(g0.height + (g1.height - g0.height) * p),
+                }
+            end
+            for _, id in ipairs(leaf_ids) do
+                if old_geos[id] and end_geos[id] then
+                    apply_leaf_geo(s, id, lg(old_geos[id], end_geos[id]))
+                end
+            end
+            if frame >= frames then
+                tim:stop()
+                split_anim_active[s] = nil
+                update_ui(s)
+            end
+        end,
+    }
+    split_anim_active[s] = { timer = tim }
 end
 
 ---------------------------------------------------------------------------
@@ -1531,8 +1721,22 @@ local function with_tag(fn)
     if t and fn(t) ~= false then awful.layout.arrange(s) end
 end
 
-splitwm.split_horizontal = function() with_tag(function(t) split_leaf(t, tree.DIR_H) end) end
-splitwm.split_vertical   = function() with_tag(function(t) split_leaf(t, tree.DIR_V) end) end
+local function do_split_with_anim(dir)
+    local s = awful.screen.focused()
+    local t = s and s.selected_tag
+    if not t then return end
+    local state   = get_state(t)
+    local leaf    = get_focused_leaf(state)
+    local old_geo = leaf and geo_cache[s] and geo_cache[s].geos[leaf.id]
+    local a_id, b_id = split_leaf(t, dir)
+    if not a_id then return end
+    awful.layout.arrange(s)
+    if old_geo then
+        split_anim_pending[s] = { old_geo = old_geo, a_id = a_id, b_id = b_id, dir = dir }
+    end
+end
+splitwm.split_horizontal = function() do_split_with_anim(tree.DIR_H) end
+splitwm.split_vertical   = function() do_split_with_anim(tree.DIR_V) end
 splitwm.focus_next_split = function() with_tag(function(t) focus_direction(t, "next") end) end
 splitwm.focus_prev_split = function() with_tag(function(t) focus_direction(t, "prev") end) end
 splitwm.next_tab         = function() with_tag(function(t) cycle_tab(t, 1) end) end
@@ -1541,7 +1745,32 @@ splitwm.move_tab_next    = function() with_tag(function(t) move_tab_to_direction
 splitwm.move_tab_prev    = function() with_tag(function(t) move_tab_to_direction(t, "prev") end) end
 splitwm.resize_grow      = function() with_tag(function(t) resize_focused(t, 0.05) end) end
 splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -0.05) end) end
-splitwm.close_split      = function() with_tag(function(t) close_leaf(t, get_state(t).focused_leaf_id) end) end
+splitwm.close_split = function()
+    local s = awful.screen.focused()
+    local t = s and s.selected_tag
+    if not t then return end
+    local state   = get_state(t)
+    local leaf_id = state.focused_leaf_id
+    local leaf    = state.leaf_map[leaf_id]
+    local parent, pidx = leaf and tree.find_parent(state.root, leaf)
+    local old_geos, sibling_ids
+    if parent then
+        local slvs = tree.collect_leaves(parent.children[pidx == 1 and 2 or 1])
+        local cached = geo_cache[s]
+        if cached and #slvs > 0 then
+            sibling_ids = {}; old_geos = {}
+            for _, l in ipairs(slvs) do
+                sibling_ids[#sibling_ids + 1] = l.id
+                old_geos[l.id] = cached.geos[l.id]
+            end
+        end
+    end
+    if close_leaf(t, leaf_id) == false then return end
+    awful.layout.arrange(s)
+    if old_geos then
+        close_anim_pending[s] = { old_geos = old_geos, leaf_ids = sibling_ids }
+    end
+end
 
 function splitwm.cancel_pickup()
     if pickup.tag ~= "idle" then
