@@ -699,6 +699,121 @@ local function get_active_state(s)
 end
 
 
+---------------------------------------------------------------------------
+-- Per-screen underlay wibox: wallpaper + leaf chrome + drag handles in one
+-- composited surface, stacked below all windows and panels (type = "desktop").
+---------------------------------------------------------------------------
+local underlay_cache = {}
+
+local function make_wallpaper_widget()
+    local w = wibox.widget.base.make_widget()
+    w._surface = nil
+    function w:draw(_, cr, width, height)
+        if not self._surface then return end
+        local sw = self._surface:get_width()
+        local sh = self._surface:get_height()
+        local scale = math.max(width / sw, height / sh)
+        cr:save()
+        cr:translate((width - sw * scale) / 2, (height - sh * scale) / 2)
+        cr:scale(scale, scale)
+        cr:set_source_surface(self._surface, 0, 0)
+        cr:paint()
+        cr:restore()
+    end
+    function w:fit(_, w, h) return w, h end
+    return w
+end
+
+local function get_or_create_underlay(s)
+    if underlay_cache[s] then return underlay_cache[s] end
+    local wallpaper_w  = make_wallpaper_widget()
+    local chrome_layer = wibox.layout.manual()
+    local handle_layer = wibox.layout.manual()
+    local wb = wibox {
+        screen  = s,
+        x       = s.geometry.x,
+        y       = s.geometry.y,
+        width   = s.geometry.width,
+        height  = s.geometry.height,
+        bg      = color_bg,
+        visible = true,
+        type    = "desktop",
+    }
+    wb:setup { wallpaper_w, chrome_layer, handle_layer, layout = wibox.layout.stack }
+    local entry = { wb = wb, chrome_layer = chrome_layer, handle_layer = handle_layer, wallpaper_w = wallpaper_w }
+    underlay_cache[s] = entry
+    return entry
+end
+
+-- Creates a wibox-compatible proxy widget placed in a wibox.layout.manual layer.
+-- Supports .x/.y/.width/.height/.visible and :setup()/:buttons()/:connect_signal().
+local function make_wb_proxy(layer, s)
+    local container = wibox.container.background()
+    local px, py, rw, rh, vis = 0, 0, 0, 0, false
+    container.point         = function() return { x = px, y = py } end
+    container.forced_width  = 0
+    container.forced_height = 0
+    layer:add(container)
+
+    -- Methods go into the raw table BEFORE the metatable is set so that
+    -- __newindex is never called for them (Lua only invokes __newindex when the
+    -- key is absent from the raw table).
+    local proxy = {
+        setup          = function(_, tree)    container.widget = wibox.widget(tree) end,
+        buttons        = function(_, b)       container:buttons(b)                  end,
+        connect_signal = function(_, sig, fn) container:connect_signal(sig, fn)     end,
+    }
+    setmetatable(proxy, {
+        __index = function(_, k)
+            if     k == "x"       then return px + s.geometry.x
+            elseif k == "y"       then return py + s.geometry.y
+            elseif k == "width"   then return rw
+            elseif k == "height"  then return rh
+            elseif k == "visible" then return vis
+            else                       return container[k] end
+        end,
+        __newindex = function(_, k, v)
+            if k == "x" then
+                px = v - s.geometry.x
+                container:emit_signal("widget::layout_changed")
+            elseif k == "y" then
+                py = v - s.geometry.y
+                container:emit_signal("widget::layout_changed")
+            elseif k == "width" then
+                rw = v
+                container.forced_width = vis and v or 0
+                container:emit_signal("widget::layout_changed")
+            elseif k == "height" then
+                rh = v
+                container.forced_height = vis and v or 0
+                container:emit_signal("widget::layout_changed")
+            elseif k == "visible" then
+                vis = v
+                container.visible       = v
+                container.forced_width  = v and rw or 0
+                container.forced_height = v and rh or 0
+                container:emit_signal("widget::layout_changed")
+            else
+                container[k] = v
+            end
+        end,
+    })
+    return proxy
+end
+
+function splitwm.set_wallpaper(s, ws)
+    local u = get_or_create_underlay(s)
+    u.wb.bg = ws.dark
+    if ws.has_bg then
+        u.wallpaper_w._surface = gears.surface.load(ws.bg)
+    else
+        u.wallpaper_w._surface = nil
+    end
+    u.wallpaper_w:emit_signal("widget::redraw_needed")
+end
+
+---------------------------------------------------------------------------
+
 local drag_handle_pool = {}
 local function get_drag_handle(s, i)
     if not drag_handle_pool[s] then drag_handle_pool[s] = {} end
@@ -706,7 +821,8 @@ local function get_drag_handle(s, i)
 
     local ref = { b = nil, handle_w = 1 }
     local handle_state = "idle"
-    local wb  = wibox { x = 0, y = 0, width = 1, height = 1, bg = color_transparent, visible = false, ontop = true, type = "utility" }
+    local wb = make_wb_proxy(get_or_create_underlay(s).handle_layer, s)
+    wb.visible = false
 
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
@@ -784,7 +900,7 @@ local function tb_get_or_create_entry(s, leaf)
     local entry = cache[leaf.id]
     if entry then return entry end
     entry = {
-        wb                = wibox { screen = s, bg = color_transparent, visible = true, ontop = false, type = "utility" },
+        wb                = make_wb_proxy(get_or_create_underlay(s).chrome_layer, s),
         tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12px", bg = color_bg, fg = color_fg, border_width = 0 },
         tooltip_objs      = {},
         titlebar_btn_list = {},
@@ -1295,7 +1411,7 @@ end
 ---------------------------------------------------------------------------
 
 local function update_drag_handles(s, state, bounds)
-    -- Hide all drag handles when any client is fullscreen (handles are ontop and would overdraw).
+    -- Hide all drag handles when any client is fullscreen.
     for _, c in ipairs(s.clients) do
         if c.fullscreen then
             local pool = drag_handle_pool[s]
@@ -1528,10 +1644,13 @@ function splitwm.flush_caches()
     for _, screen_cache in pairs(titlebar_cache) do
         for _, entry in pairs(screen_cache) do
             for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
-            entry.wb.visible = false
         end
     end
     titlebar_cache = {}
+    -- Reset chrome layers so freed proxy widgets are unregistered.
+    for _, u in pairs(underlay_cache) do
+        u.chrome_layer:reset()
+    end
 end
 
 splitwm.get_state = get_state

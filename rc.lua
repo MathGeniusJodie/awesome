@@ -304,13 +304,9 @@ end
 awful.screen.connect_for_each_screen(function(s)
     awful.tag({ "1", "2", "3", "4", "5" }, s, splitwm.layout)
 
-    -- Per-tag wallpaper: each tag captures its own workspace entry at creation
+    -- Per-tag wallpaper: rendered in the splitwm underlay wibox (type="desktop").
     local function set_wallpaper(ws)
-        if ws.has_bg then
-            gears.wallpaper.maximized(ws.bg, s, true)
-        else
-            gears.wallpaper.set(ws.dark)
-        end
+        splitwm.set_wallpaper(s, ws)
     end
     for i, t in ipairs(s.tags) do
         local ws = WORKSPACES[i]
