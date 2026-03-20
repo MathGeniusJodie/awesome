@@ -56,7 +56,7 @@ function icons.chip(cr, w, h)
     local pin_len = 3
     local n_pins  = 3
     local bx = math.floor(w / 2) - math.floor(cw / 2)
-    local by = math.floor(h / 2) - math.floor(ch / 2)
+    local by = h - ch - 1
 
     cr:set_line_width(2)
     local pin_spacing = (ch - 2) / (n_pins - 1)
@@ -91,17 +91,16 @@ function icons.lock(cr, w, h)
     cr:fill()
 end
 
-function icons.speaker(cr, _, h)
-    local s  = h / 32.0
-    local cy = h / 2
-    local sx = 1 * s
-
-    cr:move_to(sx,           cy + 4*s)
-    cr:line_to(sx,           cy - 4*s)
-    cr:line_to(sx + 4*s,     cy - 4*s)
-    cr:line_to(sx + 10*s,    cy - 8*s)
-    cr:line_to(sx + 10*s,    cy + 8*s)
-    cr:line_to(sx + 4*s,     cy + 4*s)
+function icons.speaker(cr, w, h)
+    local r2 = math.sqrt(2) * h / 32.0
+    local cx = w / 2
+    -- vertices are the horizontal speaker polygon pre-rotated -45°, bottom-aligned
+    cr:move_to(cx - 4*r2, h)
+    cr:line_to(cx - 8*r2, h - 4*r2)
+    cr:line_to(cx - 6*r2, h - 6*r2)
+    cr:line_to(cx - 5*r2, h - 11*r2)
+    cr:line_to(cx + 3*r2, h - 3*r2)
+    cr:line_to(cx - 2*r2, h - 2*r2)
     cr:close_path()
     cr:fill()
 end

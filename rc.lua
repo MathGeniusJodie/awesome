@@ -189,6 +189,7 @@ beautiful.fg_focus       = "#ffffff"
 local bar_margin     = 3
 local capsule_height = 24
 local wibar_height   = bar_margin * 2 + capsule_height  -- equal top + bottom padding
+local icon_bottom_pad = 2  -- gap between icon bottom and capsule bottom edge
 
 local function parse_hex(hex)
     hex = hex:gsub("#", "")
@@ -336,7 +337,8 @@ awful.screen.connect_for_each_screen(function(s)
     local mon_codes = { "Ja", "Fe", "Mr", "Ap", "My", "Jn", "Jl", "Au", "Se", "Oc", "Nv", "De" }
 
     local mydate = wibox.widget.textbox()
-    mydate.font = "monospace 14px"
+    mydate.font   = "monospace 14px"
+    mydate.valign = "bottom"
     local function update_date()
         local t = os.date("*t")
         mydate.text = dow_codes[t.wday] .. " " .. mon_codes[t.month]
@@ -347,7 +349,8 @@ awful.screen.connect_for_each_screen(function(s)
     gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_date }
 
     local myclock = wibox.widget.textbox()
-    myclock.font = "monospace bold 14px"
+    myclock.font   = "monospace bold 14px"
+    myclock.valign = "bottom"
     local function update_clock()
         local t = os.date("%I:%M")
         local ap = os.date("%p"):lower()
@@ -376,9 +379,9 @@ awful.screen.connect_for_each_screen(function(s)
     -- Status icons capsule (chip + battery + volume) — tab profile on left side
     local icons_row = wibox.layout.fixed.horizontal()
     icons_row.spacing = 4
-    icons_row:add(chip_widget)
-    icons_row:add(bat_widget)
-    icons_row:add(wibox.container.margin(vol_widget, 0, 0, 0, 0))
+    icons_row:add(wibox.container.margin(chip_widget, 0, 0, 0, icon_bottom_pad))
+    icons_row:add(wibox.container.margin(bat_widget,  0, 0, 0, icon_bottom_pad))
+    icons_row:add(wibox.container.margin(vol_widget,  0, 0, 0, icon_bottom_pad))
     local status_capsule = capsule(icons_row, 24, 22, splitwm.tab_shape, "#000000ff")
 
     -- Date / clock capsule — tab profile on right side

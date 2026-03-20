@@ -34,7 +34,7 @@ function status.new_battery_widget()
         local nub_w, nub_h = 2, 5
         local total_w = bw + nub_w
         local bx = math.floor((width - total_w) / 2)
-        local by = math.floor((height - bh) / 2) + 1
+        local by = height - bh - 1
         local nub_x = bx + bw
         local nub_y = by + math.floor((bh - nub_h) / 2)
 
@@ -97,44 +97,35 @@ function status.new_volume_widget()
     end
 
     function w:draw(_, cr, width, height)
-        -- Scale all coordinates proportionally to height (designed for 32px)
         local s  = height / 32.0
-        local cy = height / 2
-        local sx = 1 * s
+        local r2 = math.sqrt(2) * s
+        local cx = width / 2
 
         cr:set_source_rgba(1, 1, 1, 1)
+        icons.speaker(cr, width, height)
 
-        -- Rotate 45° counterclockwise so the speaker points top-right
-        local pivot_x = width / 2
-        local pivot_y = cy
-        cr:save()
-        cr:translate(pivot_x, pivot_y - 3)
-        cr:rotate(-math.pi / 4)
-        cr:translate(-pivot_x, -(pivot_y - 3))
-
-        icons.speaker(cr, nil, height)
-
-        -- Sound waves or mute X, starting just right of the cone tip
-        local ax = sx + 10*s
+        -- wave/mute origin: rotated position of the speaker cone tip (11s, cy_orig)
+        local ax = cx - r2
+        local ay = height - 7*r2
         cr:set_line_width(1.5 * s)
 
         if self.muted then
-            local cx, ms = ax + 7*s, 3.5*s
             cr:set_line_width(2.5 * s)
             cr:set_line_cap(1)  -- ROUND
-            cr:move_to(cx - ms, cy - ms) cr:line_to(cx + ms, cy + ms) cr:stroke()
-            cr:move_to(cx + ms, cy - ms) cr:line_to(cx - ms, cy + ms) cr:stroke()
+            -- mute X rotated -45° becomes a horizontal + vertical line pair
+            cr:move_to(cx - r2,      height - 21*r2/2) cr:line_to(cx + 6*r2,   height - 21*r2/2) cr:stroke()
+            cr:move_to(cx + 5*r2/2,  height - 14*r2)   cr:line_to(cx + 5*r2/2, height - 7*r2)   cr:stroke()
         else
             local waves = self.volume > 60 and 3
                        or self.volume > 25 and 2
                        or self.volume >  0 and 1
                        or 0
             for i = 1, waves do
-                cr:arc(ax, cy, i * 3.5 * s, -math.pi / 2.8, math.pi / 2.8)
+                -- arc angles rotated -45° from the original rightward fan
+                cr:arc(ax, ay, i * 3.5 * s, -math.pi / 2.8 - math.pi / 4, math.pi / 2.8 - math.pi / 4)
                 cr:stroke()
             end
         end
-        cr:restore()
     end
 
     table.insert(volume_widgets, w)
@@ -155,13 +146,12 @@ function status.new_chip_widget()
 
     function w:draw(_, cr, width, height)
         local cx = math.floor(width / 2)
-        local cy = math.floor(height / 2)
+        local by = height - ch
         local bx = cx - math.floor(cw / 2)
-        local by = cy - math.floor(ch / 2)
+        local cy = by + math.floor(ch / 2)
 
         cr:set_source_rgba(1, 1, 1, 1)
         cr:save()
-        cr:translate(0, 1)
         icons.chip(cr, width, height)
 
         -- 3 vertical gauges inside body, 1px gap between them
