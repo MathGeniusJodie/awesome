@@ -179,10 +179,142 @@ end
 
 local tag_state = setmetatable({}, { __mode = "k" })
 
+---------------------------------------------------------------------------
+-- State persistence
+---------------------------------------------------------------------------
+
+local PERSIST_FILE = (os.getenv("HOME") or "") .. "/.cache/awesome/splitwm_state.lua"
+
+-- Per-tag restore data loaded from file at startup.
+-- key: "<screen_index>:<tag_name>"  (unique across screens)
+-- consumed entry by entry as tags are first accessed.
+local tag_restore_specs = {}
+
+-- xid (integer X window ID) -> { key, path, tab_index }
+-- consumed as clients are managed after restart.
+local xid_restore_map = {}
+
+local function tag_key(t)
+    local s = t.screen
+    return string.format("%d:%s", (s and s.index) or 0, t.name)
+end
+
+-- Recursively serialise a tree node to a Lua-evaluable string.
+-- Branch: {"B", dir, ratio, left, right}
+-- Leaf:   {"L", active_tab, xid1, xid2, ...}
+-- The tagged-union encoding makes impossible tree shapes unrepresentable:
+-- a branch always has exactly two children, a leaf has exactly one
+-- active_tab followed by zero-or-more XIDs.
+local function ser_node(node)
+    if node.kind == "leaf" then
+        local parts = { '"L"', tostring(node.active_tab) }
+        for _, c in ipairs(node.tabs) do
+            if c.valid then table.insert(parts, tostring(c.window)) end
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    else
+        return string.format('{"B",%q,%.6f,%s,%s}',
+            node.direction,
+            math.max(0.1, math.min(0.9, node.ratio)),
+            ser_node(node.children[1]),
+            ser_node(node.children[2]))
+    end
+end
+
+-- Find the "0"/"1" path string from root to the leaf with the given id.
+local function path_to_leaf_id(node, target_id, path)
+    if node.kind == "leaf" then
+        return node.id == target_id and path or nil
+    end
+    return path_to_leaf_id(node.children[1], target_id, path .. "0")
+        or path_to_leaf_id(node.children[2], target_id, path .. "1")
+end
+
+local function save_state()
+    local lines = { "return {" }
+    for t, state in pairs(tag_state) do
+        local fp = path_to_leaf_id(state.root, state.focused_leaf_id, "") or ""
+        table.insert(lines, string.format("[%q]={tree=%s,focused_path=%q},",
+            tag_key(t), ser_node(state.root), fp))
+    end
+    table.insert(lines, "}")
+    local f = io.open(PERSIST_FILE, "w")
+    if f then f:write(table.concat(lines, "\n")); f:close() end
+end
+
+-- Walk a spec and record xid -> {key, path, tab_index} for every window.
+local function index_xids(spec, path, key)
+    if spec[1] == "L" then
+        for i = 3, #spec do
+            xid_restore_map[spec[i]] = { key = key, path = path, tab_index = i - 2 }
+        end
+    elseif spec[1] == "B" then
+        index_xids(spec[4], path .. "0", key)
+        index_xids(spec[5], path .. "1", key)
+    end
+end
+
+local function load_restore_data()
+    local f = io.open(PERSIST_FILE, "r")
+    if not f then return end
+    local content = f:read("*a"); f:close()
+    local fn = load(content)
+    if not fn then return end
+    local ok, data = pcall(fn)
+    if not ok or type(data) ~= "table" then return end
+    for key, td in pairs(data) do
+        if type(td) == "table" and type(td.tree) == "table"
+                and type(td.focused_path) == "string" then
+            tag_restore_specs[key] = td
+            index_xids(td.tree, "", key)
+        end
+    end
+end
+
+-- Reconstruct a live tree from a spec.
+-- Populates path_to_leaf: path_string -> leaf_node.
+local function restore_node(spec, path, path_to_leaf)
+    if type(spec) ~= "table" then return tree.make_leaf() end
+    if spec[1] == "L" then
+        local leaf = tree.make_leaf()
+        leaf._restore_active_tab = type(spec[2]) == "number" and spec[2] or 0
+        path_to_leaf[path] = leaf
+        return leaf
+    elseif spec[1] == "B" then
+        if spec[2] ~= tree.DIR_H and spec[2] ~= tree.DIR_V then return tree.make_leaf() end
+        if type(spec[4]) ~= "table" or type(spec[5]) ~= "table" then return tree.make_leaf() end
+        local ratio = type(spec[3]) == "number" and math.max(0.1, math.min(0.9, spec[3])) or 0.5
+        local left  = restore_node(spec[4], path .. "0", path_to_leaf)
+        local right = restore_node(spec[5], path .. "1", path_to_leaf)
+        return tree.make_branch(spec[2], ratio, left, right)
+    else
+        return tree.make_leaf()
+    end
+end
+
 local function get_state(t)
     if not tag_state[t] then
-        local root = tree.make_leaf()
-        tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root } }
+        local key  = tag_key(t)
+        local spec = tag_restore_specs[key]
+        if spec then
+            tag_restore_specs[key] = nil   -- consume so GC can free it
+            local path_to_leaf = {}
+            local root   = restore_node(spec.tree, "", path_to_leaf)
+            local leaves = tree.collect_leaves(root)
+            local leaf_map = {}
+            for _, leaf in ipairs(leaves) do leaf_map[leaf.id] = leaf end
+            local focused = path_to_leaf[spec.focused_path]
+            local focused_id = (focused and focused.id) or (leaves[1] and leaves[1].id) or 0
+            tag_state[t] = {
+                root            = root,
+                focused_leaf_id = focused_id,
+                leaf_map        = leaf_map,
+                _restore_ptl    = path_to_leaf,
+            }
+        else
+            local root = tree.make_leaf()
+            tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root } }
+        end
     end
     return tag_state[t]
 end
@@ -1308,7 +1440,20 @@ function splitwm.setup()
         if not t then return end
         local state = get_state(t)
         local leaf = tree.find_leaf_for_client(state.root, c)
-        if not leaf then pin_client(t, c); leaf = tree.find_leaf_for_client(state.root, c) end
+        if not leaf then
+            -- During restore: place client at its saved position.
+            local info = xid_restore_map[c.window]
+            if info and info.key == tag_key(t) and state._restore_ptl then
+                local target = state._restore_ptl[info.path]
+                if target then
+                    table.insert(target.tabs, math.min(info.tab_index, #target.tabs + 1), c)
+                    if target.active_tab == 0 then target.active_tab = 1 end
+                    xid_restore_map[c.window] = nil
+                    leaf = target
+                end
+            end
+            if not leaf then pin_client(t, c); leaf = tree.find_leaf_for_client(state.root, c) end
+        end
         if leaf then colors.resolve_color_conflict(leaf, c) end
     end)
 
@@ -1353,6 +1498,32 @@ function splitwm.setup()
         if pickup.tag == "split" then pickup = pickup_idle() end
         if s then geo_cache[s] = nil; gears.timer.delayed_call(function() update_ui(s) end) end
     end)
+
+    -- Save full split/tab state on exit so it can be restored after restart.
+    awesome.connect_signal("exit", save_state)
+
+    -- After restart: all pre-existing clients have been managed and placed into
+    -- their restored leaves.  Now apply the saved active_tab to each leaf and
+    -- trigger a full rearrange so the UI reflects the restored state.
+    awesome.connect_signal("startup", function()
+        for t, state in pairs(tag_state) do
+            if state._restore_ptl then
+                for _, leaf in ipairs(tree.collect_leaves(state.root)) do
+                    if leaf._restore_active_tab ~= nil then
+                        leaf.active_tab = #leaf.tabs > 0
+                            and math.max(1, math.min(leaf._restore_active_tab, #leaf.tabs))
+                            or 0
+                        leaf._restore_active_tab = nil
+                    end
+                end
+                state._restore_ptl = nil
+            end
+        end
+        xid_restore_map = {}
+        for s in screen do awful.layout.arrange(s) end
+    end)
+
+    load_restore_data()
 end
 
 function splitwm.flush_caches()
