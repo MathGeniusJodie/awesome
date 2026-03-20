@@ -15,6 +15,23 @@ local COLORS = {
 local COLORS_BY_NAME = {}
 for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
 
+-- Preferred color per application class (case-insensitive).
+local CLASS_COLORS = {
+    ["discord"]              = "violet",
+    ["obsidian"]             = "purple",
+    ["claude"]               = "orange",
+    ["librewolf"]            = "cyan",
+    ["code"]                 = "blue",  -- VSCode
+    ["code-oss"]             = "blue",
+    ["yt-gtk"]               = "pink",
+}
+
+local function get_preferred_color(c)
+    if not c.valid or not c.class then return nil end
+    local name = CLASS_COLORS[c.class:lower()]
+    return name and COLORS_BY_NAME[name]
+end
+
 -- Lua-side cache to avoid repeated X11 xproperty reads.
 -- Weak keys so entries are evicted automatically when clients are GC'd.
 -- Boxes ({value}) distinguish "not cached" (nil) from "cached nil" ({nil}).
@@ -44,6 +61,9 @@ local function pick_color_for_leaf(leaf, exclude_c)
             if col then used[col.name] = true end
         end
     end
+    -- Honour the app's preferred color if it isn't already taken.
+    local preferred = exclude_c and get_preferred_color(exclude_c)
+    if preferred and not used[preferred.name] then return preferred end
     for _, col in ipairs(COLORS) do
         if not used[col.name] then return col end
     end
@@ -52,6 +72,29 @@ end
 
 local function assign_color(leaf, c)
     set_client_color(c, pick_color_for_leaf(leaf, c).name)
+end
+
+-- After a tab is removed, let remaining tabs reclaim their preferred color
+-- if it's no longer taken by anyone else in the leaf.
+function colors.recheck_preferred(leaf, exclude_c)
+    for _, tc in ipairs(leaf.tabs) do
+        if tc == exclude_c or not tc.valid then goto continue end
+        local preferred = get_preferred_color(tc)
+        if not preferred then goto continue end
+        local conflict = false
+        for _, other in ipairs(leaf.tabs) do
+            if other ~= tc and other ~= exclude_c and other.valid then
+                local col = colors.get_client_color(other)
+                if col and col.name == preferred.name then
+                    conflict = true; break
+                end
+            end
+        end
+        if not conflict then
+            set_client_color(tc, preferred.name)
+        end
+        ::continue::
+    end
 end
 
 function colors.resolve_color_conflict(leaf, c)

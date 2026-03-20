@@ -370,6 +370,7 @@ local function unpin_client(root, c)
                 leaf.active_tab = math.min(math.max(1, i - 1), #leaf.tabs)
             end
             -- i > active_tab: no index change needed
+            colors.recheck_preferred(leaf, c)
             return
         end
     end
