@@ -22,8 +22,8 @@ local active     = {}   -- [screen] = { timer, overlays }
 local DURATION_S = 0.5
 local FPS        = 60
 
-local function ease_out(t)
-    return 1 - (1 - t) * (1 - t)
+local function ease_in_out(t)
+    return t * t * (3 - 2 * t)  -- smoothstep: slow start, fast middle, slow end
 end
 
 local function cancel_active(s)
@@ -78,7 +78,7 @@ local function animate(s, old_overlay, new_overlay, dx)
         call_now  = false,
         callback  = function()
             frame = frame + 1
-            local p = ease_out(frame / frames)
+            local p = ease_in_out(frame / frames)
             old_overlay.x = math.floor(old_start + dx * p)
             new_overlay.x = math.floor(new_start + dx * p)
             if frame >= frames then
