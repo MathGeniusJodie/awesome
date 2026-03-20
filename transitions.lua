@@ -19,7 +19,7 @@ local active      = {}     -- [screen] = { timer, overlays }
 
 local DURATION_S  = 1.1
 local FPS         = 60
-local SETTLE_S    = 0.7    -- seconds after arriving before we screenshot
+local SETTLE_S    = DURATION_S + 0.5  -- always capture after animation finishes
 
 local function ease_out(t)
     return 1 - (1 - t) * (1 - t)
@@ -93,7 +93,8 @@ local function schedule_capture(s, tag)
         local g    = s.geometry
         local path = string.format("/tmp/awesome_ws_%d_%d.png", s.index, tag.index)
         awful.spawn.easy_async(
-            string.format("maim -g %dx%d+%d+%d -- %s", g.width, g.height, g.x, g.y, path),
+            string.format("import -window root -crop %dx%d+%d+%d +repage %s",
+                g.width, g.height, g.x, g.y, path),
             function(_, _, _, code)
                 if code == 0 then cache[tag] = path end
             end
