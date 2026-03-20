@@ -378,15 +378,15 @@ awful.screen.connect_for_each_screen(function(s)
     icons_row.spacing = 4
     icons_row:add(chip_widget)
     icons_row:add(bat_widget)
-    icons_row:add(wibox.container.margin(vol_widget, 0, 0, 0, 1))
-    local status_capsule = capsule(icons_row, 24, 24, splitwm.tab_shape, "#000000ff")
+    icons_row:add(wibox.container.margin(vol_widget, 0, 0, 0, 0))
+    local status_capsule = capsule(icons_row, 24, 22, splitwm.tab_shape, "#000000ff")
 
     -- Date / clock capsule — tab profile on right side
     local dt_row = wibox.layout.fixed.horizontal()
     dt_row.spacing = 8
     dt_row:add(mydate)
     dt_row:add(myclock)
-    local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 1, 0), 24, 24, splitwm.tab_shape, "#000000ff")
+    local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 0, 0), 26, 26, splitwm.tab_shape, "#000000ff")
 
     local lock_capsule = wibox.container.margin(
         status.new_lock_widget(capsule_height), 0, 0, wibar_height - capsule_height - 2, 0)
