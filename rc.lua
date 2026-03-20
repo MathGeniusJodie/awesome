@@ -92,6 +92,7 @@ local menu        = require("menu")
 local status      = require("status")
 local timebar     = require("timebar")
 local transitions = require("transitions")
+local hunger_mod  = require("hunger")
 
 -- Workspace colors: COLORS indices 0,2,4,6,8 (1-based: 1,3,5,7,9) = pink,gold,emerald,blue,purple
 -- bg existence is checked once at startup to avoid repeated stat() on every switch
@@ -362,9 +363,10 @@ awful.screen.connect_for_each_screen(function(s)
     update_clock()
     gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_clock }
 
-    local bat_widget  = status.new_battery_widget()
-    local vol_widget  = status.new_volume_widget()
-    local chip_widget = status.new_chip_widget()
+    local bat_widget    = status.new_battery_widget()
+    local vol_widget    = status.new_volume_widget()
+    local chip_widget   = status.new_chip_widget()
+    local hunger_widget = hunger_mod.new_widget(capsule_height)
 
     -- Capsule helper: wraps widget(s) in a black shaped background
     local function capsule(inner, pad_l, pad_r, shape_fn, bgc)
@@ -415,7 +417,7 @@ awful.screen.connect_for_each_screen(function(s)
             wibox.container.margin(s.mytaglist, bar_margin, 0, 0, 0),
             s.mypromptbox,
         },
-        nil, -- Center: empty
+        wibox.container.place(wibox.container.margin(hunger_widget, 4, 4, 0, 0)), -- Center
         { -- Right
             layout = wibox.layout.fixed.horizontal,
             spacing = bar_margin,
