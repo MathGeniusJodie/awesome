@@ -705,7 +705,7 @@ local function arrange(p)
             if i == leaf.active_tab then
                 c.hidden = false
                 c.border_width = 0
-                if not c.fullscreen then
+                if not c.fullscreen and not split_anim_active[s] then
                     -- Content precisely sits below the external titlebar Wibox cache
                     c:geometry({
                         x      = geo.x + bw,
@@ -1341,11 +1341,13 @@ local function update_titlebars(s, t, state, geos, leaves)
         entry.tb_h = tb_h
         local wb = entry.wb
         local active_client = leaf.tabs[leaf.active_tab]
-        wb.x       = geo.x
-        wb.y       = geo.y - gap
-        wb.width   = geo.width
-        wb.height  = geo.height + gap
         wb.visible = true
+        if not split_anim_active[s] then
+            wb.x      = geo.x
+            wb.y      = geo.y - gap
+            wb.width  = geo.width
+            wb.height = geo.height + gap
+        end
 
         local fp = tb_compute_fingerprint(leaf, state, geo)
         if entry.fp == fp then return end
