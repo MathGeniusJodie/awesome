@@ -86,11 +86,12 @@ package.path = config_dir .. "?.lua;"
             .. config_dir .. "?/init.lua;"
             .. package.path
 
-local splitwm  = require("splitwm")
-local swcolors = require("splitwm.colors")
-local menu     = require("menu")
-local status   = require("status")
-local timebar  = require("timebar")
+local splitwm     = require("splitwm")
+local swcolors    = require("splitwm.colors")
+local menu        = require("menu")
+local status      = require("status")
+local timebar     = require("timebar")
+local transitions = require("transitions")
 
 -- Workspace colors: COLORS indices 0,2,4,6,8 (1-based: 1,3,5,7,9) = pink,gold,emerald,blue,purple
 -- bg existence is checked once at startup to avoid repeated stat() on every switch
@@ -160,6 +161,7 @@ splitwm.launchers = {
 }
 
 splitwm.setup()
+transitions.setup({ workspaces = WORKSPACES })
 
 menu.setup({
     terminal    = terminal,
@@ -289,7 +291,7 @@ local function make_tag_widget(t, color)
     tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - bar_margin - dots.forced_height, 0))
 
     tag_layout:buttons(gears.table.join(
-        awful.button({}, 1, function() t:view_only() end)
+        awful.button({}, 1, function() transitions.switch(t.screen, t) end)
     ))
 
     t:connect_signal("property::selected", function() update_circle() end)
@@ -506,9 +508,9 @@ local globalkeys = gears.table.join(
     -- Tag switching (standard)
     ---------------------------------------------------------------------------
 
-    awful.key({ modkey }, "Left",  awful.tag.viewprev,
+    awful.key({ modkey }, "Left",  function() transitions.switch_prev() end,
         { description = "view previous", group = "tag" }),
-    awful.key({ modkey }, "Right", awful.tag.viewnext,
+    awful.key({ modkey }, "Right", function() transitions.switch_next() end,
         { description = "view next", group = "tag" }),
 
     ---------------------------------------------------------------------------
@@ -535,7 +537,7 @@ for i = 1, 5 do
             function()
                 local s = awful.screen.focused()
                 local t = s.tags[i]
-                if t then t:view_only() end
+                if t then transitions.switch(s, t) end
             end,
             { description = "view tag #" .. i, group = "tag" })
     )
