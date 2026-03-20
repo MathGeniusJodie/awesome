@@ -482,7 +482,7 @@ local function run_v_drag(s, get_b)
             local b = get_b()
             if not b then return false end
             local igap = b.parent_gap or 0
-            b.branch.ratio = math.max(0.1, math.min(0.9, (m.y - b.parent_y) / (b.parent_h - igap)))
+            b.branch.ratio = math.max(0.1, math.min(0.9, (m.y - b.parent_y - math.floor(igap / 2)) / (b.parent_h - igap)))
             awful.layout.arrange(s)
             return true
         end, "sb_v_double_arrow")
@@ -590,7 +590,7 @@ local function get_drag_handle(s, i)
                 if b.dir == tree.DIR_H then
                     local usable = b.parent_w - igap
                     local min_r  = MIN_SPLIT_W / usable
-                    b.branch.ratio = math.max(min_r, math.min(1 - min_r, (mouse.x - b.parent_x) / usable))
+                    b.branch.ratio = math.max(min_r, math.min(1 - min_r, (mouse.x - b.parent_x - math.floor(igap / 2)) / usable))
                     wb.x = mouse.x - math.floor(hw / 2)
                 else
                     local usable = b.parent_h - igap

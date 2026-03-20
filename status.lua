@@ -156,7 +156,7 @@ function status.new_chip_widget()
 
         -- 3 vertical gauges inside body, 1px gap between them
         -- Inner area matches battery fill inset: 2px from each edge
-        local pad = 2
+        local pad = 3
         local gap = 1
         local n   = 3
         local gh  = ch - pad * 2
