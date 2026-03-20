@@ -14,7 +14,7 @@ local awful = require("awful")
 local M = {}
 
 local WORKSPACES  = nil
-local cache       = {}     -- [tag] = file path string
+local cache       = {}     -- [tag] = cairo surface
 local active      = {}     -- [screen] = { timer, overlays }
 
 local DURATION_S  = 1.1
@@ -35,7 +35,7 @@ local function cancel_active(s)
     active[s] = nil
 end
 
-local function make_overlay(s, x, img_src, bg_color)
+local function make_overlay(s, x, surf, path, bg_color)
     local ov = wibox {
         screen  = s,
         x       = x,
@@ -47,11 +47,10 @@ local function make_overlay(s, x, img_src, bg_color)
         visible = true,
         type    = "notification",
     }
-    if img_src then
-        local surf = gears.surface.load_uncached(img_src)
-        if surf then
-            ov:setup { wibox.widget.imagebox(surf, true), layout = wibox.layout.fixed.vertical }
-        end
+    -- surf is a pre-loaded cairo surface; path is a fallback file path (e.g. wallpaper)
+    local src = surf or (path and gears.surface.load_uncached(path))
+    if src then
+        ov:setup { wibox.widget.imagebox(src, true), layout = wibox.layout.fixed.vertical }
     end
     return ov
 end
@@ -96,7 +95,10 @@ local function schedule_capture(s, tag)
             string.format("import -window root -crop %dx%d+%d+%d +repage %s",
                 g.width, g.height, g.x, g.y, path),
             function(_, _, _, code)
-                if code == 0 then cache[tag] = path end
+                if code == 0 then
+                    local surf = gears.surface.load_uncached(path)
+                    if surf then cache[tag] = surf end
+                end
             end
         )
         return false
@@ -105,9 +107,11 @@ end
 
 local function tag_overlay_args(tag)
     local ws    = tag and WORKSPACES and WORKSPACES[tag.index]
-    local src   = (tag and cache[tag]) or (ws and ws.has_bg and ws.bg)
+    -- Prefer cached surface; fall back to wallpaper path; fall back to solid color
+    local surf  = tag and cache[tag]
+    local path  = (not surf) and ws and ws.has_bg and ws.bg
     local color = (ws and ws.dark) or "#111111"
-    return src, color
+    return surf, path, color
 end
 
 function M.switch(s, new_tag)
@@ -119,13 +123,13 @@ function M.switch(s, new_tag)
     -- Negative dx = both slide left (going to higher tag), positive = right
     local dx = (new_idx > old_idx) and -s.geometry.width or s.geometry.width
 
-    local old_src, old_color = tag_overlay_args(old_tag)
-    local new_src, new_color = tag_overlay_args(new_tag)
+    local old_surf, old_path, old_color = tag_overlay_args(old_tag)
+    local new_surf, new_path, new_color = tag_overlay_args(new_tag)
 
     -- Old overlay covers current state at screen position
-    local old_overlay = make_overlay(s, s.geometry.x, old_src, old_color)
+    local old_overlay = make_overlay(s, s.geometry.x, old_surf, old_path, old_color)
     -- New overlay starts off-screen on the incoming side
-    local new_overlay = make_overlay(s, s.geometry.x - dx, new_src, new_color)
+    local new_overlay = make_overlay(s, s.geometry.x - dx, new_surf, new_path, new_color)
 
     -- Switch tag underneath both overlays
     new_tag:view_only()
