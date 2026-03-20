@@ -10,16 +10,17 @@
 local gears = require("gears")
 local wibox = require("wibox")
 local awful = require("awful")
+local lgi   = require("lgi")
+local cairo = lgi.cairo
 
 local M = {}
 
-local WORKSPACES  = nil
-local cache       = {}     -- [tag] = cairo surface
-local active      = {}     -- [screen] = { timer, overlays }
+local WORKSPACES = nil
+local cache      = {}   -- [tag] = cairo ImageSurface (screenshot from last departure)
+local active     = {}   -- [screen] = { timer, overlays }
 
-local DURATION_S  = 1.1
-local FPS         = 60
-local SETTLE_S    = DURATION_S + 0.5  -- always capture after animation finishes
+local DURATION_S = 1.1
+local FPS        = 60
 
 local function ease_out(t)
     return 1 - (1 - t) * (1 - t)
@@ -35,7 +36,18 @@ local function cancel_active(s)
     active[s] = nil
 end
 
-local function make_overlay(s, x, surf, path, bg_color)
+-- Synchronously capture the current screen content into an ImageSurface.
+-- root.content() returns the raw XCB surface; we blit it cropped to this screen.
+local function capture_screen(s)
+    local g    = s.geometry
+    local img  = cairo.ImageSurface(cairo.Format.RGB24, g.width, g.height)
+    local cr   = cairo.Context(img)
+    cr:set_source_surface(gears.surface(root.content()), -g.x, -g.y)
+    cr:paint()
+    return img
+end
+
+local function make_overlay(s, x, surf, bg_color)
     local ov = wibox {
         screen  = s,
         x       = x,
@@ -47,25 +59,18 @@ local function make_overlay(s, x, surf, path, bg_color)
         visible = true,
         type    = "notification",
     }
-    -- surf is a pre-loaded cairo surface; path is a fallback file path (e.g. wallpaper)
-    local src = surf or (path and gears.surface.load_uncached(path))
-    if src then
-        ov:setup { wibox.widget.imagebox(src, true), layout = wibox.layout.fixed.vertical }
+    if surf then
+        ov:setup { wibox.widget.imagebox(surf, true), layout = wibox.layout.fixed.vertical }
     end
     return ov
 end
 
--- Animate old_overlay out and new_overlay in, both driven by one timer.
--- dx: how far (and which direction) each overlay moves.
---   old starts at sg.x,      ends at sg.x + dx   (slides off-screen)
---   new starts at sg.x - dx, ends at sg.x         (slides on-screen, then hides)
 local function animate(s, old_overlay, new_overlay, dx)
     cancel_active(s)
     local frames    = math.max(1, math.floor(DURATION_S * FPS))
     local frame     = 0
-    local sg        = s.geometry
-    local old_start = sg.x
-    local new_start = sg.x - dx
+    local old_start = s.geometry.x
+    local new_start = s.geometry.x - dx
     local tim
     tim = gears.timer {
         timeout   = 1 / FPS,
@@ -87,57 +92,39 @@ local function animate(s, old_overlay, new_overlay, dx)
     active[s] = { timer = tim, overlays = { old_overlay, new_overlay } }
 end
 
-local function schedule_capture(s, tag)
-    gears.timer.start_new(SETTLE_S, function()
-        local g    = s.geometry
-        local path = string.format("/tmp/awesome_ws_%d_%d.png", s.index, tag.index)
-        awful.spawn.easy_async(
-            string.format("import -window root -crop %dx%d+%d+%d +repage %s",
-                g.width, g.height, g.x, g.y, path),
-            function(_, _, _, code)
-                if code == 0 then
-                    local surf = gears.surface.load_uncached(path)
-                    if surf then cache[tag] = surf end
-                end
-            end
-        )
-        return false
-    end)
+local function tag_color(tag)
+    local ws = tag and WORKSPACES and WORKSPACES[tag.index]
+    return (ws and ws.dark) or "#111111"
 end
 
-local function tag_overlay_args(tag)
-    local ws    = tag and WORKSPACES and WORKSPACES[tag.index]
-    -- Prefer cached surface; fall back to wallpaper path; fall back to solid color
-    local surf  = tag and cache[tag]
-    local path  = (not surf) and ws and ws.has_bg and ws.bg
-    local color = (ws and ws.dark) or "#111111"
-    return surf, path, color
+-- Returns cached surface for tag, or wallpaper as fallback, or nil.
+local function tag_surf(tag)
+    if cache[tag] then return cache[tag] end
+    local ws = tag and WORKSPACES and WORKSPACES[tag.index]
+    if ws and ws.has_bg then
+        return gears.surface.load_uncached(ws.bg)
+    end
+    return nil
 end
 
 function M.switch(s, new_tag)
     local old_tag = s.selected_tag
     if old_tag == new_tag then return end
 
+    cancel_active(s)
+
     local old_idx = old_tag and old_tag.index or new_tag.index
     local new_idx = new_tag.index
-    -- Negative dx = both slide left (going to higher tag), positive = right
-    local dx = (new_idx > old_idx) and -s.geometry.width or s.geometry.width
+    local dx      = (new_idx > old_idx) and -s.geometry.width or s.geometry.width
 
-    local old_surf, old_path, old_color = tag_overlay_args(old_tag)
-    local new_surf, new_path, new_color = tag_overlay_args(new_tag)
+    -- Capture current screen state synchronously before switching
+    local old_surf = capture_screen(s)
+    if old_tag then cache[old_tag] = old_surf end
 
-    -- Old overlay covers current state at screen position
-    local old_overlay = make_overlay(s, s.geometry.x, old_surf, old_path, old_color)
-    -- New overlay starts off-screen on the incoming side
-    local new_overlay = make_overlay(s, s.geometry.x - dx, new_surf, new_path, new_color)
+    local old_overlay = make_overlay(s, s.geometry.x,      old_surf,          tag_color(old_tag))
+    local new_overlay = make_overlay(s, s.geometry.x - dx, tag_surf(new_tag), tag_color(new_tag))
 
-    -- Switch tag underneath both overlays
     new_tag:view_only()
-
-    -- Capture new tag after settling, for future transitions
-    schedule_capture(s, new_tag)
-
-    -- Slide old out, new in
     animate(s, old_overlay, new_overlay, dx)
 end
 
