@@ -1085,6 +1085,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             return
         end
         leaf.active_tab = tab_idx
+        ctx.state.focused_leaf_id = leaf.id
+        tc:emit_signal("request::activate", "mouse_click", {raise = true})
         awful.layout.arrange(ctx.s)
     end)))
 
