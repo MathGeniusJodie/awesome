@@ -19,7 +19,7 @@ local WORKSPACES = nil
 local cache      = {}   -- [tag] = cairo ImageSurface (screenshot from last departure)
 local active     = {}   -- [screen] = { timer, overlays }
 
-local DURATION_S = 1.1
+local DURATION_S = 0.5
 local FPS        = 60
 
 local function ease_out(t)
