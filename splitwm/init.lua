@@ -802,6 +802,7 @@ local function make_wb_proxy(layer, s)
 end
 
 function splitwm.set_wallpaper(s, ws)
+    -- Primary: render in the underlay wibox so transparent UI elements composite cleanly.
     local u = get_or_create_underlay(s)
     u.wb.bg = ws.dark
     if ws.has_bg then
@@ -810,6 +811,13 @@ function splitwm.set_wallpaper(s, ws)
         u.wallpaper_w._surface = nil
     end
     u.wallpaper_w:emit_signal("widget::redraw_needed")
+    -- Fallback: also set the X root window so compositors that don't honour
+    -- _NET_WM_WINDOW_TYPE_DESKTOP still show the correct wallpaper.
+    if ws.has_bg then
+        gears.wallpaper.maximized(ws.bg, s, true)
+    else
+        gears.wallpaper.set(ws.dark)
+    end
 end
 
 ---------------------------------------------------------------------------
