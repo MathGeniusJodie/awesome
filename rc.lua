@@ -336,7 +336,7 @@ awful.screen.connect_for_each_screen(function(s)
     local mon_codes = { "Ja", "Fe", "Mr", "Ap", "My", "Jn", "Jl", "Au", "Se", "Oc", "Nv", "De" }
 
     local mydate = wibox.widget.textbox()
-    mydate.font = "monospace 12px"
+    mydate.font = "monospace 14px"
     local function update_date()
         local t = os.date("*t")
         mydate.text = dow_codes[t.wday] .. " " .. mon_codes[t.month]
@@ -346,8 +346,16 @@ awful.screen.connect_for_each_screen(function(s)
     update_date()
     gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_date }
 
-    local myclock = wibox.widget.textclock("%I:%M %p")
-    myclock.font = "monospace bold 12px"
+    local myclock = wibox.widget.textbox()
+    myclock.font = "monospace bold 14px"
+    local function update_clock()
+        local t = os.date("%I:%M")
+        local ap = os.date("%p"):lower()
+        myclock.markup = string.format(
+            '%s<span font_variant="small-caps">%s</span>', t, ap)
+    end
+    update_clock()
+    gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_clock }
 
     local bat_widget  = status.new_battery_widget()
     local vol_widget  = status.new_volume_widget()
