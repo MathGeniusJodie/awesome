@@ -186,6 +186,8 @@ local tag_state = setmetatable({}, { __mode = "k" })
 local PERSIST_FILE = (os.getenv("HOME") or "") .. "/.cache/awesome/splitwm_state.lua"
 
 local geo_cache          = {}   -- [screen] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
+local client_actual_geo  = {}   -- [client] = actual geometry after size-hint snapping, from property::geometry signal
+local client_last_target = {}   -- [client] = last geometry we requested in arrange()
 local split_anim_pending = {}   -- [screen] = {old_geo, a_id, b_id, dir}
 local close_anim_pending = {}   -- [screen] = {old_geos, leaf_ids}
 local split_anim_active  = {}   -- [screen] = {timer}
@@ -707,12 +709,26 @@ local function arrange(p)
                 c.border_width = 0
                 if not c.fullscreen and not split_anim_active[s] then
                     -- Content precisely sits below the external titlebar Wibox cache
-                    c:geometry({
+                    local tgt = {
                         x      = geo.x + bw,
                         y      = geo.y - gap + tb_h,
                         width  = math.max(1, geo.width - bw * 2),
                         height = math.max(1, geo.height + gap - bw - tb_h),
-                    })
+                    }
+                    -- Skip redundant configure requests for windows that have already
+                    -- confirmed a smaller size (e.g. refuse to fill the split).
+                    -- Without this, every arrange() call (including hover-triggered ones)
+                    -- would briefly resize the window before it snaps back, causing a flash.
+                    local ag   = client_actual_geo[c]
+                    local last = client_last_target[c]
+                    local skip = ag and last
+                        and (ag.width < tgt.width - 1 or ag.height < tgt.height - 1)
+                        and last.x == tgt.x and last.y == tgt.y
+                        and last.width == tgt.width and last.height == tgt.height
+                    if not skip then
+                        c:geometry(tgt)
+                        client_last_target[c] = tgt
+                    end
                 end
             else
                 c.hidden = true
@@ -950,25 +966,8 @@ local function tb_get_or_create_entry(s, leaf)
         tooltip           = awful.tooltip { text = "", delay_show = 0.3, font = "monospace bold 12px", bg = color_bg, fg = color_fg, border_width = 0 },
         tooltip_objs      = {},
         titlebar_btn_list = {},
-        titlebar_hovered  = false,
         tb_h              = nil,
     }
-    entry.wb:connect_signal("mouse::enter", function()
-        entry.titlebar_hovered = true
-        for _, btn in ipairs(entry.titlebar_btn_list) do if not btn._disabled then btn.bg = color_bg end end
-        if entry.swap_btn and not entry.swap_btn_picked then entry.swap_btn.bg = color_bg end
-    end)
-    entry.wb:connect_signal("mouse::leave", function()
-        entry.titlebar_hovered = false
-        for _, btn in ipairs(entry.titlebar_btn_list) do if not btn._disabled then btn.bg = color_btn_bg end end
-        if entry.swap_btn then
-            entry.swap_btn.bg = entry.swap_btn_picked and color_fg or color_btn_bg
-            if entry.swap_btn._icon then
-                entry.swap_btn._icon._dark = entry.swap_btn_picked
-                entry.swap_btn._icon:emit_signal("widget::redraw_needed")
-            end
-        end
-    end)
     cache[leaf.id] = entry
     return entry
 end
@@ -995,6 +994,8 @@ local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
     local w = make_circle_icon_btn_widget(draw_fn, size)
     w.shape_border_color = widget_bc
     if callback then w:buttons(gears.table.join(awful.button({}, 1, callback))) end
+    w:connect_signal("mouse::enter", function() if not w._disabled then w.bg = color_bg end end)
+    w:connect_signal("mouse::leave", function() if not w._disabled then w.bg = color_btn_bg end end)
     table.insert(entry.titlebar_btn_list, w)
     return w
 end
@@ -1156,6 +1157,16 @@ local function tb_build_split_controls(leaf, entry, ctx)
     if is_split_picked then swap_btn.bg = color_fg; swap_btn._icon._dark = true end
     entry.swap_btn        = swap_btn
     entry.swap_btn_picked = is_split_picked
+    swap_btn:connect_signal("mouse::enter", function()
+        if not entry.swap_btn_picked then swap_btn.bg = color_bg end
+    end)
+    swap_btn:connect_signal("mouse::leave", function()
+        swap_btn.bg = entry.swap_btn_picked and color_fg or color_btn_bg
+        if swap_btn._icon then
+            swap_btn._icon._dark = entry.swap_btn_picked
+            swap_btn._icon:emit_signal("widget::redraw_needed")
+        end
+    end)
     swap_btn:buttons(gears.table.join(awful.button({}, 1, function()
         if pickup.tag == "split" and pickup.split_id == leaf.id then
             pickup = pickup_idle()
@@ -1172,7 +1183,10 @@ local function tb_build_split_controls(leaf, entry, ctx)
 end
 
 -- Build the focus border drawn around the client area.
-local function tb_build_border_widget(border_color, tb_h, bw, radius)
+-- entry_ref (optional): when provided, border_client_w/h are read from it at
+-- draw time rather than captured as upvalues, so any redraw always uses the
+-- current stable size even if the widget is unexpectedly recreated mid-hover.
+local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
     local w   = wibox.widget.base.make_widget()
     w._bc     = border_color
     w._tb_h   = tb_h
@@ -1184,8 +1198,10 @@ local function tb_build_border_widget(border_color, tb_h, bw, radius)
         local half = self._bw / 2
         local x    = half
         local y    = self._tb_h - half
-        local wd   = width - self._bw
-        local h    = height - self._tb_h
+        local cw   = entry_ref and entry_ref.border_client_w
+        local ch   = entry_ref and entry_ref.border_client_h
+        local wd   = cw and (cw + self._bw) or (width - self._bw)
+        local h    = ch and (ch + self._bw) or (height - self._tb_h)
         local r    = radius or beautiful.splitwm_border_radius
         cr:new_sub_path()
         cr:arc(x + wd - r, y + r,     r, -math.pi / 2, 0)
@@ -1349,6 +1365,24 @@ local function update_titlebars(s, t, state, geos, leaves)
             wb.height = geo.height + gap
         end
 
+        -- Compute a geometry-only fingerprint (excludes focus/pickup state) so the border
+        -- size override is only recomputed when the split geometry or active client changes —
+        -- NOT on focus changes from hover, which would race against X11 ConfigureNotify.
+        local geo_fp_parts = { leaf.active_tab, geo.width, geo.height }
+        for _, tc in ipairs(leaf.tabs) do geo_fp_parts[#geo_fp_parts+1] = tostring(tc.window) end
+        local geo_fp = table.concat(geo_fp_parts, "\0")
+        if entry.geo_fp ~= geo_fp then
+            entry.geo_fp = geo_fp
+            entry.border_client_w = nil
+            entry.border_client_h = nil
+            if active_client and active_client.valid and not active_client.fullscreen then
+                local ag    = client_actual_geo[active_client]
+                local exp_w = geo.width - bw * 2
+                local exp_h = geo.height + gap - bw - tb_h
+                if ag and ag.width  < exp_w - 1 then entry.border_client_w = ag.width  end
+                if ag and ag.height < exp_h - 1 then entry.border_client_h = ag.height end
+            end
+        end
         local fp = tb_compute_fingerprint(leaf, state, geo)
         if entry.fp == fp then return end
         entry.fp              = fp
@@ -1405,7 +1439,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         local empty_focus_color = color_fg
         local border_draw = #leaf.tabs == 0
             and tb_build_border_widget(is_focused and empty_focus_color or nil, tb_h, bw, empty_r)
-            or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw)
+            or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, nil, entry)
 
         local middle_drag
         if leaf.v_bound_above then
@@ -1822,6 +1856,20 @@ function splitwm.setup()
     client.connect_signal("unmanage", function(c)
         if pickup.tag == "client" and pickup.client == c then pickup = pickup_idle() end
         for t, state in pairs(tag_state) do unpin_client(state.root, c) end
+        client_actual_geo[c]  = nil
+        client_last_target[c] = nil
+    end)
+
+    -- Track the actual confirmed client geometry (after size-hint snapping / ConfigureNotify)
+    -- so update_titlebars can draw the border at the true window size.  Stored here rather
+    -- than read back immediately after c:geometry({...}) in arrange() to avoid a race where
+    -- the getter still returns the un-snapped requested value.
+    client.connect_signal("property::geometry", function(c)
+        client_actual_geo[c] = c:geometry()
+    end)
+
+    client.connect_signal("unmanage", function(c)
+        client_actual_geo[c] = nil
     end)
 
     client.connect_signal("focus", function(c)
