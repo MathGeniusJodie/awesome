@@ -14,9 +14,9 @@ local wibox = require("wibox")
 local gears = require("gears")
 
 -- Layout constants — tweak these to reshape both bars at once.
-local BAR_WIDTH   = 6   -- px width of each bar (corner radius = BAR_WIDTH / 2)
+local BAR_WIDTH   = 10   -- px width of each bar (corner radius = BAR_WIDTH / 2)
 local BAR_SPACING = 3   -- px gap between the two bars
-local BAR_MARGIN  = 3   -- px gap between screen left edge and bar 1
+local BAR_MARGIN  = 4 -- px gap between screen left edge and bar 1
 
 local M = {}
 

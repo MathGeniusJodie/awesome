@@ -14,7 +14,7 @@ local ICON_SIZE      = 18
 -- Apple images: 0=full, 1=slightly eaten, 2=more eaten, 3=core
 local APPLE_IMGS = {}
 for i = 0, 3 do
-    APPLE_IMGS[i] = config_dir .. "appleb" .. i .. "-fs8.png"
+    APPLE_IMGS[i] = config_dir .. "applew" .. i .. "-fs8.png"
 end
 local HUNGER_BTN_ICON = config_dir .. "hunger-fs8.png"
 
@@ -140,13 +140,14 @@ function hunger.new_widget(btn_height)
     table.insert(_update_fns, update_all)
     update_all()
 
-    -- Assemble: [button] [apples]
-    local row = wibox.layout.fixed.horizontal()
-    row.spacing = 6
-    row:add(wibox.container.margin(wibox.container.place(btn_bg), 0, 0, 0, 2))
-    row:add(wibox.container.margin(wibox.container.place(apple_row), 0, 0, 0, 1))
-
-    return row
+    return {
+        button = wibox.container.margin(wibox.container.place(btn_bg), 0, 0, 0, 2),
+        apples = (function()
+            local p = wibox.container.place(apple_row)
+            p.valign = "bottom"
+            return p
+        end)(),
+    }
 end
 
 return hunger

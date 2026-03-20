@@ -366,7 +366,7 @@ awful.screen.connect_for_each_screen(function(s)
     local bat_widget    = status.new_battery_widget()
     local vol_widget    = status.new_volume_widget()
     local chip_widget   = status.new_chip_widget()
-    local hunger_widget = hunger_mod.new_widget(capsule_height)
+    local hunger_parts  = hunger_mod.new_widget(capsule_height)
 
     -- Capsule helper: wraps widget(s) in a black shaped background
     local function capsule(inner, pad_l, pad_r, shape_fn, bgc)
@@ -386,7 +386,13 @@ awful.screen.connect_for_each_screen(function(s)
     icons_row:add(wibox.container.margin(chip_widget, 0, 0, 0, icon_bottom_pad))
     icons_row:add(wibox.container.margin(bat_widget,  0, 0, 0, icon_bottom_pad))
     icons_row:add(wibox.container.margin(vol_widget,  0, 0, 0, icon_bottom_pad))
-    local status_capsule = capsule(icons_row, 24, 22, splitwm.tab_shape, "#000000ff")
+    local status_capsule   = capsule(icons_row, 24, 22, splitwm.tab_shape, "#000000ff")
+
+    local hunger_apples_capsule = capsule(hunger_parts.apples, 22, 22, splitwm.tab_shape, "#000000ff")
+    local hunger_row = wibox.layout.fixed.horizontal()
+    hunger_row.spacing = bar_margin
+    hunger_row:add(hunger_parts.button)
+    hunger_row:add(hunger_apples_capsule)
 
     -- Date / clock capsule — tab profile on right side
     local dt_row = wibox.layout.fixed.horizontal()
@@ -417,7 +423,7 @@ awful.screen.connect_for_each_screen(function(s)
             wibox.container.margin(s.mytaglist, bar_margin, 0, 0, 0),
             s.mypromptbox,
         },
-        wibox.container.place(wibox.container.margin(hunger_widget, 4, 4, 0, 0)), -- Center
+        wibox.container.place(hunger_row), -- Center
         { -- Right
             layout = wibox.layout.fixed.horizontal,
             spacing = bar_margin,
