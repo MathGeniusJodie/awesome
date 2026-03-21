@@ -304,7 +304,6 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     local ROWS      = 3
     local content_w = COLS * MENU_CIRC_SIZE + (COLS - 1) * MENU_CIRC_GAP
     local menu_w    = tab_w or (MENU_BW * 2 + MENU_PAD_H * 2 + content_w)
-    local pad_h     = math.max(MENU_BW, math.floor((menu_w - MENU_BW * 2 - content_w) / 2))
     local menu_h    = MENU_PAD_V * 2 + ROWS * MENU_CIRC_SIZE + (ROWS - 1) * MENU_CIRC_GAP + MENU_BW
 
     if not ms.wb then
@@ -380,9 +379,9 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
         wb:setup {
             ms.border_w,
             {
-                grid,
-                left   = pad_h,
-                right  = pad_h,
+                { grid, halign = "center", valign = "center", widget = wibox.container.place },
+                left   = MENU_BW,
+                right  = MENU_BW,
                 top    = MENU_PAD_V,
                 bottom = MENU_PAD_V + MENU_BW,
                 widget = wibox.container.margin,
