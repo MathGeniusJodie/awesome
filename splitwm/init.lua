@@ -1094,6 +1094,20 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                                         if lid ~= leaf.id then
                                             try_drop_picked_up(ctx.t, lid)
                                             awful.layout.arrange(ctx.s)
+                                        elseif my < g.y then
+                                            -- same leaf, in tab bar: swap tab order
+                                            local tab_w = 21 + BTN_SIZE + 2 + BTN_SIZE + 21
+                                            local step  = tab_w + TAB_SPACING
+                                            local target = math.max(1, math.min(#leaf.tabs,
+                                                math.floor((mx - g.x) / step) + 1))
+                                            if target ~= tab_idx then
+                                                leaf.tabs[tab_idx], leaf.tabs[target] =
+                                                    leaf.tabs[target], leaf.tabs[tab_idx]
+                                                leaf.active_tab = target
+                                                pickup = pickup_idle()
+                                                awful.layout.arrange(ctx.s)
+                                            end
+                                            -- else: same tab, stay in pickup mode
                                         end
                                         return false
                                     end
