@@ -1076,12 +1076,36 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end)
         end
         move_overlay:buttons(gears.table.join(awful.button({}, 1, function()
-            if pickup.tag == "client" and pickup.client == tc then
-                pickup = pickup_idle()
-            else
-                pickup = pickup_client(tc, ctx.t)
-            end
+            pickup = pickup_client(tc, ctx.t)
             awful.layout.arrange(ctx.s)
+            gears.timer.delayed_call(function()
+                if not mouse.coords().buttons[1] then return end
+                mousegrabber.run(function(m)
+                    if not m.buttons[1] then
+                        if pickup.tag == "client" then
+                            local mx, my = m.x, m.y
+                            local gap = beautiful.splitwm_gap
+                            local cached = geo_cache[ctx.t]
+                            if cached then
+                                for lid, _ in pairs(ctx.state.leaf_map) do
+                                    local g = cached.geos[lid]
+                                    if g and mx >= g.x and mx < g.x + g.width
+                                           and my >= g.y - gap and my < g.y + g.height then
+                                        if lid ~= leaf.id then
+                                            try_drop_picked_up(ctx.t, lid)
+                                            awful.layout.arrange(ctx.s)
+                                        end
+                                        return false
+                                    end
+                                end
+                            end
+                            -- released outside all splits: stay in pickup mode
+                        end
+                        return false
+                    end
+                    return true
+                end, "fleur")
+            end)
         end)))
         local close_btn_hovered = false
         close_btn:connect_signal("mouse::enter", function() close_btn_hovered = true end)
