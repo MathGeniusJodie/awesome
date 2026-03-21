@@ -413,10 +413,43 @@ local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
 end
 
 -- Called when pickup tag=="split" is active: swaps tabs if different leaf, then always resets and arranges.
+-- If the source split is on a different tag, does a cross-tag swap of all clients.
 local function handle_split_pickup(state, leaf_id, s)
     if pickup.split_id ~= leaf_id then
-        swap_split_tabs(state, pickup.split_id, leaf_id)
-        state.focused_leaf_id = leaf_id
+        if state.leaf_map[pickup.split_id] then
+            -- Same tag: simple in-place swap
+            swap_split_tabs(state, pickup.split_id, leaf_id)
+            state.focused_leaf_id = leaf_id
+        else
+            -- Different tag: find source state and swap clients across tags
+            local src_state, src_t
+            for t, ts in pairs(tag_state) do
+                if ts.leaf_map[pickup.split_id] then
+                    src_state = ts
+                    src_t = t
+                    break
+                end
+            end
+            if src_state then
+                local src_leaf = src_state.leaf_map[pickup.split_id]
+                local dst_leaf = state.leaf_map[leaf_id]
+                local dst_t    = s.selected_tag
+                if src_leaf and dst_leaf and src_t and dst_t then
+                    local src_clients  = src_leaf.tabs
+                    local dst_clients  = dst_leaf.tabs
+                    local src_active   = src_leaf.active_tab
+                    local dst_active   = dst_leaf.active_tab
+                    src_leaf.tabs      = dst_clients
+                    src_leaf.active_tab = math.min(math.max(dst_active, #dst_clients > 0 and 1 or 0), #dst_clients)
+                    dst_leaf.tabs      = src_clients
+                    dst_leaf.active_tab = math.min(math.max(src_active, #src_clients > 0 and 1 or 0), #src_clients)
+                    for _, c in ipairs(src_leaf.tabs) do if c.valid then c:move_to_tag(src_t) end end
+                    for _, c in ipairs(dst_leaf.tabs) do if c.valid then c:move_to_tag(dst_t) end end
+                    state.focused_leaf_id = leaf_id
+                    if src_t.screen then awful.layout.arrange(src_t.screen) end
+                end
+            end
+        end
     end
     pickup = pickup_idle()
     awful.layout.arrange(s)
@@ -1303,9 +1336,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                     end
                 end
             end
-            -- released outside all splits: cancel pickup
-            pickup = pickup_idle()
-            awful.layout.arrange(ctx.s)
+            -- released outside all splits: stay in pickup mode so user can switch tags and drop there
         end
         return false
     end
@@ -2263,13 +2294,11 @@ function splitwm.setup()
     tag.connect_signal("property::selected", function(t)
         local s = t.screen
         if type(s) == "number" then s = screen[s] end
-        -- Tag switches cancel all pickup state: leaf IDs are tag-local and
-        -- a mousegrabber from another tag would be invisible to the user.
+        -- Preserve pickup state across tag switches so the user can drag tabs/splits to other tags.
+        -- Stop the mousegrabber if running (it's bound to the old tag's context), but keep
+        -- the pickup so the user can click a leaf on the new tag to complete the move.
         pending_drag = nil
-        if pickup.tag ~= "idle" then
-            pickup = pickup_idle()
-            if mousegrabber.isrunning() then mousegrabber.stop() end
-        end
+        if mousegrabber.isrunning() then mousegrabber.stop() end
         geo_cache[t] = nil
         if s then gears.timer.delayed_call(function() update_ui(s) end) end
     end)
