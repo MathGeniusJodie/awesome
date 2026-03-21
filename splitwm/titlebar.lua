@@ -88,6 +88,9 @@ end
 
 local titlebar_cache = {}
 local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+-- Per-event dedup flag: set true for the duration of the event that closed a menu,
+-- so multiple handlers firing in the same event batch don't each trigger on_menu_close.
+local menu_was_open_this_event = false
 
 ---------------------------------------------------------------------------
 -- Module table
@@ -426,16 +429,16 @@ end
 -- Deduplicates within a single event: multiple handlers firing for the same
 -- click all check this, but only the first actually calls on_menu_close().
 local function event_close_menu_if_open()
-    if _splitwm._menu_just_toggled then return false end
-    if _splitwm._menu_was_open     then return true  end
+    if _splitwm._menu_just_toggled  then return false end
+    if menu_was_open_this_event     then return true  end
     if hide_tab_color_menu() then
-        _splitwm._menu_was_open = true
-        gears.timer.delayed_call(function() _splitwm._menu_was_open = false end)
+        menu_was_open_this_event = true
+        gears.timer.delayed_call(function() menu_was_open_this_event = false end)
         return true
     end
     if _splitwm.on_menu_close and _splitwm.on_menu_close() then
-        _splitwm._menu_was_open = true
-        gears.timer.delayed_call(function() _splitwm._menu_was_open = false end)
+        menu_was_open_this_event = true
+        gears.timer.delayed_call(function() menu_was_open_this_event = false end)
         return true
     end
     return false
