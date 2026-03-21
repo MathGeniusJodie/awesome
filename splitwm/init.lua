@@ -1083,7 +1083,12 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end
             awful.layout.arrange(ctx.s)
         end)))
-        close_btn:buttons(gears.table.join(awful.button({}, 1, function() tc:kill() end)))
+        local close_btn_hovered = false
+        close_btn:connect_signal("mouse::enter", function() close_btn_hovered = true end)
+        close_btn:connect_signal("mouse::leave", function() close_btn_hovered = false end)
+        close_btn:buttons(gears.table.join(awful.button({}, 1, nil, function()
+            if close_btn_hovered then tc:kill() end
+        end)))
     end
 
     local client_color = colors.get_client_color(tc)
