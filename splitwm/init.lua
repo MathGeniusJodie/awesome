@@ -1466,11 +1466,11 @@ local function update_titlebars(s, t, state, geos, leaves)
         local drag_pill
         if leaf.v_bound_above then
             local pill_bg = wibox.widget {
-                bg     = color_transparent,
+                bg     = entry.pill_dragging and color_fg or color_transparent,
                 shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.floor(h / 2)) end,
                 widget = wibox.container.background,
             }
-            local pill_dragging = false
+            entry.pill_bg = pill_bg
             drag_pill = wibox.widget {
                 { pill_bg, bottom = BTN_V_RAISE, left = 4, right = 4, widget = wibox.container.margin },
                 bg     = color_transparent,
@@ -1478,17 +1478,17 @@ local function update_titlebars(s, t, state, geos, leaves)
                 widget = wibox.container.background,
             }
             drag_pill:connect_signal("mouse::enter", function()
-                if not pill_dragging then pill_bg.bg = color_handle end
+                if not entry.pill_dragging then entry.pill_bg.bg = color_handle end
             end)
             drag_pill:connect_signal("mouse::leave", function()
-                if not pill_dragging then pill_bg.bg = color_transparent end
+                if not entry.pill_dragging then entry.pill_bg.bg = color_transparent end
             end)
             drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
                 if not leaf.v_bound_above then return end
                 if event_close_menu_if_open() then return end
                 run_v_drag(s, function() return leaf.v_bound_above end,
-                    function() pill_dragging = true;  pill_bg.bg = color_fg end,
-                    function() pill_dragging = false; pill_bg.bg = color_transparent end)
+                    function() entry.pill_dragging = true;  entry.pill_bg.bg = color_fg end,
+                    function() entry.pill_dragging = false; entry.pill_bg.bg = color_transparent end)
             end)))
         end
 
