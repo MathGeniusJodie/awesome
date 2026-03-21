@@ -101,7 +101,7 @@ M.pickup_split  = pickup_split
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile
 ---------------------------------------------------------------------------
 
-function M.tab_shape(cr, w, h)
+local function tab_path(cr, w, h)
     local cx = tab_cx(h)
     cr:move_to(0, h)
     cr:arc_negative(0,     h - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
@@ -110,6 +110,10 @@ function M.tab_shape(cr, w, h)
     cr:arc(w - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
     cr:line_to(w - TAB_EAR * TAB_CA, h - TAB_EAR * (1 - TAB_SA))
     cr:arc_negative(w, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
+end
+
+function M.tab_shape(cr, w, h)
+    tab_path(cr, w, h)
     cr:close_path()
 end
 
@@ -173,14 +177,7 @@ local function rounded_top(cr, w, h)
 end
 
 local function draw_tab_border(cr, w, h)
-    local cx = tab_cx(h)
-    cr:move_to(0, h)
-    cr:arc_negative(0,     h - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
-    cr:line_to(cx - TAB_CORNER * TAB_CA, TAB_CORNER * (1 - TAB_SA))
-    cr:arc(cx,     TAB_CORNER, TAB_CORNER, math.pi + TAB_ALPHA, 1.5 * math.pi)
-    cr:arc(w - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
-    cr:line_to(w - TAB_EAR * TAB_CA, h - TAB_EAR * (1 - TAB_SA))
-    cr:arc_negative(w, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
+    tab_path(cr, w, h)
 end
 
 ---------------------------------------------------------------------------
@@ -684,14 +681,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     function tab_draw:draw(_, cr, w2, h2)
         local h = h2 - 1  -- 1px breathing room at top so the border stroke isn't clipped
         cr:translate(0, 1)
-        local cx = tab_cx(h)
-        cr:move_to(0, h)
-        cr:arc_negative(0,      h - TAB_EAR, TAB_EAR, math.pi / 2,             TAB_ALPHA)
-        cr:line_to(cx - TAB_CORNER * TAB_CA, TAB_CORNER * (1 - TAB_SA))
-        cr:arc(cx,      TAB_CORNER, TAB_CORNER, math.pi + TAB_ALPHA, 1.5 * math.pi)
-        cr:arc(w2 - cx, TAB_CORNER, TAB_CORNER, 1.5 * math.pi,       2 * math.pi - TAB_ALPHA)
-        cr:line_to(w2 - TAB_EAR * TAB_CA, h - TAB_EAR * (1 - TAB_SA))
-        cr:arc_negative(w2, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
+        tab_path(cr, w2, h)
         cr:close_path()
         cr:set_source(tab_bg_pat)
         cr:fill()
