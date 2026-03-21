@@ -1044,16 +1044,17 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         }
     end
 
-    local move_btn = wibox.widget {
-        {
-            { text = tab_state == "picked" and "↗" or "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-            bottom = 2, widget = wibox.container.margin,
-        },
-        bg           = tab_state == "picked" and color_fg or color_transparent,
-        fg           = tab_state == "picked" and color_bg or (tab_state == "active" and color_fg or color_transparent),
-        shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
-        forced_width = BTN_SIZE,
-        widget       = wibox.container.background,
+    local move_overlay = wibox.widget {
+        { text = "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
+        bg            = tab_state == "picked" and color_fg or color_transparent,
+        fg            = tab_state == "picked" and color_bg or color_transparent,
+        forced_width  = ctx.icon_size,
+        forced_height = ctx.icon_size,
+        widget        = wibox.container.background,
+    }
+    local icon_move_btn = wibox.widget {
+        { tab_icon, halign = "center", valign = "center", widget = wibox.container.place },
+        move_overlay, layout = wibox.layout.stack,
     }
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
@@ -1063,10 +1064,18 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         forced_width = BTN_SIZE,
         widget       = wibox.container.background,
     }
-    if tab_state == "active" then
-        move_btn:connect_signal("mouse::enter", function() move_btn.bg = color_fg_hover end)
-        move_btn:connect_signal("mouse::leave", function() move_btn.bg = color_transparent end)
-        move_btn:buttons(gears.table.join(awful.button({}, 1, function()
+    if tab_state == "active" or tab_state == "picked" then
+        if tab_state == "active" then
+            move_overlay:connect_signal("mouse::enter", function()
+                move_overlay.bg = color_fg_hover
+                move_overlay.fg = color_fg
+            end)
+            move_overlay:connect_signal("mouse::leave", function()
+                move_overlay.bg = color_transparent
+                move_overlay.fg = color_transparent
+            end)
+        end
+        move_overlay:buttons(gears.table.join(awful.button({}, 1, function()
             if pickup.tag == "client" and pickup.client == tc then
                 pickup = pickup_idle()
             else
@@ -1113,8 +1122,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         tab_draw,
         {
             {
-                { { tab_icon, halign = "center", valign = "center", widget = wibox.container.place }, right = 3, widget = wibox.container.margin },
-                move_btn, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
+                icon_move_btn, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
             },
             left = 21, right = 21, top = 1, bottom = 1, widget = wibox.container.margin,
         },
@@ -1437,7 +1445,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             top_pad      = math.max(gap, TITLEBAR_HEIGHT) - TITLEBAR_HEIGHT,
             tb_h         = tb_h,
             tb_bar_h     = tb_h,
-            icon_size    = 20,
+            icon_size    = tb_h - 4,
             tab_btn_font = "monospace bold 18px",
             BTN_SPACING  = BTN_SPACING,
             TAB_SPACING  = TAB_SPACING,
