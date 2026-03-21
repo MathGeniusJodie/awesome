@@ -19,6 +19,7 @@ for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
 local CLASS_COLORS = {
     ["discord"]              = "violet",
     ["obsidian"]             = "purple",
+    ["mpv"]                  = "purple",
     ["claude"]               = "orange",
     ["librewolf"]            = "cyan",
     ["code"]                 = "blue",  -- VSCode
