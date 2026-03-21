@@ -1161,8 +1161,16 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local auto_icon = wider and icons.vsplit or icons.hsplit
     local auto_cb   = wider and (can_vsplit and cb.vsplit or nil)
                              or  (can_hsplit and cb.hsplit or nil)
+    local auto_cb_opp = wider and (can_hsplit and cb.hsplit or nil)
+                               or  (can_vsplit and cb.vsplit or nil)
     local can_split  = wider and can_vsplit or can_hsplit
     local split_btn       = make_btn(auto_icon,   auto_cb,  not can_split)
+    if auto_cb_opp then
+        split_btn:buttons(gears.table.join(
+            split_btn:buttons(),
+            awful.button({}, 3, auto_cb_opp)
+        ))
+    end
     local close_split_btn = make_btn(icons.close,  cb.close,  not parent)
 
     if not can_split then set_btn_disabled(split_btn, entry.wb) end
