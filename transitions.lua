@@ -85,7 +85,7 @@ local function animate(s, old_overlay, new_overlay, dx)
     tim = gears.timer {
         timeout   = 1 / FPS,
         autostart = true,
-        call_now  = true,
+        call_now  = false,
         callback  = function()
             frame = frame + 1
             local p = ease_in_out(frame / frames)
