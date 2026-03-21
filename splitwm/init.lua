@@ -93,6 +93,7 @@ local function pickup_idle()            return PICKUP_IDLE end
 local function pickup_client(c, t)      return { tag = "client", client = c, client_tag = t } end
 local function pickup_split(id)         return { tag = "split", split_id = id } end
 local pickup = PICKUP_IDLE
+local pending_drag = nil  -- { client, client_tag } — mouse held, cursor hasn't left the tab yet
 
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
@@ -1212,7 +1213,44 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- Shared mousegrabber callback: on release, drop onto the leaf under the cursor
     -- (or swap tab order if released on the same leaf's tab bar), else stay in pickup mode.
     local function drag_release_fn(m)
+        -- While button is held: promote pending_drag to pickup once cursor leaves the tab.
+        if m.buttons[1] and pending_drag and pending_drag.client == tc then
+            local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
+            if g then
+                local gap  = beautiful.splitwm_gap
+                local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
+                local tx   = g.x + (tab_idx - 1) * step
+                local ty   = g.y - gap
+                if m.x < tx or m.x >= tx + step - TAB_SPACING
+                or m.y < ty or m.y >= ty + ctx.tb_h then
+                    pending_drag = nil
+                    pickup = pickup_client(tc, ctx.t)
+                    awful.layout.arrange(ctx.s)
+                end
+            end
+            return true
+        end
         if m.buttons[1] then return true end
+        -- Button released while still pending (cursor never left the tab): focus / close.
+        if pending_drag and pending_drag.client == tc then
+            pending_drag = nil
+            local mx, my = m.x, m.y
+            local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
+            if g and tab_state == "active" then
+                local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
+                local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
+                if mx >= cx1 and mx < cx1 + BTN_SIZE
+                and my >= g.y - beautiful.splitwm_gap
+                and my < g.y - beautiful.splitwm_gap + ctx.tb_h then
+                    tc:kill(); return false
+                end
+            end
+            leaf.active_tab = tab_idx
+            ctx.state.focused_leaf_id = leaf.id
+            if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
+            awful.layout.arrange(ctx.s)
+            return false
+        end
         if pickup.tag == "client" and not pickup.client.valid then
             pickup = pickup_idle()
             awful.layout.arrange(ctx.s)
@@ -1272,15 +1310,21 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         return false
     end
 
-    -- Pick up this tab, arrange immediately (shows picked state), then start a grab
-    -- after the current event batch settles to avoid the xcb_grab_pointer race.
+    -- Begin a tab drag: start the mousegrabber after the current event batch to avoid
+    -- the xcb_grab_pointer race. The white highlight is deferred until cursor leaves.
     local function start_tab_drag()
-        pickup = pickup_client(tc, ctx.t)
-        awful.layout.arrange(ctx.s)
+        pending_drag = { client = tc, client_tag = ctx.t }
+        -- Don't set pickup yet — no white flash until cursor leaves the tab.
+        -- drag_release_fn detects when the cursor leaves and promotes pending_drag.
         gears.timer.delayed_call(function()
-            if not mouse.coords().buttons[1] then return end
-            if pickup.tag ~= "client" or pickup.client ~= tc then return end
+            if not mouse.coords().buttons[1] then
+                if pending_drag and pending_drag.client == tc then pending_drag = nil end
+                return
+            end
             if mousegrabber.isrunning() then return end
+            local has_pending = pending_drag and pending_drag.client == tc
+            local has_pickup  = pickup.tag == "client" and pickup.client == tc
+            if not has_pending and not has_pickup then return end
             mousegrabber.run(drag_release_fn, "fleur")
         end)
     end
@@ -1344,6 +1388,13 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     }
 
     tab_widget:connect_signal("mouse::enter", function() entry.tooltip.text = (tc.valid and tc.name) or "?" end)
+    tab_widget:connect_signal("mouse::leave", function()
+        if pending_drag and pending_drag.client == tc and mouse.coords().buttons[1] then
+            pending_drag = nil
+            pickup = pickup_client(tc, ctx.t)
+            awful.layout.arrange(ctx.s)
+        end
+    end)
     entry.tooltip:add_to_object(tab_widget)
     table.insert(entry.tooltip_objs, tab_widget)
 
@@ -1367,7 +1418,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             start_tab_drag()
         end, function()
             -- Release handler: fires only for quick clicks (before the mousegrabber starts).
-            if pickup.tag ~= "client" or pickup.client ~= tc then return end
+            local is_pending = pending_drag and pending_drag.client == tc
+            if not is_pending and (pickup.tag ~= "client" or pickup.client ~= tc) then return end
+            if is_pending then pending_drag = nil end
             local mc = mouse.coords()
             local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
             if g then
@@ -2113,6 +2166,7 @@ splitwm.close_split = function()
 end
 
 function splitwm.cancel_pickup()
+    pending_drag = nil
     if pickup.tag ~= "idle" then
         pickup = pickup_idle()
         awful.layout.arrange(awful.screen.focused())
@@ -2160,6 +2214,7 @@ function splitwm.setup()
 
     client.connect_signal("unmanage", function(c)
         if pickup.tag == "client" and pickup.client == c then pickup = pickup_idle() end
+        if pending_drag and pending_drag.client == c then pending_drag = nil end
         for t, state in pairs(tag_state) do unpin_client(state.root, c) end
         client_actual_geo[c]  = nil
         client_last_target[c] = nil
@@ -2210,6 +2265,7 @@ function splitwm.setup()
         if type(s) == "number" then s = screen[s] end
         -- Tag switches cancel all pickup state: leaf IDs are tag-local and
         -- a mousegrabber from another tag would be invisible to the user.
+        pending_drag = nil
         if pickup.tag ~= "idle" then
             pickup = pickup_idle()
             if mousegrabber.isrunning() then mousegrabber.stop() end
