@@ -311,7 +311,9 @@ local function make_tag_widget(t, ws)
 
     local layout = wibox.container.margin(thumb, 0, 0, wibar_height - thumb_h - 2, 2)
     layout:buttons(gears.table.join(
-        awful.button({}, 1, function() transitions.switch(t.screen, t) end)
+        awful.button({}, 1,
+            function() transitions.prepare(t.screen, t) end,
+            function() transitions.switch(t.screen, t) end)
     ))
 
     t:connect_signal("property::selected", function() update() end)

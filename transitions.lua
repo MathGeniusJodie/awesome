@@ -17,7 +17,9 @@ local M = {}
 
 local WORKSPACES = nil
 M.cache          = {}   -- [tag] = cairo ImageSurface (screenshot from last departure)
+local wp_cache   = {}   -- [ws_index] = cairo surface (preloaded wallpaper)
 local active     = {}   -- [screen] = { timer, overlays }
+local pending    = {}   -- [screen] = { new_tag, old_overlay, new_overlay, dx }
 
 local DURATION_S = 0.5
 local FPS        = 60
@@ -34,6 +36,14 @@ local function cancel_active(s)
         ov.visible = false
     end
     active[s] = nil
+end
+
+local function cancel_pending(s)
+    local p = pending[s]
+    if not p then return end
+    p.old_overlay.visible = false
+    p.new_overlay.visible = false
+    pending[s] = nil
 end
 
 -- Synchronously capture the current screen content into an ImageSurface.
@@ -75,7 +85,7 @@ local function animate(s, old_overlay, new_overlay, dx)
     tim = gears.timer {
         timeout   = 1 / FPS,
         autostart = true,
-        call_now  = false,
+        call_now  = true,
         callback  = function()
             frame = frame + 1
             local p = ease_in_out(frame / frames)
@@ -97,35 +107,62 @@ local function tag_color(tag)
     return (ws and ws.dark) or "#111111"
 end
 
--- Returns cached surface for tag, or wallpaper as fallback, or nil.
+-- Returns cached surface for tag, or preloaded wallpaper as fallback, or nil.
 local function tag_surf(tag)
     if M.cache[tag] then return M.cache[tag] end
     local ws = tag and WORKSPACES and WORKSPACES[tag.index]
     if ws and ws.has_bg then
-        return gears.surface.load_uncached(ws.bg)
+        return wp_cache[tag.index]
     end
     return nil
 end
 
-function M.switch(s, new_tag)
-    local old_tag = s.selected_tag
-    if old_tag == new_tag then return end
-
-    cancel_active(s)
-
+local function build_overlays(s, old_tag, new_tag)
     local old_idx      = old_tag and old_tag.index or new_tag.index
     local new_idx      = new_tag.index
     local n            = #s.tags
     local forward_dist = (new_idx - old_idx) % n
     local dx           = (forward_dist <= n - forward_dist) and -s.geometry.width or s.geometry.width
 
-    -- Capture current screen state synchronously before switching
     local old_surf = capture_screen(s)
     if old_tag then M.cache[old_tag] = old_surf end
 
     local old_overlay = make_overlay(s, s.geometry.x,      old_surf,          tag_color(old_tag))
     local new_overlay = make_overlay(s, s.geometry.x - dx, tag_surf(new_tag), tag_color(new_tag))
+    return old_overlay, new_overlay, dx
+end
 
+-- Call on mousedown to do the expensive prep work early.
+-- The overlays are created and made visible immediately; switch() consumes them.
+function M.prepare(s, new_tag)
+    local old_tag = s.selected_tag
+    if old_tag == new_tag then return end
+    cancel_active(s)
+    cancel_pending(s)
+    local old_overlay, new_overlay, dx = build_overlays(s, old_tag, new_tag)
+    pending[s] = { new_tag = new_tag, old_overlay = old_overlay, new_overlay = new_overlay, dx = dx }
+end
+
+function M.switch(s, new_tag)
+    local old_tag = s.selected_tag
+    if old_tag == new_tag then
+        cancel_pending(s)
+        return
+    end
+
+    local p = pending[s]
+    if p and p.new_tag == new_tag then
+        -- Overlays already built by prepare(); just commit.
+        pending[s] = nil
+        new_tag:view_only()
+        animate(s, p.old_overlay, p.new_overlay, p.dx)
+        return
+    end
+
+    -- No matching pending (e.g. keyboard/edge switch bypassed prepare).
+    cancel_pending(s)
+    cancel_active(s)
+    local old_overlay, new_overlay, dx = build_overlays(s, old_tag, new_tag)
     new_tag:view_only()
     animate(s, old_overlay, new_overlay, dx)
 end
@@ -156,6 +193,7 @@ function M.switch_instant(s, delta)
     local cur  = s.selected_tag
     if not cur then return end
     cancel_active(s)
+    cancel_pending(s)
     M.cache[cur] = capture_screen(s)
     local idx = (cur.index - 1 + delta) % #tags + 1
     tags[idx]:view_only()
@@ -163,6 +201,12 @@ end
 
 function M.setup(config)
     WORKSPACES = config.workspaces
+    -- Preload wallpaper surfaces so tag_surf() never hits disk during a switch
+    for i, ws in ipairs(WORKSPACES) do
+        if ws.has_bg then
+            wp_cache[i] = gears.surface.load_uncached(ws.bg)
+        end
+    end
 end
 
 return M
