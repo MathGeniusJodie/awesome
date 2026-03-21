@@ -58,6 +58,9 @@ local MENU_PAD_H     = 8
 local MENU_PAD_V     = 6
 local MENU_BW        = 2   -- border on left / right / bottom
 
+-- Left/right padding inside each tab widget (drives close-button x-offset).
+local TAB_PAD_H = 21
+
 -- Tab shape geometry.  TAB_ALPHA is the slant angle from vertical.
 local TAB_ALPHA  = math.rad(20)
 local TAB_EAR    = 11
@@ -69,6 +72,12 @@ local function tab_cx(h) return (TAB_CORNER + TAB_EAR) * (1 - TAB_SA) / TAB_CA +
 -- Overlap = 2x slant width for tighter nesting. Using a fixed reference height
 -- matching the default TITLEBAR_HEIGHT = 30 so TAB_SPACING is stable at load time.
 local TAB_SPACING = -math.floor((tab_cx(30) - TAB_EAR * TAB_CA) * 2)
+
+-- Width of one tab slot including its negative overlap with the next tab.
+-- _BTN_SIZE is injected by setup(), so this must be called after setup().
+local function tab_step(icon_size)
+    return TAB_PAD_H + icon_size + 2 + _BTN_SIZE + TAB_PAD_H + TAB_SPACING
+end
 
 ---------------------------------------------------------------------------
 -- Titlebar cache and color-menu state
@@ -498,6 +507,16 @@ end
 
 local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_state = get_tab_state(tab_idx, leaf, tc)
+    local step      = tab_step(ctx.icon_size)
+
+    -- Returns true if (mx, my) is over the close button of this tab.
+    local function in_close_btn(mx, my, g)
+        local cx1 = g.x + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + 2
+        return tab_state == "active"
+           and mx >= cx1 and mx < cx1 + _BTN_SIZE
+           and my >= g.y - beautiful.splitwm_gap
+           and my <  g.y - beautiful.splitwm_gap + ctx.tb_h
+    end
 
     local tab_icon
     if tc.icon then
@@ -544,7 +563,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
             if g then
                 local gap  = beautiful.splitwm_gap
-                local step = (21 + ctx.icon_size + 2 + _BTN_SIZE + 21) + TAB_SPACING
                 local tx   = g.x + (tab_idx - 1) * step
                 local ty   = g.y - gap
                 if m.x < tx or m.x >= tx + step - TAB_SPACING
@@ -562,14 +580,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             drag.pending = nil
             local mx, my = m.x, m.y
             local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-            if g and tab_state == "active" then
-                local step = (21 + ctx.icon_size + 2 + _BTN_SIZE + 21) + TAB_SPACING
-                local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
-                if mx >= cx1 and mx < cx1 + _BTN_SIZE
-                and my >= g.y - beautiful.splitwm_gap
-                and my < g.y - beautiful.splitwm_gap + ctx.tb_h then
-                    tc:kill(); return false
-                end
+            if g and in_close_btn(mx, my, g) then
+                tc:kill(); return false
             end
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
@@ -587,19 +599,11 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local gap    = beautiful.splitwm_gap
             local cached = _geo_cache[ctx.t]
             -- Released over the close button of the originating tab: close the tab.
-            if cached then
-                local og = cached.geos[leaf.id]
-                if og then
-                    local step = (21 + ctx.icon_size + 2 + _BTN_SIZE + 21) + TAB_SPACING
-                    local cx1  = og.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
-                    if mx >= cx1 and mx < cx1 + _BTN_SIZE
-                    and my >= og.y - gap and my < og.y - gap + ctx.tb_h
-                    and tab_state == "active" then
-                        drag.pickup = pickup_idle()
-                        tc:kill()
-                        return false
-                    end
-                end
+            local og = cached and cached.geos[leaf.id]
+            if og and in_close_btn(mx, my, og) then
+                drag.pickup = pickup_idle()
+                tc:kill()
+                return false
             end
             if cached then
                 for lid, _ in pairs(ctx.state.leaf_map) do
@@ -699,7 +703,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             {
                 icon_move_btn, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
             },
-            left = 21, right = 21, top = 1, bottom = 1, widget = wibox.container.margin,
+            left = TAB_PAD_H, right = TAB_PAD_H, top = 1, bottom = 1, widget = wibox.container.margin,
         },
         layout = wibox.layout.stack,
     }
@@ -752,17 +756,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             if is_pending then drag.pending = nil end
             local mc = mouse.coords()
             local g  = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-            if g then
-                local step = (21 + ctx.icon_size + 2 + _BTN_SIZE + 21) + TAB_SPACING
-                local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
-                if mc.x >= cx1 and mc.x < cx1 + _BTN_SIZE
-                and mc.y >= g.y - beautiful.splitwm_gap
-                and mc.y < g.y - beautiful.splitwm_gap + ctx.tb_h
-                and tab_state == "active" then
-                    drag.pickup = pickup_idle()
-                    tc:kill()
-                    return
-                end
+            if g and in_close_btn(mc.x, mc.y, g) then
+                drag.pickup = pickup_idle()
+                tc:kill()
+                return
             end
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
@@ -778,7 +775,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end
             local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
             if not g then return end
-            local step       = (21 + ctx.icon_size + 2 + _BTN_SIZE + 21) + TAB_SPACING
             local tab_x      = g.x + (tab_idx - 1) * step
             local bar_bottom = g.y - beautiful.splitwm_gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
