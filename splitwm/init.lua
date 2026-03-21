@@ -1064,6 +1064,71 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         forced_width = BTN_SIZE,
         widget       = wibox.container.background,
     }
+    -- Shared mousegrabber callback: on release, drop onto the leaf under the cursor
+    -- (or swap tab order if released on the same leaf's tab bar), else stay in pickup mode.
+    local function drag_release_fn(m)
+        if m.buttons[1] then return true end
+        if pickup.tag == "client" then
+            local mx, my = m.x, m.y
+            local gap = beautiful.splitwm_gap
+            local cached = geo_cache[ctx.t]
+            -- Released over the close button of the originating tab: close the tab.
+            if cached then
+                local og = cached.geos[leaf.id]
+                if og then
+                    local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
+                    local cx1  = og.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
+                    if mx >= cx1 and mx < cx1 + BTN_SIZE
+                    and my >= og.y - gap and my < og.y - gap + ctx.tb_h then
+                        pickup = pickup_idle()
+                        tc:kill()
+                        return false
+                    end
+                end
+            end
+            if cached then
+                for lid, _ in pairs(ctx.state.leaf_map) do
+                    local g = cached.geos[lid]
+                    if g and mx >= g.x and mx < g.x + g.width
+                           and my >= g.y - gap and my < g.y + g.height then
+                        if lid ~= leaf.id then
+                            try_drop_picked_up(ctx.t, lid)
+                            awful.layout.arrange(ctx.s)
+                        elseif my < g.y then
+                            -- same leaf, in tab bar: swap tab order
+                            local tab_w = 21 + BTN_SIZE + 2 + BTN_SIZE + 21
+                            local step  = tab_w + TAB_SPACING
+                            local target = math.max(1, math.min(#leaf.tabs,
+                                math.floor((mx - g.x) / step) + 1))
+                            if target ~= tab_idx then
+                                leaf.tabs[tab_idx], leaf.tabs[target] =
+                                    leaf.tabs[target], leaf.tabs[tab_idx]
+                                leaf.active_tab = target
+                                pickup = pickup_idle()
+                                awful.layout.arrange(ctx.s)
+                            end
+                            -- else: same tab, stay in pickup mode
+                        end
+                        return false
+                    end
+                end
+            end
+            -- released outside all splits: stay in pickup mode
+        end
+        return false
+    end
+
+    -- Pick up this tab, arrange immediately (shows picked state), then start a grab
+    -- after the current event batch settles to avoid the xcb_grab_pointer race.
+    local function start_tab_drag()
+        pickup = pickup_client(tc, ctx.t)
+        awful.layout.arrange(ctx.s)
+        gears.timer.delayed_call(function()
+            if not mouse.coords().buttons[1] then return end
+            mousegrabber.run(drag_release_fn, "fleur")
+        end)
+    end
+
     if tab_state == "active" or tab_state == "picked" then
         if tab_state == "active" then
             move_overlay:connect_signal("mouse::enter", function()
@@ -1075,58 +1140,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 move_overlay.fg = color_transparent
             end)
         end
-        move_overlay:buttons(gears.table.join(awful.button({}, 1, function()
-            pickup = pickup_client(tc, ctx.t)
-            awful.layout.arrange(ctx.s)
-            gears.timer.delayed_call(function()
-                if not mouse.coords().buttons[1] then return end
-                mousegrabber.run(function(m)
-                    if not m.buttons[1] then
-                        if pickup.tag == "client" then
-                            local mx, my = m.x, m.y
-                            local gap = beautiful.splitwm_gap
-                            local cached = geo_cache[ctx.t]
-                            if cached then
-                                for lid, _ in pairs(ctx.state.leaf_map) do
-                                    local g = cached.geos[lid]
-                                    if g and mx >= g.x and mx < g.x + g.width
-                                           and my >= g.y - gap and my < g.y + g.height then
-                                        if lid ~= leaf.id then
-                                            try_drop_picked_up(ctx.t, lid)
-                                            awful.layout.arrange(ctx.s)
-                                        elseif my < g.y then
-                                            -- same leaf, in tab bar: swap tab order
-                                            local tab_w = 21 + BTN_SIZE + 2 + BTN_SIZE + 21
-                                            local step  = tab_w + TAB_SPACING
-                                            local target = math.max(1, math.min(#leaf.tabs,
-                                                math.floor((mx - g.x) / step) + 1))
-                                            if target ~= tab_idx then
-                                                leaf.tabs[tab_idx], leaf.tabs[target] =
-                                                    leaf.tabs[target], leaf.tabs[tab_idx]
-                                                leaf.active_tab = target
-                                                pickup = pickup_idle()
-                                                awful.layout.arrange(ctx.s)
-                                            end
-                                            -- else: same tab, stay in pickup mode
-                                        end
-                                        return false
-                                    end
-                                end
-                            end
-                            -- released outside all splits: stay in pickup mode
-                        end
-                        return false
-                    end
-                    return true
-                end, "fleur")
-            end)
-        end)))
-        local close_btn_hovered = false
-        close_btn:connect_signal("mouse::enter", function() close_btn_hovered = true end)
-        close_btn:connect_signal("mouse::leave", function() close_btn_hovered = false end)
-        close_btn:buttons(gears.table.join(awful.button({}, 1, nil, function()
-            if close_btn_hovered then tc:kill() end
-        end)))
+        -- move_overlay has no button handler; tab_widget covers the whole tab for drag.
+        -- Close button click is handled in tab_widget's release handler and drag_release_fn.
     end
 
     local client_color = colors.get_client_color(tc)
@@ -1188,7 +1203,25 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         leaf.active_tab = tab_idx
         ctx.state.focused_leaf_id = leaf.id
         tc:emit_signal("request::activate", "mouse_click", {raise = true})
-        awful.layout.arrange(ctx.s)
+        if tab_state == "active" or tab_state == "picked" then
+            start_tab_drag()
+        end
+    end, function()
+        -- Release handler: fires only for quick clicks (before the mousegrabber starts).
+        -- If the mouse is over the close button, close the tab.
+        if pickup.tag ~= "client" or pickup.client ~= tc then return end
+        local mc = mouse.coords()
+        local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
+        if g then
+            local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
+            local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
+            if mc.x >= cx1 and mc.x < cx1 + BTN_SIZE
+            and mc.y >= g.y - beautiful.splitwm_gap
+            and mc.y < g.y - beautiful.splitwm_gap + ctx.tb_h then
+                pickup = pickup_idle()
+                tc:kill()
+            end
+        end
     end)))
 
     return tab_widget
