@@ -610,7 +610,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                         awful.layout.arrange(ctx.s)
                     elseif my < g.y then
                         -- Same leaf, in tab bar: reorder tabs by drop position.
-                        local reorder_step = TAB_PAD_H + _BTN_SIZE + 2 + _BTN_SIZE + TAB_PAD_H + TAB_SPACING
+                        local reorder_step = tab_step(ctx.icon_size)
                         local target = math.max(1, math.min(#leaf.tabs,
                             math.floor((mx - g.x) / reorder_step) + 1))
                         if target ~= tab_idx then
