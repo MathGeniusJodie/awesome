@@ -94,6 +94,7 @@ local function pickup_client(c, t)      return { tag = "client", client = c, cli
 local function pickup_split(id)         return { tag = "split", split_id = id } end
 local pickup = PICKUP_IDLE
 local pending_drag = nil  -- { client, client_tag } — mouse held, cursor hasn't left the tab yet
+local drag_hover_timer = nil  -- polling timer for switching tabs when dragging content over the tab bar
 
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
@@ -1409,7 +1410,21 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         layout = wibox.layout.stack,
     }
 
-    tab_widget:connect_signal("mouse::enter", function() entry.tooltip.text = (tc.valid and tc.name) or "?" end)
+    tab_widget:connect_signal("mouse::enter", function()
+        entry.tooltip.text = (tc.valid and tc.name) or "?"
+        -- If the mouse button is held and we're not dragging a tab, switch to this tab.
+        -- This lets you drag content from one tab to another within the same split.
+        if mouse.coords().buttons[1]
+        and pickup.tag == "idle"
+        and pending_drag == nil
+        and tab_idx ~= leaf.active_tab
+        and tc.valid then
+            leaf.active_tab = tab_idx
+            ctx.state.focused_leaf_id = leaf.id
+            tc:emit_signal("request::activate", "mouse_click", {raise = true})
+            awful.layout.arrange(ctx.s)
+        end
+    end)
     tab_widget:connect_signal("mouse::leave", function()
         if pending_drag and pending_drag.client == tc and mouse.coords().buttons[1] then
             pending_drag = nil
@@ -2196,6 +2211,64 @@ function splitwm.cancel_pickup()
 end
 
 ---------------------------------------------------------------------------
+-- Drag-over-tab hover switching
+-- When the user holds a mouse button down (e.g. dragging content within a
+-- client) and moves into another tab's area, switch to that tab.  We poll
+-- mouse.coords() because a client's implicit X pointer-grab prevents the
+-- wibox from receiving mouse::enter events during a client drag.
+---------------------------------------------------------------------------
+
+local function stop_drag_hover_poll()
+    if drag_hover_timer then
+        drag_hover_timer:stop()
+        drag_hover_timer = nil
+    end
+end
+
+local function start_drag_hover_poll()
+    if drag_hover_timer then return end
+    drag_hover_timer = gears.timer {
+        timeout   = 0.05,
+        call_now  = false,
+        autostart = true,
+        callback  = function()
+            local m = mouse.coords()
+            if not m.buttons[1] or pickup.tag ~= "idle" or pending_drag ~= nil then
+                stop_drag_hover_poll(); return
+            end
+            local mx, my   = m.x, m.y
+            local gap      = beautiful.splitwm_gap
+            local tb_h     = math.max(TITLEBAR_HEIGHT, gap)
+            local icon_sz  = tb_h - 4
+            local step     = (21 + icon_sz + 2 + BTN_SIZE + 21) + TAB_SPACING
+            for s in screen do
+                local t = s.selected_tag
+                if not t then goto continue end
+                local cached = geo_cache[t]
+                local state  = tag_state[t]
+                if not cached or not state then goto continue end
+                for lid, leaf in pairs(state.leaf_map) do
+                    local g = cached.geos[lid]
+                    if g and mx >= g.x and mx < g.x + g.width
+                           and my >= g.y - gap and my < g.y - gap + tb_h then
+                        local tab_idx = math.max(1, math.min(#leaf.tabs,
+                            math.floor((mx - g.x) / step) + 1))
+                        if tab_idx ~= leaf.active_tab and leaf.tabs[tab_idx] then
+                            leaf.active_tab = tab_idx
+                            state.focused_leaf_id = lid
+                            awful.layout.arrange(s)
+                        end
+                        goto done
+                    end
+                end
+                ::continue::
+            end
+            ::done::
+        end,
+    }
+end
+
+---------------------------------------------------------------------------
 -- Setup & Caches
 ---------------------------------------------------------------------------
 
@@ -2279,6 +2352,10 @@ function splitwm.setup()
         elseif leaf and leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
             awful.layout.arrange(c.screen)
+        end
+        -- Poll mouse position so dragging content over another tab's bar switches to it.
+        if pickup.tag == "idle" and pending_drag == nil then
+            start_drag_hover_poll()
         end
     end)
 
