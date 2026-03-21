@@ -337,6 +337,78 @@ refresh_chip = function()
 end
 
 ---------------------------------------------------------------------------
+-- Composite widget factories
+---------------------------------------------------------------------------
+
+function status.new_datetime_widget()
+    local dow_codes = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" }
+    local mon_codes = { "Ja", "Fe", "Mr", "Ap", "My", "Jn", "Jl", "Au", "Se", "Oc", "Nv", "De" }
+
+    local mydate = wibox.widget.textbox()
+    mydate.font   = "monospace 14px"
+    mydate.valign = "bottom"
+    local function update_date()
+        local t = os.date("*t")
+        mydate.text = dow_codes[t.wday] .. " " .. mon_codes[t.month]
+                      .. " " .. string.format("%02d", t.day)
+                      .. " " .. string.format("%02d", t.year % 100)
+    end
+    update_date()
+    gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_date }
+
+    local myclock = wibox.widget.textbox()
+    myclock.font   = "monospace bold 14px"
+    myclock.valign = "bottom"
+    local function update_clock()
+        local t = os.date("%I:%M")
+        local ap = os.date("%p"):lower()
+        myclock.markup = string.format(
+            '%s<span font_variant="small-caps">%s</span>', t, ap)
+    end
+    update_clock()
+    gears.timer { timeout = 60, autostart = true, call_now = false, callback = update_clock }
+
+    local dt_row = wibox.layout.fixed.horizontal()
+    dt_row.spacing = 8
+    dt_row:add(mydate)
+    dt_row:add(myclock)
+    return dt_row
+end
+
+-- Builds the combined status+clock capsule (chip | battery | volume | date | clock).
+-- bar_margin and capsule_height control the outer margin/shape; icon_bottom_pad shifts
+-- icons up to align with the clock baseline; tab_shape is the pill shape function.
+function status.new_status_clock_capsule(bar_margin, capsule_height, icon_bottom_pad, tab_shape)
+    local function capsule(inner, pad_l, pad_r, shape_fn, bgc)
+        bgc = bgc or "#00000000"
+        local bg = wibox.container.background()
+        bg.bg    = bgc
+        bg.shape = shape_fn or function(cr, w, h)
+            gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
+        end
+        bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
+        return wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
+    end
+
+    local chip_widget = status.new_chip_widget()
+    local bat_widget  = status.new_battery_widget()
+    local vol_widget  = status.new_volume_widget()
+
+    local icons_row = wibox.layout.fixed.horizontal()
+    icons_row.spacing = 4
+    icons_row:add(wibox.container.margin(chip_widget, 0, 0, 0, icon_bottom_pad))
+    icons_row:add(wibox.container.margin(bat_widget,  0, 0, 0, icon_bottom_pad))
+    icons_row:add(wibox.container.margin(vol_widget,  0, 0, 0, icon_bottom_pad))
+
+    local combined_row = wibox.layout.fixed.horizontal()
+    combined_row.spacing = 16
+    combined_row:add(icons_row)
+    combined_row:add(status.new_datetime_widget())
+
+    return capsule(combined_row, 24, 26, tab_shape, "#000000ff")
+end
+
+---------------------------------------------------------------------------
 -- Timers (start immediately on require)
 ---------------------------------------------------------------------------
 
