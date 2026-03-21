@@ -148,6 +148,25 @@ function M.switch_next(s)
     M.switch(s, tags[idx < #tags and idx + 1 or 1])
 end
 
+-- Instant (no animation) variants used by edge switching.
+function M.switch_instant_prev(s)
+    s = s or awful.screen.focused()
+    local tags = s.tags
+    local cur  = s.selected_tag
+    if not cur then return end
+    cancel_active(s)
+    tags[cur.index > 1 and cur.index - 1 or #tags]:view_only()
+end
+
+function M.switch_instant_next(s)
+    s = s or awful.screen.focused()
+    local tags = s.tags
+    local cur  = s.selected_tag
+    if not cur then return end
+    cancel_active(s)
+    tags[cur.index < #tags and cur.index + 1 or 1]:view_only()
+end
+
 function M.setup(config)
     WORKSPACES = config.workspaces
 end

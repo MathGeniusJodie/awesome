@@ -169,6 +169,52 @@ transitions.setup({ workspaces = WORKSPACES })
 tag_prev = transitions.switch_prev  -- luacheck: ignore
 tag_next = transitions.switch_next  -- luacheck: ignore
 
+---------------------------------------------------------------------------
+-- Edge workspace switching (Pacman style)
+-- Mouse hitting left/right screen edge switches workspaces.
+-- A dead zone prevents re-triggering until mouse retreats from the edge.
+---------------------------------------------------------------------------
+
+local EDGE_DEAD_ZONE = beautiful.splitwm_gap  -- px from edge; must clear this before re-triggering
+
+local edge_locked = {}  -- [screen] = "left" | "right" | nil
+
+gears.timer {
+    timeout   = 0.025,
+    autostart = true,
+    callback  = function()
+        local s = mouse.screen
+        if not s then return end
+
+        local mx   = mouse.coords().x - s.geometry.x
+        local sw   = s.geometry.width
+        local lock = edge_locked[s]
+
+        if mx <= 0 then
+            if lock ~= "left" then
+                edge_locked[s] = "left"
+                transitions.switch_instant_prev(s)
+                -- Teleport to opposite edge
+                mouse.coords({ x = s.geometry.x + sw - 2, y = mouse.coords().y })
+            end
+        elseif mx >= sw - 1 then
+            if lock ~= "right" then
+                edge_locked[s] = "right"
+                transitions.switch_instant_next(s)
+                -- Teleport to opposite edge
+                mouse.coords({ x = s.geometry.x + 1, y = mouse.coords().y })
+            end
+        else
+            -- release lock once mouse clears the dead zone
+            if lock == "left"  and mx > EDGE_DEAD_ZONE then
+                edge_locked[s] = nil
+            elseif lock == "right" and mx < sw - 1 - EDGE_DEAD_ZONE then
+                edge_locked[s] = nil
+            end
+        end
+    end,
+}
+
 menu.setup({
     terminal    = terminal,
     browser     = browser,
