@@ -2296,11 +2296,39 @@ function splitwm.setup()
         if type(s) == "number" then s = screen[s] end
         -- Preserve pickup state across tag switches so the user can drag tabs/splits to other tags.
         -- Stop the mousegrabber if running (it's bound to the old tag's context), but keep
-        -- the pickup so the user can click a leaf on the new tag to complete the move.
+        -- the pickup so the user can mouseup on the new tag to complete the move.
         pending_drag = nil
         if mousegrabber.isrunning() then mousegrabber.stop() end
         geo_cache[t] = nil
         if s then gears.timer.delayed_call(function() update_ui(s) end) end
+        -- If switching TO a new tag while a client is picked up with button still held,
+        -- start a fresh mousegrabber so the button release drops onto the new tag's leaf.
+        if t.selected and pickup.tag == "client" and mouse.coords().buttons[1] then
+            mousegrabber.run(function(m)
+                if m.buttons[1] then return true end
+                if pickup.tag ~= "client" or not pickup.client.valid then
+                    pickup = pickup_idle()
+                    return false
+                end
+                local cached = geo_cache[t]
+                if cached and s then
+                    local gap = beautiful.splitwm_gap
+                    local mx, my = m.x, m.y
+                    local state = get_state(t)
+                    for lid, _ in pairs(state.leaf_map) do
+                        local g = cached.geos[lid]
+                        if g and mx >= g.x and mx < g.x + g.width
+                               and my >= g.y - gap and my < g.y + g.height then
+                            try_drop_picked_up(t, lid)
+                            awful.layout.arrange(s)
+                            return false
+                        end
+                    end
+                end
+                -- Released outside all leaves: keep pickup so user can still click to drop.
+                return false
+            end, "fleur")
+        end
     end)
 
     -- Save full split/tab state on exit so it can be restored after restart.
