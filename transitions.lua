@@ -153,9 +153,11 @@ function M.switch(s, new_tag)
     local p = pending[s]
     if p and p.new_tag == new_tag then
         -- Overlays already built by prepare(); just commit.
+        -- animate() before view_only() so the timer ticks during the synchronous
+        -- wallpaper/layout work triggered by view_only().
         pending[s] = nil
-        new_tag:view_only()
         animate(s, p.old_overlay, p.new_overlay, p.dx)
+        new_tag:view_only()
         return
     end
 
@@ -163,8 +165,8 @@ function M.switch(s, new_tag)
     cancel_pending(s)
     cancel_active(s)
     local old_overlay, new_overlay, dx = build_overlays(s, old_tag, new_tag)
-    new_tag:view_only()
     animate(s, old_overlay, new_overlay, dx)
+    new_tag:view_only()
 end
 
 function M.switch_prev(s)
