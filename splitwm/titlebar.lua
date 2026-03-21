@@ -1058,7 +1058,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         local entry = tb_get_or_create_entry(s, leaf)
         entry.tb_h  = tb_h
         local wb    = entry.wb
-        local active_client = leaf.tabs[leaf.active_tab]
+        local border_ref_client = leaf.tabs[leaf.active_tab]
         wb.visible = true
         if not _split_anim_active[s] then
             wb.x      = geo.x
@@ -1076,8 +1076,8 @@ local function update_titlebars(s, t, state, geos, leaves)
             entry.geo_fp = geo_fp
             entry.border_client_w = nil
             entry.border_client_h = nil
-            if active_client and active_client.valid and not active_client.fullscreen then
-                local ag    = _client_actual_geo[active_client]
+            if border_ref_client and border_ref_client.valid and not border_ref_client.fullscreen then
+                local ag    = _client_actual_geo[border_ref_client]
                 local exp_w = geo.width - bw * 2
                 local exp_h = geo.height + gap - bw - tb_h
                 if ag and ag.width  < exp_w - 1 then entry.border_client_w = ag.width  end
@@ -1091,7 +1091,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         entry.titlebar_btn_list = {}
 
         local is_focused    = state.focused_leaf_id == leaf.id
-        active_client       = leaf.tabs[leaf.active_tab]
+        local active_client = leaf.tabs[leaf.active_tab]
         local active_picked = drag.pickup.tag == "client" and drag.pickup.client == active_client
         local active_color  = active_client and colors.get_client_color(active_client)
         local focus_color   = active_picked and color_fg
@@ -1207,8 +1207,6 @@ end
 -- Public update entry point
 ---------------------------------------------------------------------------
 
-function M.update(s, t, state, geos, leaves)
-    update_titlebars(s, t, state, geos, leaves)
-end
+M.update = update_titlebars
 
 return M
