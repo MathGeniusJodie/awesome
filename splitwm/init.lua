@@ -35,7 +35,7 @@ local BTN_SIZE     = 26
 local BTN_SPACING  = 5
 -- Bottom padding applied to round buttons so they sit 2px above center (raise = padding / 2).
 local BTN_V_RAISE  = 4
-local N_SPLIT_BTNS = 5  -- swap + vsplit + hsplit + close + "+"
+local N_SPLIT_BTNS = 4  -- swap + split (auto) + close + "+"
 local MIN_SPLIT_W  = N_SPLIT_BTNS * BTN_SIZE + (N_SPLIT_BTNS - 1) * BTN_SPACING
 local MIN_SPLIT_H  = TITLEBAR_HEIGHT
 
@@ -1157,12 +1157,15 @@ local function tb_build_split_controls(leaf, entry, ctx)
     end
 
     local cb = make_split_action_callbacks(ctx.state, leaf.id, ctx.t, ctx.s)
-    local vsplit_btn      = make_btn(icons.vsplit, cb.vsplit, not can_vsplit)
-    local hsplit_btn      = make_btn(icons.hsplit, cb.hsplit, not can_hsplit)
+    local wider = geo and geo.width >= geo.height
+    local auto_icon = wider and icons.vsplit or icons.hsplit
+    local auto_cb   = wider and (can_vsplit and cb.vsplit or nil)
+                             or  (can_hsplit and cb.hsplit or nil)
+    local can_split  = wider and can_vsplit or can_hsplit
+    local split_btn       = make_btn(auto_icon,   auto_cb,  not can_split)
     local close_split_btn = make_btn(icons.close,  cb.close,  not parent)
 
-    if not can_vsplit then set_btn_disabled(vsplit_btn, entry.wb) end
-    if not can_hsplit then set_btn_disabled(hsplit_btn, entry.wb) end
+    if not can_split then set_btn_disabled(split_btn, entry.wb) end
     if parent then on_hover_fg(close_split_btn, color_close, color_fg)
     else           set_btn_disabled(close_split_btn, entry.wb) end
 
@@ -1195,7 +1198,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
         awful.layout.arrange(ctx.s)
     end)))
 
-    return { vsplit = vsplit_btn, hsplit = hsplit_btn, close = close_split_btn, swap = swap_btn }
+    return { split = split_btn, close = close_split_btn, swap = swap_btn }
 end
 
 -- Build the focus border drawn around the client area.
@@ -1266,7 +1269,7 @@ local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
     local ctrl_cover = {
         {
             {
-                { controls.swap, controls.vsplit, controls.hsplit, controls.close,
+                { controls.swap, controls.split, controls.close,
                   spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
                 widget = wibox.container.margin,
             },
