@@ -308,21 +308,28 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     wb.height = menu_h
     wb.bg     = bg_color
 
-    local circs = {}
+    -- Circle widgets are created once and reused; update selection + handlers each open.
     local current = colors.get_client_color(tc)
-    for _, col in ipairs(colors.COLORS) do
-        local is_sel = current and current.name == col.name
-        local circ = wibox.widget {
-            bg                 = col.light,
-            shape              = gears.shape.circle,
-            shape_border_color = is_sel and color_fg or color_transparent,
-            shape_border_width = MENU_BW,
-            forced_width       = MENU_CIRC_SIZE,
-            forced_height      = MENU_CIRC_SIZE,
-            widget             = wibox.container.background,
-        }
-        circ:connect_signal("mouse::enter", function() wb.cursor = "hand2" end)
-        circ:connect_signal("mouse::leave", function() wb.cursor = "left_ptr" end)
+    if not ms.circs then
+        ms.circs = {}
+        for i, col in ipairs(colors.COLORS) do
+            local circ = wibox.widget {
+                bg                 = col.light,
+                shape              = gears.shape.circle,
+                shape_border_color = color_transparent,
+                shape_border_width = MENU_BW,
+                forced_width       = MENU_CIRC_SIZE,
+                forced_height      = MENU_CIRC_SIZE,
+                widget             = wibox.container.background,
+            }
+            circ:connect_signal("mouse::enter", function() wb.cursor = "hand2" end)
+            circ:connect_signal("mouse::leave", function() wb.cursor = "left_ptr" end)
+            ms.circs[i] = circ
+        end
+    end
+    for i, col in ipairs(colors.COLORS) do
+        local circ = ms.circs[i]
+        circ.shape_border_color = (current and current.name == col.name) and color_fg or color_transparent
         local col_name = col.name
         circ:buttons(gears.table.join(awful.button({}, 1, function()
             if tc.valid then
@@ -331,43 +338,51 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
                 awful.layout.arrange(s)
             end
         end)))
-        table.insert(circs, circ)
     end
 
-    local bpat = gears.color(border_color)
-    local border_w = wibox.widget.base.make_widget()
-    function border_w:draw(_, cr, w, h)
-        cr:set_source(bpat)
-        cr:set_line_width(MENU_BW)
-        local o = MENU_BW / 2
-        cr:move_to(o, 0) cr:line_to(o, h) cr:stroke()
-        cr:move_to(w - o, 0) cr:line_to(w - o, h) cr:stroke()
-        cr:move_to(0, h - o) cr:line_to(w, h - o) cr:stroke()
-    end
-    function border_w:fit(_, w, h) return w, h end
-
-    local grid = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.vertical }
-    for row = 0, ROWS - 1 do
-        local row_spec = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.horizontal }
-        for col = 1, COLS do
-            local idx = row * COLS + col
-            if circs[idx] then table.insert(row_spec, circs[idx]) end
+    -- Border widget created once; source color updated each open.
+    if not ms.border_w then
+        local bw = wibox.widget.base.make_widget()
+        function bw:draw(_, cr, w, h)
+            if not self._bpat then return end
+            cr:set_source(self._bpat)
+            cr:set_line_width(MENU_BW)
+            local o = MENU_BW / 2
+            cr:move_to(o, 0) cr:line_to(o, h) cr:stroke()
+            cr:move_to(w - o, 0) cr:line_to(w - o, h) cr:stroke()
+            cr:move_to(0, h - o) cr:line_to(w, h - o) cr:stroke()
         end
-        table.insert(grid, wibox.widget(row_spec))
+        function bw:fit(_, w, h) return w, h end
+        ms.border_w = bw
     end
+    ms.border_w._bpat = gears.color(border_color)
+    ms.border_w:emit_signal("widget::redraw_needed")
 
-    wb:setup {
-        border_w,
-        {
-            grid,
-            left   = pad_h,
-            right  = pad_h,
-            top    = MENU_PAD_V,
-            bottom = MENU_PAD_V + MENU_BW,
-            widget = wibox.container.margin,
-        },
-        layout = wibox.layout.stack,
-    }
+    -- Grid layout and wb:setup only rebuilt when menu width changes.
+    if ms.last_menu_w ~= menu_w then
+        ms.last_menu_w = menu_w
+        local grid = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.vertical }
+        for row = 0, ROWS - 1 do
+            local row_spec = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.horizontal }
+            for col = 1, COLS do
+                local idx = row * COLS + col
+                if ms.circs[idx] then table.insert(row_spec, ms.circs[idx]) end
+            end
+            table.insert(grid, wibox.widget(row_spec))
+        end
+        wb:setup {
+            ms.border_w,
+            {
+                grid,
+                left   = pad_h,
+                right  = pad_h,
+                top    = MENU_PAD_V,
+                bottom = MENU_PAD_V + MENU_BW,
+                widget = wibox.container.margin,
+            },
+            layout = wibox.layout.stack,
+        }
+    end
 
     local sg = s.geometry
     wb.x = math.max(sg.x, math.min(sg.x + sg.width - menu_w, tab_x))
