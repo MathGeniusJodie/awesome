@@ -524,14 +524,15 @@ end
 local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_state = get_tab_state(tab_idx, leaf, tc)
     local step      = tab_step(ctx.icon_size)
+    local gap       = beautiful.splitwm_gap
 
     -- Returns true if (mx, my) is over the close button of this tab.
     local function in_close_btn(mx, my, g)
         local cx1 = g.x + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + 2
         return tab_state == "active"
            and mx >= cx1 and mx < cx1 + _BTN_SIZE
-           and my >= g.y - beautiful.splitwm_gap
-           and my <  g.y - beautiful.splitwm_gap + ctx.tb_h
+           and my >= g.y - gap
+           and my <  g.y - gap + ctx.tb_h
     end
 
     local tab_icon
