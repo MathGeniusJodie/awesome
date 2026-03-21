@@ -185,7 +185,7 @@ local tag_state = setmetatable({}, { __mode = "k" })
 
 local PERSIST_FILE = (os.getenv("HOME") or "") .. "/.cache/awesome/splitwm_state.lua"
 
-local geo_cache          = {}   -- [screen] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
+local geo_cache          = {}   -- [tag] = { geos={}, bounds={} }, written by arrange(), read by update_ui()
 local client_actual_geo  = {}   -- [client] = actual geometry after size-hint snapping, from property::geometry signal
 local client_last_target = {}   -- [client] = last geometry we requested in arrange()
 local split_anim_pending = {}   -- [screen] = {old_geo, a_id, b_id, dir}
@@ -514,7 +514,7 @@ end
 local function make_split_action_callbacks(state, leaf_id, t, s)
     local function do_split(dir)
         state.focused_leaf_id = leaf_id
-        local old_geo = geo_cache[s] and geo_cache[s].geos[leaf_id]
+        local old_geo = geo_cache[t] and geo_cache[t].geos[leaf_id]
         local a_id, b_id = split_leaf(t, dir)
         awful.layout.arrange(s)
         if old_geo and a_id then
@@ -523,11 +523,12 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
     end
     local function do_close()
         local leaf = state.leaf_map[leaf_id]
-        local parent, pidx = leaf and tree.find_parent(state.root, leaf)
+        local parent, pidx
+        if leaf then parent, pidx = tree.find_parent(state.root, leaf) end
         local old_geos, sibling_ids
         if parent then
             local slvs = tree.collect_leaves(parent.children[pidx == 1 and 2 or 1])
-            local cached = geo_cache[s]
+            local cached = geo_cache[t]
             if cached and #slvs > 0 then
                 sibling_ids = {}; old_geos = {}
                 for _, l in ipairs(slvs) do
@@ -558,7 +559,7 @@ local function resize_focused(t, delta)
     local new_ratio = parent.ratio
     if idx == 1 then new_ratio = new_ratio + delta else new_ratio = new_ratio - delta end
     local min_r, max_r = 0.1, 0.9
-    local cached = t.screen and geo_cache[t.screen]
+    local cached = geo_cache[t]
     if cached then
         local l1 = tree.collect_leaves(parent.children[1])[1]
         local l2 = tree.collect_leaves(parent.children[2])[1]
@@ -689,7 +690,7 @@ local function arrange(p)
     tree.compute_tree(root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
     local s = p.screen
     if type(s) == "number" then s = screen[s] end
-    if s then geo_cache[s] = { geos = geos, bounds = bounds } end
+    if s then geo_cache[tag] = { geos = geos, bounds = bounds } end
     local bw   = beautiful.splitwm_focus_border_width
     local tb_h = math.max(TITLEBAR_HEIGHT, gap)
 
@@ -1563,7 +1564,7 @@ local function update_ui(s)
     end
 
     local gap    = beautiful.splitwm_gap
-    local cached = geo_cache[s]
+    local cached = geo_cache[t]
     local geos, bounds
     if cached then
         geos, bounds = cached.geos, cached.bounds
@@ -1639,7 +1640,7 @@ end
 
 start_split_anim = function(s, old_geo, a_id, b_id, dir)
     cancel_split_anim(s)
-    local cached = geo_cache[s]
+    local cached = geo_cache[s.selected_tag]
     if not cached then return end
     local geo_a = cached.geos[a_id]
     local geo_b = cached.geos[b_id]
@@ -1688,7 +1689,7 @@ end
 
 start_close_anim = function(s, old_geos, leaf_ids)
     cancel_split_anim(s)
-    local cached = geo_cache[s]
+    local cached = geo_cache[s.selected_tag]
     if not cached then return end
     local end_geos = {}
     for _, id in ipairs(leaf_ids) do
@@ -1763,7 +1764,7 @@ local function do_split_with_anim(dir)
     if not t then return end
     local state   = get_state(t)
     local leaf    = get_focused_leaf(state)
-    local old_geo = leaf and geo_cache[s] and geo_cache[s].geos[leaf.id]
+    local old_geo = leaf and geo_cache[t] and geo_cache[t].geos[leaf.id]
     local a_id, b_id = split_leaf(t, dir)
     if not a_id then return end
     awful.layout.arrange(s)
@@ -1788,11 +1789,12 @@ splitwm.close_split = function()
     local state   = get_state(t)
     local leaf_id = state.focused_leaf_id
     local leaf    = state.leaf_map[leaf_id]
-    local parent, pidx = leaf and tree.find_parent(state.root, leaf)
+    local parent, pidx
+    if leaf then parent, pidx = tree.find_parent(state.root, leaf) end
     local old_geos, sibling_ids
     if parent then
         local slvs = tree.collect_leaves(parent.children[pidx == 1 and 2 or 1])
-        local cached = geo_cache[s]
+        local cached = geo_cache[t]
         if cached and #slvs > 0 then
             sibling_ids = {}; old_geos = {}
             for _, l in ipairs(slvs) do
@@ -1906,7 +1908,8 @@ function splitwm.setup()
         -- Splits are tag-local; cancel any pending swap so the leaf ID
         -- doesn't silently fail to resolve on the newly selected tag.
         if pickup.tag == "split" then pickup = pickup_idle() end
-        if s then geo_cache[s] = nil; gears.timer.delayed_call(function() update_ui(s) end) end
+        geo_cache[t] = nil
+        if s then gears.timer.delayed_call(function() update_ui(s) end) end
     end)
 
     -- Save full split/tab state on exit so it can be restored after restart.
