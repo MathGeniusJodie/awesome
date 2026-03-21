@@ -651,9 +651,10 @@ function status.new_datetime_widget()
         local sg      = scr.geometry
         local wibar_h = 30
 
+        local cal_x = sg.x + sg.width - beautiful.splitwm_gap - 16 - cal_w
         cal_popup = wibox({
-            x            = sg.x + sg.width  - cal_w - 10,
-            y            = sg.y + sg.height - wibar_h - cal_h - 4,
+            x            = cal_x,
+            y            = sg.y + sg.height - wibar_h - cal_h,
             width        = cal_w,
             height       = cal_h,
             bg           = beautiful.splitwm_color_bg or "#000000",
@@ -674,8 +675,8 @@ function status.new_datetime_widget()
             local w, cw, ch = build_calendar_widget(
                 disp_year, disp_month, cur_today(), on_prev, on_next)
             local s = scr.geometry
-            cal_popup.x      = s.x + s.width  - cw - 10
-            cal_popup.y      = s.y + s.height - wibar_h - ch - 4
+            cal_popup.x      = s.x + s.width - beautiful.splitwm_gap - 16 - cw
+            cal_popup.y      = s.y + s.height - wibar_h - ch
             cal_popup.width  = cw
             cal_popup.height = ch
             cal_popup.widget = w

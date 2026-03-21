@@ -374,9 +374,6 @@ awful.screen.connect_for_each_screen(function(s)
     local status_clock_capsule = status.new_status_clock_capsule(
         bar_margin, capsule_height, icon_bottom_pad, splitwm.tab_shape)
 
-    local lock_capsule = wibox.container.margin(
-        status.new_lock_widget(capsule_height), 0, 0, wibar_height - capsule_height - 2, 0)
-
     local sg = beautiful.splitwm_gap
     s.mywibox = wibox({
         x       = s.geometry.x + sg,
@@ -397,13 +394,31 @@ awful.screen.connect_for_each_screen(function(s)
             s.mypromptbox,
         },
         wibox.container.place(hunger_row), -- Center
-        { -- Right
+        { -- Right: status capsule flush with the wibar's right (gap) edge
             layout = wibox.layout.fixed.horizontal,
             spacing = bar_margin,
             wibox.widget.systray(),
             status_clock_capsule,
-            wibox.container.margin(lock_capsule, 0, bar_margin, 0, 0),
         },
+    }
+
+    -- Lock button in its own wibox at the actual screen corner
+    local lock_w = capsule_height + bar_margin
+    s.mylock_wibox = wibox({
+        x       = s.geometry.x + s.geometry.width - lock_w,
+        y       = s.geometry.y + s.geometry.height - wibar_height,
+        width   = lock_w,
+        height  = wibar_height,
+        bg      = "#00000000",
+        ontop   = false,
+        screen  = s,
+        visible = true,
+        type    = "dock",
+    })
+    s.mylock_wibox:setup {
+        wibox.container.margin(
+            status.new_lock_widget(capsule_height), 0, bar_margin, wibar_height - capsule_height - 2, 0),
+        layout = wibox.layout.fixed.horizontal,
     }
 end)
 
