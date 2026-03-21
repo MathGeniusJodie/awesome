@@ -27,8 +27,18 @@ local color_transparent    -- fully transparent
 local color_fg_hover       -- hover highlight
 local color_handle         -- drag handle pill color
 
+-- Tab color picker popup menu state (one shared wibox for the whole session).
+local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 30
+
+-- Tab color picker menu geometry.
+local MENU_CIRC_SIZE = 18
+local MENU_CIRC_GAP  = 4
+local MENU_PAD_H     = 8
+local MENU_PAD_V     = 6
+local MENU_BW        = 2   -- border on left / right / bottom
 
 -- Button geometry — used to derive split minimum sizes.
 local BTN_SIZE     = 26
@@ -939,12 +949,145 @@ end
 
 local titlebar_cache = {}
 
+---------------------------------------------------------------------------
+-- Tab color picker popup menu
+---------------------------------------------------------------------------
+
+local function hide_tab_color_menu()
+    local ms = tab_color_menu_state
+    if not (ms.wb and ms.wb.visible) then return false end
+    ms.wb.visible = false
+    if ms.poll and ms.poll.started then ms.poll:stop() end
+    return true
+end
+
+local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_color, tab_w)
+    local ms       = tab_color_menu_state
+    local COLS     = 3
+    local ROWS     = 3  -- ceil(#colors.COLORS / COLS)
+    local content_w = COLS * MENU_CIRC_SIZE + (COLS - 1) * MENU_CIRC_GAP
+    local menu_w    = tab_w or (MENU_BW * 2 + MENU_PAD_H * 2 + content_w)
+    local pad_h     = math.max(MENU_BW, math.floor((menu_w - MENU_BW * 2 - content_w) / 2))
+    local menu_h = MENU_PAD_V * 2 + ROWS * MENU_CIRC_SIZE + (ROWS - 1) * MENU_CIRC_GAP + MENU_BW
+
+    if not ms.wb then
+        ms.wb = wibox { ontop = true, visible = false, border_width = 0 }
+    end
+    local wb = ms.wb
+    wb.width  = menu_w
+    wb.height = menu_h
+    wb.bg     = bg_color
+
+    -- Build one circle widget per color.
+    local circs = {}
+    local current = colors.get_client_color(tc)
+    for _, col in ipairs(colors.COLORS) do
+        local is_sel = current and current.name == col.name
+        local circ = wibox.widget {
+            bg                 = col.light,
+            shape              = gears.shape.circle,
+            shape_border_color = is_sel and color_fg or color_transparent,
+            shape_border_width = MENU_BW,
+            forced_width       = MENU_CIRC_SIZE,
+            forced_height      = MENU_CIRC_SIZE,
+            widget             = wibox.container.background,
+        }
+        circ:connect_signal("mouse::enter", function() wb.cursor = "hand2" end)
+        circ:connect_signal("mouse::leave", function() wb.cursor = "left_ptr" end)
+        local col_name = col.name  -- capture for closure
+        circ:buttons(gears.table.join(awful.button({}, 1, function()
+            if tc.valid then
+                colors.set_client_color(tc, col_name)
+                hide_tab_color_menu()
+                awful.layout.arrange(s)
+            end
+        end)))
+        table.insert(circs, circ)
+    end
+
+    -- Border widget: draws left, right, and bottom lines only (no top border).
+    local bpat = gears.color(border_color)
+    local border_w = wibox.widget.base.make_widget()
+    function border_w:draw(_, cr, w, h)
+        cr:set_source(bpat)
+        cr:set_line_width(MENU_BW)
+        local o = MENU_BW / 2
+        cr:move_to(o, 0) cr:line_to(o, h) cr:stroke()
+        cr:move_to(w - o, 0) cr:line_to(w - o, h) cr:stroke()
+        cr:move_to(0, h - o) cr:line_to(w, h - o) cr:stroke()
+    end
+    function border_w:fit(_, w, h) return w, h end
+
+    local grid = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.vertical }
+    for row = 0, ROWS - 1 do
+        local row_spec = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.horizontal }
+        for col = 1, COLS do
+            local idx = row * COLS + col
+            if circs[idx] then table.insert(row_spec, circs[idx]) end
+        end
+        table.insert(grid, wibox.widget(row_spec))
+    end
+
+    wb:setup {
+        border_w,
+        {
+            grid,
+            left   = pad_h,
+            right  = pad_h,
+            top    = MENU_PAD_V,
+            bottom = MENU_PAD_V + MENU_BW,
+            widget = wibox.container.margin,
+        },
+        layout = wibox.layout.stack,
+    }
+
+    -- Position: flush with the clicked tab, clamped to screen.
+    local sg = s.geometry
+    wb.x = math.max(sg.x, math.min(sg.x + sg.width - menu_w, tab_x))
+    wb.y = bar_bottom
+    wb.visible = true
+
+    -- Poll for clicks outside the menu to auto-close it.
+    ms.poll_ready = false
+    if not ms.poll then
+        ms.poll = gears.timer {
+            timeout   = 0.05,
+            autostart = false,
+            callback  = function()
+                if not (wb and wb.visible) then
+                    ms.poll_ready = false; ms.poll:stop(); return
+                end
+                local m = mouse.coords()
+                local pressed = (m.buttons[1] or m.buttons[3]) and true or false
+                if not ms.poll_ready then
+                    if not pressed then ms.poll_ready = true end
+                    return
+                end
+                if pressed then
+                    local g = wb:geometry()
+                    if not (m.x >= g.x and m.x < g.x + g.width
+                        and m.y >= g.y and m.y < g.y + g.height) then
+                        hide_tab_color_menu()
+                    end
+                end
+            end,
+        }
+    end
+    if ms.poll.started then ms.poll:stop() end
+    ms.poll:start()
+end
+
 -- Closes the menu if open and returns true; returns false if it was already closed.
 -- Deduplicates within a single event: multiple handlers firing for the same click
 -- all check this, but only the first actually calls on_menu_close().
 local function event_close_menu_if_open()
     if splitwm._menu_just_toggled then return false end
     if splitwm._menu_was_open     then return true  end
+    if hide_tab_color_menu() then
+        splitwm._menu_was_open = true
+        gears.timer.delayed_call(function() splitwm._menu_was_open = false end)
+        return true
+    end
     if splitwm.on_menu_close and splitwm.on_menu_close() then
         splitwm._menu_was_open = true
         gears.timer.delayed_call(function() splitwm._menu_was_open = false end)
@@ -1002,6 +1145,8 @@ local function tb_compute_fingerprint(leaf, state, geo)
     for _, tc in ipairs(leaf.tabs) do
         parts[#parts+1] = tostring(tc.window)
         if pickup.tag == "client" and pickup.client == tc then parts[#parts+1] = "P" end
+        local col = colors.get_client_color(tc)
+        if col then parts[#parts+1] = col.name end
     end
     return table.concat(parts, "\0")
 end
@@ -1191,44 +1336,65 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     entry.tooltip:add_to_object(tab_widget)
     table.insert(entry.tooltip_objs, tab_widget)
 
-    tab_widget:buttons(gears.table.join(awful.button({}, 1, function()
-        if pickup.tag == "split" and pickup.split_id ~= leaf.id then
-            handle_split_pickup(ctx.state, leaf.id, ctx.s); return
-        end
-        if pickup.tag == "client" and pickup.client.valid and pickup.client ~= tc then
-            try_drop_picked_up(ctx.t, leaf.id)
-            awful.layout.arrange(ctx.s)
-            return
-        end
-        -- Clicking the picked tab again cancels the drag.
-        if tab_state == "picked" and pickup.tag == "client" and pickup.client == tc then
-            pickup = pickup_idle()
-            awful.layout.arrange(ctx.s)
-            return
-        end
-        leaf.active_tab = tab_idx
-        ctx.state.focused_leaf_id = leaf.id
-        tc:emit_signal("request::activate", "mouse_click", {raise = true})
-        if tab_state == "active" then
-            start_tab_drag()
-        end
-    end, function()
-        -- Release handler: fires only for quick clicks (before the mousegrabber starts).
-        -- If the mouse is over the close button, close the tab.
-        if pickup.tag ~= "client" or pickup.client ~= tc then return end
-        local mc = mouse.coords()
-        local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
-        if g then
-            local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
-            local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
-            if mc.x >= cx1 and mc.x < cx1 + BTN_SIZE
-            and mc.y >= g.y - beautiful.splitwm_gap
-            and mc.y < g.y - beautiful.splitwm_gap + ctx.tb_h then
-                pickup = pickup_idle()
-                tc:kill()
+    tab_widget:buttons(gears.table.join(
+        awful.button({}, 1, function()
+            if pickup.tag == "split" and pickup.split_id ~= leaf.id then
+                handle_split_pickup(ctx.state, leaf.id, ctx.s); return
             end
-        end
-    end)))
+            if pickup.tag == "client" and pickup.client.valid and pickup.client ~= tc then
+                try_drop_picked_up(ctx.t, leaf.id)
+                awful.layout.arrange(ctx.s)
+                return
+            end
+            -- Clicking the picked tab again cancels the drag.
+            if tab_state == "picked" and pickup.tag == "client" and pickup.client == tc then
+                pickup = pickup_idle()
+                awful.layout.arrange(ctx.s)
+                return
+            end
+            leaf.active_tab = tab_idx
+            ctx.state.focused_leaf_id = leaf.id
+            tc:emit_signal("request::activate", "mouse_click", {raise = true})
+            if tab_state == "active" then
+                start_tab_drag()
+            end
+        end, function()
+            -- Release handler: fires only for quick clicks (before the mousegrabber starts).
+            -- If the mouse is over the close button, close the tab.
+            if pickup.tag ~= "client" or pickup.client ~= tc then return end
+            local mc = mouse.coords()
+            local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
+            if g then
+                local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
+                local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
+                if mc.x >= cx1 and mc.x < cx1 + BTN_SIZE
+                and mc.y >= g.y - beautiful.splitwm_gap
+                and mc.y < g.y - beautiful.splitwm_gap + ctx.tb_h then
+                    pickup = pickup_idle()
+                    tc:kill()
+                end
+            end
+        end),
+        awful.button({}, 3, function()
+            if not tc.valid then return end
+            -- Close any open app menu first.
+            if splitwm.on_menu_close then splitwm.on_menu_close() end
+            -- Toggle: right-clicking again closes the menu.
+            if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
+                hide_tab_color_menu(); return
+            end
+            local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
+            if not g then return end
+            local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
+            local tab_x      = g.x + (tab_idx - 1) * step
+            local bar_bottom = g.y - beautiful.splitwm_gap + ctx.tb_h
+            local cc = colors.get_client_color(tc)
+            show_tab_color_menu(tc, ctx.s, tab_x, bar_bottom,
+                cc and cc.dark or color_bg,
+                cc and cc.light or color_fg,
+                step - TAB_SPACING)
+        end)
+    ))
 
     return tab_widget
 end

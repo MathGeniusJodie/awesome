@@ -112,6 +112,7 @@ function colors.resolve_color_conflict(leaf, c)
     end
 end
 
-colors.COLORS = COLORS
+colors.COLORS          = COLORS
+colors.set_client_color = set_client_color
 
 return colors
