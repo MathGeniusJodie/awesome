@@ -26,6 +26,7 @@ local color_btn_bg         -- transparent circle button bg
 local color_transparent    -- fully transparent
 local color_fg_hover       -- hover highlight
 local color_fg        -- drag/active highlight
+local color_handle         -- drag handle pill color
 
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 30
@@ -637,7 +638,7 @@ end
 -- Drag helpers
 ---------------------------------------------------------------------------
 
-local function run_v_drag(s, get_b)
+local function run_v_drag(s, get_b, on_start, on_stop)
     -- Capture start position before the delayed_call so it reflects the press position.
     local start_y = mouse.coords().y
     local moved   = false
@@ -647,9 +648,11 @@ local function run_v_drag(s, get_b)
     -- no button held and no future release event to terminate the callback.
     gears.timer.delayed_call(function()
         if not mouse.coords().buttons[1] then return end  -- button already released
+        if on_start then on_start() end
         mousegrabber.run(function(m)
             if not m.buttons[1] then
                 if moved then awful.layout.arrange(s) end
+                if on_stop then on_stop() end
                 return false
             end
             if not moved and math.abs(m.y - start_y) < 4 then return true end
@@ -891,6 +894,15 @@ local function get_drag_handle(s, i)
     local wb = make_wb_proxy(get_or_create_underlay(s).handle_layer, s)
     wb.visible = false
 
+    wb.bg    = color_transparent
+    wb.shape = function(cr, w, h)
+        local pw = BTN_SIZE
+        cr:save()
+        cr:translate(math.floor((w - pw) / 2), 0)
+        gears.shape.rounded_rect(cr, pw, h, math.floor(pw / 2))
+        cr:restore()
+    end
+
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
             if not ref.b then return end
@@ -918,7 +930,7 @@ local function get_drag_handle(s, i)
             end, b.dir == tree.DIR_H and "sb_h_double_arrow" or "sb_v_double_arrow")
         end)
     ))
-    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = color_fg_hover end end)
+    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = color_handle end end)
     wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = color_transparent end end)
 
     local entry = { wb = wb, ref = ref }
@@ -1246,29 +1258,34 @@ local function tb_split_tab_layers(tab_widgets, active_tab)
     return behind, above
 end
 
-local function tb_build_bar_layer(behind, controls, middle_drag, ctx)
-    local tabs   = { spacing = ctx.TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(behind) }
-    -- Rendered on top of tabs in the stack so its background paints over any tab overflow.
+local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
+    -- Use 0 spacing when there is only one child (the "+" button alone); negative TAB_SPACING
+    -- applied to a single-item fixed.horizontal causes it to report a non-positive natural
+    -- width, which makes wibox.layout.align.horizontal give the left slot zero space.
+    local tab_spacing = #behind > 1 and ctx.TAB_SPACING or 0
+    local tabs     = { spacing = tab_spacing, layout = wibox.layout.fixed.horizontal, table.unpack(behind) }
     local ctrl_cover = {
         {
             {
-                {
-                    { controls.swap, controls.vsplit, controls.hsplit, controls.close,
-                      spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
-                    widget = wibox.container.margin,
-                },
-                bg = ctx.bar_bg, widget = wibox.container.background,
+                { controls.swap, controls.vsplit, controls.hsplit, controls.close,
+                  spacing = ctx.BTN_SPACING, layout = wibox.layout.fixed.horizontal },
+                widget = wibox.container.margin,
             },
-            bottom = BTN_V_RAISE, widget = wibox.container.margin,
+            bg = ctx.bar_bg, widget = wibox.container.background,
         },
-        halign = "right", widget = wibox.container.place,
+        bottom = BTN_V_RAISE, widget = wibox.container.margin,
     }
-    local layers = middle_drag
-        and { middle_drag, tabs, ctrl_cover, layout = wibox.layout.stack }
-        or  { tabs, ctrl_cover, layout = wibox.layout.stack }
+    local bar_content
+    if drag_pill then
+        -- align.horizontal: tabs on left, pill fills the free gap, controls on right
+        bar_content = { tabs, drag_pill, ctrl_cover, layout = wibox.layout.align.horizontal }
+    else
+        bar_content = { tabs, { ctrl_cover, halign = "right", widget = wibox.container.place },
+                        layout = wibox.layout.stack }
+    end
     return {
         {
-            { layers, top = ctx.top_pad, widget = wibox.container.margin },
+            { bar_content, top = ctx.top_pad, widget = wibox.container.margin },
             bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_bar_h, widget = wibox.container.background,
         },
         layout = wibox.layout.fixed.vertical,
@@ -1446,13 +1463,32 @@ local function update_titlebars(s, t, state, geos, leaves)
             and tb_build_border_widget(is_focused and empty_focus_color or nil, tb_h, bw, empty_r)
             or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, nil, entry)
 
-        local middle_drag
+        local drag_pill
         if leaf.v_bound_above then
-            middle_drag = wibox.widget { cursor = "sb_v_double_arrow", widget = wibox.container.background }
-            middle_drag:buttons(gears.table.join(awful.button({}, 1, function()
+            local pill_bg = wibox.widget {
+                bg     = color_transparent,
+                shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.floor(h / 2)) end,
+                widget = wibox.container.background,
+            }
+            local pill_dragging = false
+            drag_pill = wibox.widget {
+                { pill_bg, bottom = BTN_V_RAISE, left = 4, right = 4, widget = wibox.container.margin },
+                bg     = color_transparent,
+                cursor = "sb_v_double_arrow",
+                widget = wibox.container.background,
+            }
+            drag_pill:connect_signal("mouse::enter", function()
+                if not pill_dragging then pill_bg.bg = color_handle end
+            end)
+            drag_pill:connect_signal("mouse::leave", function()
+                if not pill_dragging then pill_bg.bg = color_transparent end
+            end)
+            drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
                 if not leaf.v_bound_above then return end
                 if event_close_menu_if_open() then return end
-                run_v_drag(s, function() return leaf.v_bound_above end)
+                run_v_drag(s, function() return leaf.v_bound_above end,
+                    function() pill_dragging = true;  pill_bg.bg = color_fg end,
+                    function() pill_dragging = false; pill_bg.bg = color_transparent end)
             end)))
         end
 
@@ -1465,7 +1501,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 end)
             end
             -- tab_widgets is empty for empty leaves; controls.menu has the "+" button
-            tb_assemble_empty_wibox(entry, tab_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
+            tb_assemble_empty_wibox(entry, tab_widgets, controls, border_draw, drag_pill, launcher_ws, ctx)
             -- Clicking the content area completes a swap/drop, just like the old overlay did
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
                 if pickup.tag == "split"  then handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
@@ -1476,7 +1512,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         else
             entry.wb:buttons(gears.table.join())  -- clear handler when split becomes non-empty
             local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab)
-            tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
+            tb_assemble_wibox(entry, behind, above, controls, border_draw, drag_pill, ctx)
         end
     end
 
@@ -1814,6 +1850,7 @@ function splitwm.setup()
     color_btn_bg         = beautiful.splitwm_btn_bg
     color_transparent    = beautiful.splitwm_transparent
     color_fg_hover       = beautiful.splitwm_fg_hover
+    color_handle         = beautiful.splitwm_handle_color
 
     awesome.register_xproperty("splitwm_color", "string")
 

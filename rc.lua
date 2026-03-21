@@ -67,6 +67,7 @@ beautiful.splitwm_close_fg       = "#ff6666ff"
 beautiful.splitwm_btn_bg         = "#00000080"  -- transparent circle button bg
 beautiful.splitwm_transparent    = "#00000000"  -- fully transparent
 beautiful.splitwm_fg_hover       = "#ffffff22"  -- hover highlight
+beautiful.splitwm_handle_color   = "#ffffff55"  -- drag handle pill (vertical handles + titlebar pill)
 
 -- Splitwm layout
 beautiful.splitwm_gap              = 34
