@@ -159,12 +159,6 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     return w
 end
 
-local function make_circle_icon_btn(draw_fn, size, callback)
-    local w = make_circle_icon_btn_widget(draw_fn, size)
-    w:buttons(gears.table.join(awful.button({}, 1, callback)))
-    return w
-end
-
 local function rounded_top(cr, w, h)
     local r = 4
     cr:new_sub_path()
@@ -588,13 +582,10 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
             split_anim_pending[s] = { old_geo = old_geo, a_id = a_id, b_id = b_id, dir = dir }
         end
     end
-    local function do_close()
-        close_leaf_with_anim(t, s, state, leaf_id)
-    end
     return {
         vsplit = function() do_split(tree.DIR_H) end,
         hsplit = function() do_split(tree.DIR_V) end,
-        close  = do_close,
+        close  = function() close_leaf_with_anim(t, s, state, leaf_id) end,
     }
 end
 

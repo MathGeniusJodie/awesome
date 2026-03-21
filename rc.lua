@@ -329,15 +329,12 @@ awful.screen.connect_for_each_screen(function(s)
     awful.tag({ "1", "2", "3", "4", "5" }, s, splitwm.layout)
 
     -- Per-tag wallpaper: rendered in the splitwm underlay wibox (type="desktop").
-    local function set_wallpaper(ws)
-        splitwm.set_wallpaper(s, ws)
-    end
     for i, t in ipairs(s.tags) do
         local ws = WORKSPACES[i]
         t:connect_signal("property::selected", function()
-            if t.selected then set_wallpaper(ws) end
+            if t.selected then splitwm.set_wallpaper(s, ws) end
         end)
-        if t.selected then set_wallpaper(ws) end
+        if t.selected then splitwm.set_wallpaper(s, ws) end
     end
 
     timebar.setup(s)
