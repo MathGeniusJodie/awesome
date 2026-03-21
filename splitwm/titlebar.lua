@@ -555,86 +555,93 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         widget       = wibox.container.background,
     }
 
-    -- Shared mousegrabber callback: on release, drop onto the leaf under the
-    -- cursor (or swap tab order if released on the same leaf's tab bar).
-    local function drag_release_fn(m)
-        -- While button is held: promote pending_drag to pickup once cursor leaves the tab.
-        if m.buttons[1] and drag.pending and drag.pending.client == tc then
-            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-            if g then
-                local gap  = beautiful.splitwm_gap
-                local tx   = g.x + (tab_idx - 1) * step
-                local ty   = g.y - gap
-                if m.x < tx or m.x >= tx + step - TAB_SPACING
-                or m.y < ty or m.y >= ty + ctx.tb_h then
-                    drag.pending = nil
-                    drag.pickup  = pickup_client(tc, ctx.t)
-                    awful.layout.arrange(ctx.s)
+    -- Activate focus on tc (no-op if client is no longer valid).
+    local function focus_tc()
+        if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
+    end
+
+    -- Phase 1: while button held, promote pending → pickup once cursor leaves the tab bounds.
+    local function try_promote_pending(m)
+        local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+        if not g then return end
+        local gap = beautiful.splitwm_gap
+        local tx  = g.x + (tab_idx - 1) * step
+        local ty  = g.y - gap
+        if m.x < tx or m.x >= tx + step - TAB_SPACING
+        or m.y < ty or m.y >= ty + ctx.tb_h then
+            drag.pending = nil
+            drag.pickup  = pickup_client(tc, ctx.t)
+            awful.layout.arrange(ctx.s)
+        end
+    end
+
+    -- Phase 2: button released while still pending (quick click — cursor never left the tab).
+    local function settle_pending(m)
+        drag.pending = nil
+        local mx, my = m.x, m.y
+        local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+        if g and in_close_btn(mx, my, g) then tc:kill(); return false end
+        leaf.active_tab = tab_idx
+        ctx.state.focused_leaf_id = leaf.id
+        focus_tc()
+        awful.layout.arrange(ctx.s)
+        return false
+    end
+
+    -- Phase 3: button released with an active pickup — drop, kill, or reorder.
+    local function settle_pickup(m)
+        local mx, my = m.x, m.y
+        local gap    = beautiful.splitwm_gap
+        local cached = _geo_cache[ctx.t]
+        -- Released over the close button of the originating tab: close the tab.
+        local og = cached and cached.geos[leaf.id]
+        if og and in_close_btn(mx, my, og) then
+            drag.pickup = pickup_idle()
+            tc:kill()
+            return false
+        end
+        if cached then
+            for lid, _ in pairs(ctx.state.leaf_map) do
+                local g = cached.geos[lid]
+                if g and mx >= g.x and mx < g.x + g.width
+                       and my >= g.y - gap and my < g.y + g.height then
+                    if lid ~= leaf.id then
+                        _try_drop_picked_up(ctx.t, lid)
+                        awful.layout.arrange(ctx.s)
+                    elseif my < g.y then
+                        -- Same leaf, in tab bar: reorder tabs by drop position.
+                        local reorder_step = TAB_PAD_H + _BTN_SIZE + 2 + _BTN_SIZE + TAB_PAD_H + TAB_SPACING
+                        local target = math.max(1, math.min(#leaf.tabs,
+                            math.floor((mx - g.x) / reorder_step) + 1))
+                        if target ~= tab_idx then
+                            leaf.tabs[tab_idx], leaf.tabs[target] =
+                                leaf.tabs[target], leaf.tabs[tab_idx]
+                        end
+                        leaf.active_tab = target
+                        ctx.state.focused_leaf_id = leaf.id
+                        drag.pickup = pickup_idle()
+                        focus_tc()
+                        awful.layout.arrange(ctx.s)
+                    end
+                    return false
                 end
             end
-            return true
+        end
+        -- Released outside all splits: stay in pickup mode so user can switch tags and drop there.
+        return false
+    end
+
+    -- Shared mousegrabber callback: dispatches to the appropriate drag phase.
+    local function drag_release_fn(m)
+        if m.buttons[1] and drag.pending and drag.pending.client == tc then
+            try_promote_pending(m); return true
         end
         if m.buttons[1] then return true end
-        -- Button released while still pending (cursor never left the tab): focus / close.
-        if drag.pending and drag.pending.client == tc then
-            drag.pending = nil
-            local mx, my = m.x, m.y
-            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-            if g and in_close_btn(mx, my, g) then
-                tc:kill(); return false
-            end
-            leaf.active_tab = tab_idx
-            ctx.state.focused_leaf_id = leaf.id
-            if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
-            awful.layout.arrange(ctx.s)
-            return false
-        end
+        if drag.pending and drag.pending.client == tc then return settle_pending(m) end
         if drag.pickup.tag == "client" and not drag.pickup.client.valid then
-            drag.pickup = pickup_idle()
-            awful.layout.arrange(ctx.s)
-            return false
+            drag.pickup = pickup_idle(); awful.layout.arrange(ctx.s); return false
         end
-        if drag.pickup.tag == "client" then
-            local mx, my = m.x, m.y
-            local gap    = beautiful.splitwm_gap
-            local cached = _geo_cache[ctx.t]
-            -- Released over the close button of the originating tab: close the tab.
-            local og = cached and cached.geos[leaf.id]
-            if og and in_close_btn(mx, my, og) then
-                drag.pickup = pickup_idle()
-                tc:kill()
-                return false
-            end
-            if cached then
-                for lid, _ in pairs(ctx.state.leaf_map) do
-                    local g = cached.geos[lid]
-                    if g and mx >= g.x and mx < g.x + g.width
-                           and my >= g.y - gap and my < g.y + g.height then
-                        if lid ~= leaf.id then
-                            _try_drop_picked_up(ctx.t, lid)
-                            awful.layout.arrange(ctx.s)
-                        elseif my < g.y then
-                            -- Same leaf, in tab bar: swap tab order (or focus if same tab).
-                            local tab_w = 21 + _BTN_SIZE + 2 + _BTN_SIZE + 21
-                            local step  = tab_w + TAB_SPACING
-                            local target = math.max(1, math.min(#leaf.tabs,
-                                math.floor((mx - g.x) / step) + 1))
-                            if target ~= tab_idx then
-                                leaf.tabs[tab_idx], leaf.tabs[target] =
-                                    leaf.tabs[target], leaf.tabs[tab_idx]
-                            end
-                            leaf.active_tab = target
-                            ctx.state.focused_leaf_id = leaf.id
-                            drag.pickup = pickup_idle()
-                            if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
-                            awful.layout.arrange(ctx.s)
-                        end
-                        return false
-                    end
-                end
-            end
-            -- Released outside all splits: stay in pickup mode so user can switch tags and drop there.
-        end
+        if drag.pickup.tag == "client" then return settle_pickup(m) end
         return false
     end
 
@@ -718,7 +725,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         and tc.valid then
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
-            tc:emit_signal("request::activate", "mouse_click", {raise = true})
+            focus_tc()
             awful.layout.arrange(ctx.s)
         end
     end)
@@ -764,7 +771,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
             drag.pickup = pickup_idle()
-            if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
+            focus_tc()
             awful.layout.arrange(ctx.s)
         end),
         awful.button({}, 3, function()
