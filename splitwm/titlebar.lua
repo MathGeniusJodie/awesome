@@ -51,6 +51,10 @@ local CAIRO_LINE_CAP_ROUND = 1
 -- Bottom padding applied to round buttons so they sit 2 px above centre.
 local BTN_V_RAISE = 4
 
+-- Number of split-control buttons (swap, split, close).  Used to compute the
+-- right-margin reserve in the above-layer tab row so tabs don't overlap controls.
+local NUM_CTRL_BTNS = 3
+
 -- Tab color picker menu geometry.
 local MENU_CIRC_SIZE = 18
 local MENU_CIRC_GAP  = 4
@@ -983,7 +987,7 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
                 {
                     {
                         { spacing = TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
-                        right = 4 * _BTN_SIZE + 3 * _BTN_SPACING, widget = wibox.container.margin,
+                        right = (NUM_CTRL_BTNS + 1) * _BTN_SIZE + NUM_CTRL_BTNS * _BTN_SPACING, widget = wibox.container.margin,
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
                 },
