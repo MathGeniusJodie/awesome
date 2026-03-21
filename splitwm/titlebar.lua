@@ -912,21 +912,17 @@ end
 -- Split tab_widgets into two layers
 ---------------------------------------------------------------------------
 
--- The active tab and the "+" button float above the border widget;
--- inactive tabs stay behind it.  Spacers preserve layout width in each layer.
-local function tb_split_tab_layers(tab_widgets, active_tab)
+-- The active tab and widgets after index n_tabs (i.e. the "+" button) float
+-- above the border widget; inactive tabs stay behind it.
+-- Spacers preserve layout width in each layer.
+local function tb_split_tab_layers(tab_widgets, active_tab, n_tabs)
     local behind, above = {}, {}
-    local n = #tab_widgets
     for i, tw in ipairs(tab_widgets) do
         local ref = tw
         local sp  = wibox.widget.base.make_widget()
         function sp:fit(wctx, w, h) return ref:fit(wctx, w, h) end
         function sp:draw() end
-        if i == active_tab then
-            table.insert(behind, sp)
-            table.insert(above,  tw)
-        elseif i == n then
-            -- "+" button always in above layer
+        if i == active_tab or i > n_tabs then
             table.insert(behind, sp)
             table.insert(above,  tw)
         else
@@ -1189,7 +1185,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             end)))
         else
             entry.wb:buttons(gears.table.join())
-            local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab)
+            local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab, #leaf.tabs)
             tb_assemble_wibox(entry, behind, above, controls, border_draw, drag_pill, ctx)
         end
     end
