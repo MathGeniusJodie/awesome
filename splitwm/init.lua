@@ -25,7 +25,6 @@ local color_icon           -- launcher icon foreground
 local color_btn_bg         -- transparent circle button bg
 local color_transparent    -- fully transparent
 local color_fg_hover       -- hover highlight
-local color_fg        -- drag/active highlight
 local color_handle         -- drag handle pill color
 
 -- Base height of the tab bar.
@@ -658,7 +657,7 @@ local function run_v_drag(s, get_b, on_start, on_stop)
             if not moved and math.abs(m.y - start_y) < 4 then return true end
             moved = true
             local b = get_b()
-            if not b then return false end
+            if not b then if on_stop then on_stop() end; return false end
             local igap = b.parent_gap or 0
             b.branch.ratio = math.max(0.1, math.min(0.9, (m.y - b.parent_y - math.floor(igap / 2)) / (b.parent_h - igap)))
             awful.layout.arrange(s)
@@ -1484,7 +1483,6 @@ local function update_titlebars(s, t, state, geos, leaves)
                 if not entry.pill_dragging then entry.pill_bg.bg = color_transparent end
             end)
             drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
-                if not leaf.v_bound_above then return end
                 if event_close_menu_if_open() then return end
                 run_v_drag(s, function() return leaf.v_bound_above end,
                     function() entry.pill_dragging = true;  entry.pill_bg.bg = color_fg end,
