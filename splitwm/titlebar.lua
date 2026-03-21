@@ -554,17 +554,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         }
     end
 
-    local move_overlay = wibox.widget {
-        { text = "↗", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-        bg            = tab_state == "picked" and color_fg or color_transparent,
-        fg            = tab_state == "picked" and color_bg or color_transparent,
-        forced_width  = ctx.icon_size,
-        forced_height = ctx.icon_size,
-        widget        = wibox.container.background,
-    }
-    local icon_move_btn = wibox.widget {
-        { tab_icon, halign = "center", valign = "center", widget = wibox.container.place },
-        move_overlay, layout = wibox.layout.stack,
+    local icon_widget = wibox.widget {
+        tab_icon, halign = "center", valign = "center", widget = wibox.container.place,
     }
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
@@ -681,16 +672,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         end)
     end
 
-    if tab_state == "active" then
-        move_overlay:connect_signal("mouse::enter", function()
-            move_overlay.bg = color_fg_hover
-            move_overlay.fg = color_fg
-        end)
-        move_overlay:connect_signal("mouse::leave", function()
-            move_overlay.bg = color_transparent
-            move_overlay.fg = color_transparent
-        end)
-    end
 
     local client_color  = colors.get_client_color(tc)
     local tab_bg = tab_state == "picked" and color_fg
@@ -721,7 +702,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         tab_draw,
         {
             {
-                icon_move_btn, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
+                icon_widget, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
             },
             left = TAB_PAD_H, right = TAB_PAD_H, top = 1, bottom = 1, widget = wibox.container.margin,
         },
@@ -1112,7 +1093,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             tb_h         = tb_h,
             tb_bar_h     = tb_h,
             icon_size    = tb_h - 4,
-            tab_btn_font = "monospace bold 18px",
+            tab_btn_font = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
         }
 
         -- Detach tooltip from previous tab widgets before rebuilding.
