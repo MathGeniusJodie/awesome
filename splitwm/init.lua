@@ -1213,6 +1213,11 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- (or swap tab order if released on the same leaf's tab bar), else stay in pickup mode.
     local function drag_release_fn(m)
         if m.buttons[1] then return true end
+        if pickup.tag == "client" and not pickup.client.valid then
+            pickup = pickup_idle()
+            awful.layout.arrange(ctx.s)
+            return false
+        end
         if pickup.tag == "client" then
             local mx, my = m.x, m.y
             local gap = beautiful.splitwm_gap
@@ -1224,7 +1229,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                     local step = (21 + ctx.icon_size + 2 + BTN_SIZE + 21) + TAB_SPACING
                     local cx1  = og.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
                     if mx >= cx1 and mx < cx1 + BTN_SIZE
-                    and my >= og.y - gap and my < og.y - gap + ctx.tb_h then
+                    and my >= og.y - gap and my < og.y - gap + ctx.tb_h
+                    and tab_state == "active" then
                         pickup = pickup_idle()
                         tc:kill()
                         return false
@@ -1240,7 +1246,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                             try_drop_picked_up(ctx.t, lid)
                             awful.layout.arrange(ctx.s)
                         elseif my < g.y then
-                            -- same leaf, in tab bar: swap tab order
+                            -- same leaf, in tab bar: swap tab order (or focus if same tab)
                             local tab_w = 21 + BTN_SIZE + 2 + BTN_SIZE + 21
                             local step  = tab_w + TAB_SPACING
                             local target = math.max(1, math.min(#leaf.tabs,
@@ -1248,17 +1254,20 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                             if target ~= tab_idx then
                                 leaf.tabs[tab_idx], leaf.tabs[target] =
                                     leaf.tabs[target], leaf.tabs[tab_idx]
-                                leaf.active_tab = target
-                                pickup = pickup_idle()
-                                awful.layout.arrange(ctx.s)
                             end
-                            -- else: same tab, stay in pickup mode
+                            leaf.active_tab = target
+                            ctx.state.focused_leaf_id = leaf.id
+                            pickup = pickup_idle()
+                            if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
+                            awful.layout.arrange(ctx.s)
                         end
                         return false
                     end
                 end
             end
-            -- released outside all splits: stay in pickup mode
+            -- released outside all splits: cancel pickup
+            pickup = pickup_idle()
+            awful.layout.arrange(ctx.s)
         end
         return false
     end
@@ -1270,6 +1279,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         awful.layout.arrange(ctx.s)
         gears.timer.delayed_call(function()
             if not mouse.coords().buttons[1] then return end
+            if pickup.tag ~= "client" or pickup.client ~= tc then return end
+            if mousegrabber.isrunning() then return end
             mousegrabber.run(drag_release_fn, "fleur")
         end)
     end
@@ -1352,15 +1363,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 awful.layout.arrange(ctx.s)
                 return
             end
-            leaf.active_tab = tab_idx
-            ctx.state.focused_leaf_id = leaf.id
-            tc:emit_signal("request::activate", "mouse_click", {raise = true})
-            if tab_state == "active" then
-                start_tab_drag()
-            end
+            -- Don't focus yet; focus happens on mouseup if released on same tab.
+            start_tab_drag()
         end, function()
             -- Release handler: fires only for quick clicks (before the mousegrabber starts).
-            -- If the mouse is over the close button, close the tab.
             if pickup.tag ~= "client" or pickup.client ~= tc then return end
             local mc = mouse.coords()
             local g = geo_cache[ctx.t] and geo_cache[ctx.t].geos[leaf.id]
@@ -1369,11 +1375,19 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 local cx1  = g.x + (tab_idx - 1) * step + 21 + ctx.icon_size + 2
                 if mc.x >= cx1 and mc.x < cx1 + BTN_SIZE
                 and mc.y >= g.y - beautiful.splitwm_gap
-                and mc.y < g.y - beautiful.splitwm_gap + ctx.tb_h then
+                and mc.y < g.y - beautiful.splitwm_gap + ctx.tb_h
+                and tab_state == "active" then
                     pickup = pickup_idle()
                     tc:kill()
+                    return
                 end
             end
+            -- Quick click on same tab: focus and cancel drag.
+            leaf.active_tab = tab_idx
+            ctx.state.focused_leaf_id = leaf.id
+            pickup = pickup_idle()
+            if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
+            awful.layout.arrange(ctx.s)
         end),
         awful.button({}, 3, function()
             if not tc.valid then return end
@@ -1455,6 +1469,9 @@ local function tb_build_split_controls(leaf, entry, ctx)
             pickup = pickup_idle()
         elseif pickup.tag == "split" then
             handle_split_pickup(ctx.state, leaf.id, ctx.s); return
+        elseif pickup.tag == "client" then
+            -- Cancel the in-flight tab drag; don't start a split pickup on top of it.
+            pickup = pickup_idle()
         else
             pickup = pickup_split(leaf.id)
             ctx.state.focused_leaf_id = leaf.id
@@ -2191,9 +2208,12 @@ function splitwm.setup()
     tag.connect_signal("property::selected", function(t)
         local s = t.screen
         if type(s) == "number" then s = screen[s] end
-        -- Splits are tag-local; cancel any pending swap so the leaf ID
-        -- doesn't silently fail to resolve on the newly selected tag.
-        if pickup.tag == "split" then pickup = pickup_idle() end
+        -- Tag switches cancel all pickup state: leaf IDs are tag-local and
+        -- a mousegrabber from another tag would be invisible to the user.
+        if pickup.tag ~= "idle" then
+            pickup = pickup_idle()
+            if mousegrabber.isrunning() then mousegrabber.stop() end
+        end
         geo_cache[t] = nil
         if s then gears.timer.delayed_call(function() update_ui(s) end) end
     end)
