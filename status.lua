@@ -340,6 +340,209 @@ end
 -- Composite widget factories
 ---------------------------------------------------------------------------
 
+local CAL_CELL = 24
+local CAL_GAP  = 2
+local CAL_PAD  = 10
+
+-- Returns widget, cal_w, cal_h so the caller can size the wibox precisely.
+local function build_calendar_widget(year, month, today_day, on_prev, on_next)
+    local month_names = {
+        "January","February","March","April","May","June",
+        "July","August","September","October","November","December"
+    }
+    local cell = CAL_CELL
+    local gap  = CAL_GAP
+    local pad  = CAL_PAD
+
+    local first_wday    = os.date("*t", os.time({year=year, month=month, day=1})).wday - 1
+    local days_in_month = os.date("*t", os.time({year=year, month=month+1, day=0})).day
+
+    -- Always 6 week rows so the popup height never jumps between months.
+    local MAX_WEEKS = 6
+
+    -- Exact pixel height:
+    -- rows: margin(hdr)+gap + dow_row + (1+MAX_WEEKS)*gap + MAX_WEEKS*cell
+    -- margin(hdr) height = 4 + cell + 4 = cell+8
+    local rows_h = (cell + 8) + cell + MAX_WEEKS * cell + (1 + MAX_WEEKS) * gap
+    local cal_w  = 7 * cell + 6 * gap + 2 * pad
+    local cal_h  = pad + rows_h + pad
+
+    -- Last day of previous month (for overflow cells)
+    local prev_y, prev_m = year, month - 1
+    if prev_m < 1 then prev_m = 12; prev_y = prev_y - 1 end
+    local prev_days = os.date("*t", os.time({year=prev_y, month=prev_m+1, day=0})).day
+
+    -- Blend a color with alpha (#rrggbbaa) onto a background (#rrggbb[aa])
+    -- so the result is safe to use in Pango markup (which needs plain #rrggbb).
+    local function blend(fg_c, bg_c)
+        local r, g, b, a = (fg_c or ""):match("^#(%x%x)(%x%x)(%x%x)(%x%x)$")
+        if not r then
+            r, g, b = (fg_c or ""):match("^#(%x%x)(%x%x)(%x%x)$")
+            return r and ("#" .. r .. g .. b) or "#ffffff"
+        end
+        local alpha = tonumber(a, 16) / 255
+        if alpha >= 1.0 then return "#" .. r .. g .. b end
+        local br, bg2, bb = (bg_c or "#000000"):match("^#(%x%x)(%x%x)(%x%x)")
+        br, bg2, bb = tonumber(br, 16) or 0, tonumber(bg2, 16) or 0, tonumber(bb, 16) or 0
+        local ri = math.floor(br + (tonumber(r, 16) - br) * alpha + 0.5)
+        local gi = math.floor(bg2 + (tonumber(g, 16) - bg2) * alpha + 0.5)
+        local bi = math.floor(bb + (tonumber(b, 16) - bb) * alpha + 0.5)
+        return string.format("#%02x%02x%02x", ri, gi, bi)
+    end
+
+    local raw_bg       = beautiful.splitwm_color_bg or "#000000"
+    local color_bg     = blend(raw_bg,                            "#000000")
+    local color_fg     = blend(beautiful.splitwm_color_fg,        raw_bg)
+    local color_muted  = blend(beautiful.splitwm_fg_disabled,     raw_bg)
+    local color_dow    = blend(beautiful.splitwm_handle_color,    raw_bg)
+    local color_accent = blend(beautiful.splitwm_color_accent,    raw_bg)
+    local color_today  = blend(beautiful.splitwm_close_fg,        raw_bg)
+
+    local rows = wibox.layout.fixed.vertical()
+    rows.spacing = gap
+
+    -- Nav header: ‹  Month Year  ›
+    local function nav_btn(sym, cb)
+        local btn = wibox.widget {
+            markup        = string.format('<span color="%s">%s</span>', color_dow, sym),
+            align         = "center",
+            font          = "monospace bold 14px",
+            forced_width  = cell,
+            forced_height = cell,
+            widget        = wibox.widget.textbox,
+        }
+        btn:buttons(gears.table.join(awful.button({}, 1, cb)))
+        return btn
+    end
+
+    local hdr_row = wibox.widget {
+        nav_btn("‹", on_prev),
+        wibox.widget {
+            markup        = string.format('<span color="%s"><b>%s %d</b></span>', color_fg, month_names[month], year),
+            align         = "center",
+            font          = "monospace bold 13px",
+            forced_height = cell,
+            widget        = wibox.widget.textbox,
+        },
+        nav_btn("›", on_next),
+        layout = wibox.layout.align.horizontal,
+    }
+    rows:add(wibox.container.margin(hdr_row, 0, 0, 4, 4))
+
+    -- Day-of-week labels
+    local dow_row = wibox.layout.fixed.horizontal()
+    dow_row.spacing = gap
+    for _, d in ipairs({"Su","Mo","Tu","We","Th","Fr","Sa"}) do
+        dow_row:add(wibox.widget {
+            markup        = string.format('<span color="%s"><b>%s</b></span>', color_fg, d),
+            align         = "center",
+            font          = "monospace 12px",
+            forced_width  = cell,
+            forced_height = cell,
+            widget        = wibox.widget.textbox,
+        })
+    end
+    rows:add(dow_row)
+
+    -- Helper: a muted overflow cell
+    local function overflow_cell(day_num)
+        return wibox.widget {
+            wibox.container.place(wibox.widget {
+                markup = string.format('<span color="%s">%d</span>', color_muted, day_num),
+                align  = "center",
+                font   = "monospace 13px",
+                widget = wibox.widget.textbox,
+            }),
+            forced_width  = cell,
+            forced_height = cell,
+            widget        = wibox.container.background,
+        }
+    end
+
+    -- Collect week rows into a table so we can prepend a top-overflow row.
+    local week_row_widgets = {}
+    local col     = first_wday
+    local cur_row = wibox.layout.fixed.horizontal()
+    cur_row.spacing = gap
+
+    -- Leading overflow days from previous month
+    for i = first_wday - 1, 0, -1 do
+        cur_row:add(overflow_cell(prev_days - i))
+    end
+
+    -- Current month days
+    for day = 1, days_in_month do
+        local is_today = (day == today_day)
+        local label = wibox.widget {
+            markup = is_today
+                and string.format('<span color="%s"><b>%d</b></span>', color_bg, day)
+                or  string.format('<span color="%s">%d</span>', color_fg, day),
+            align  = "center",
+            font   = "monospace 11px",
+            widget = wibox.widget.textbox,
+        }
+        local cell_w = wibox.widget {
+            wibox.container.place(label),
+            bg            = is_today and color_today or nil,
+            shape         = is_today and gears.shape.circle or nil,
+            forced_width  = cell,
+            forced_height = cell,
+            widget        = wibox.container.background,
+        }
+        cur_row:add(cell_w)
+        col = col + 1
+        if col >= 7 then
+            table.insert(week_row_widgets, cur_row)
+            cur_row         = wibox.layout.fixed.horizontal()
+            cur_row.spacing = gap
+            col = 0
+        end
+    end
+
+    -- Complete the last partial row with next-month overflow
+    local next_day = 1
+    if col > 0 then
+        while col < 7 do
+            cur_row:add(overflow_cell(next_day))
+            next_day = next_day + 1
+            col      = col + 1
+        end
+        table.insert(week_row_widgets, cur_row)
+    end
+
+    local week_rows = #week_row_widgets  -- 4, 5, or 6
+
+    -- Extra overflow rows at the bottom.
+    -- For 4-week months we only add one here (the other goes at the top below).
+    local bottom_target = (week_rows == 4) and (MAX_WEEKS - 1) or MAX_WEEKS
+    for _ = week_rows + 1, bottom_target do
+        local extra = wibox.layout.fixed.horizontal()
+        extra.spacing = gap
+        for _ = 1, 7 do
+            extra:add(overflow_cell(next_day))
+            next_day = next_day + 1
+        end
+        table.insert(week_row_widgets, extra)
+    end
+
+    -- For 4-week months: prepend one extra overflow row at the top.
+    -- It shows the 7 prev-month days immediately before the leading overflow cells.
+    if week_rows == 4 then
+        local top_row = wibox.layout.fixed.horizontal()
+        top_row.spacing = gap
+        for i = 6, 0, -1 do
+            top_row:add(overflow_cell(prev_days - first_wday - i))
+        end
+        table.insert(week_row_widgets, 1, top_row)
+    end
+
+    for _, row in ipairs(week_row_widgets) do
+        rows:add(row)
+    end
+
+    return wibox.container.margin(rows, pad, pad, pad, pad), cal_w, cal_h
+end
+
 function status.new_datetime_widget()
     local dow_codes = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" }
     local mon_codes = { "Ja", "Fe", "Mr", "Ap", "My", "Jn", "Jl", "Au", "Se", "Oc", "Nv", "De" }
@@ -372,7 +575,129 @@ function status.new_datetime_widget()
     dt_row.spacing = 8
     dt_row:add(mydate)
     dt_row:add(myclock)
-    return dt_row
+
+    -- Calendar popup state
+    local cal_popup   = nil
+    local cal_visible = false
+
+    -- Poll timer: closes calendar when a click lands outside it.
+    -- poll_ready stays false until all buttons are released after opening,
+    -- so the opening click itself doesn't immediately re-close it.
+    local poll_ready = false
+    local cal_poll_timer = gears.timer {
+        timeout   = 0.05,
+        autostart = false,
+        callback  = function()
+            if not (cal_popup and cal_popup.visible) then
+                poll_ready = false
+                return
+            end
+            local m       = mouse.coords()
+            local pressed = (m.buttons[1] or m.buttons[3]) and true or false
+            if not poll_ready then
+                if not pressed then poll_ready = true end
+                return
+            end
+            if pressed then
+                local g = cal_popup:geometry()
+                if m.x < g.x or m.x > g.x + g.width
+                or m.y < g.y or m.y > g.y + g.height then
+                    cal_popup.visible = false
+                    cal_visible       = false
+                    poll_ready        = false
+                    cal_poll_timer:stop()
+                end
+            end
+        end,
+    }
+
+    local function hide_calendar()
+        if cal_popup then cal_popup.visible = false end
+        cal_visible = false
+        poll_ready  = false
+        cal_poll_timer:stop()
+    end
+
+    local function show_calendar()
+        local t           = os.date("*t")
+        local scr         = awful.screen.focused()
+        local today_year  = t.year
+        local today_month = t.month
+        local today_day   = t.day
+
+        if cal_popup then cal_popup.visible = false end
+
+        local disp_year  = today_year
+        local disp_month = today_month
+
+        local do_refresh  -- forward declaration
+
+        local function on_prev()
+            disp_month = disp_month - 1
+            if disp_month < 1 then disp_month = 12; disp_year = disp_year - 1 end
+            do_refresh()
+        end
+        local function on_next()
+            disp_month = disp_month + 1
+            if disp_month > 12 then disp_month = 1; disp_year = disp_year + 1 end
+            do_refresh()
+        end
+        local function cur_today()
+            return (disp_year == today_year and disp_month == today_month) and today_day or nil
+        end
+
+        local widget, cal_w, cal_h = build_calendar_widget(
+            disp_year, disp_month, cur_today(), on_prev, on_next)
+        local sg      = scr.geometry
+        local wibar_h = 30
+
+        cal_popup = wibox({
+            x            = sg.x + sg.width  - cal_w - 10,
+            y            = sg.y + sg.height - wibar_h - cal_h - 4,
+            width        = cal_w,
+            height       = cal_h,
+            bg           = beautiful.splitwm_color_bg or "#000000",
+            border_width = 0,
+            ontop        = true,
+            visible      = true,
+            type         = "popup_menu",
+        })
+        cal_popup.shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 6) end
+        cal_popup.widget = widget
+        cal_visible      = true
+
+        poll_ready = false
+        if cal_poll_timer.started then cal_poll_timer:stop() end
+        cal_poll_timer:start()
+
+        do_refresh = function()
+            local w, cw, ch = build_calendar_widget(
+                disp_year, disp_month, cur_today(), on_prev, on_next)
+            local s = scr.geometry
+            cal_popup.x      = s.x + s.width  - cw - 10
+            cal_popup.y      = s.y + s.height - wibar_h - ch - 4
+            cal_popup.width  = cw
+            cal_popup.height = ch
+            cal_popup.widget = w
+        end
+    end
+
+    -- Wrap dt_row to make it clickable
+    local clickable = wibox.widget {
+        dt_row,
+        widget = wibox.container.background,
+    }
+    clickable:buttons(gears.table.join(
+        awful.button({}, 1, function()
+            if cal_visible then
+                hide_calendar()
+            else
+                show_calendar()
+            end
+        end)
+    ))
+
+    return clickable
 end
 
 -- Builds the combined status+clock capsule (chip | battery | volume | date | clock).
