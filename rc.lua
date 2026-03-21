@@ -241,7 +241,7 @@ beautiful.fg_focus       = "#ffffff"
 local bar_margin     = 3
 local capsule_height = 24
 local wibar_height   = bar_margin * 2 + capsule_height  -- equal top + bottom padding
-local icon_bottom_pad = 2  -- gap between icon bottom and capsule bottom edge
+local icon_bottom_pad = 4  -- gap between icon bottom and capsule bottom edge
 
 local function parse_hex(hex)
     hex = hex:gsub("#", "")
@@ -425,26 +425,27 @@ awful.screen.connect_for_each_screen(function(s)
         return wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
     end
 
-    -- Status icons capsule (chip + battery + volume) — tab profile on left side
-    local icons_row = wibox.layout.fixed.horizontal()
-    icons_row.spacing = 4
-    icons_row:add(wibox.container.margin(chip_widget, 0, 0, 0, icon_bottom_pad))
-    icons_row:add(wibox.container.margin(bat_widget,  0, 0, 0, icon_bottom_pad))
-    icons_row:add(wibox.container.margin(vol_widget,  0, 0, 0, icon_bottom_pad))
-    local status_capsule   = capsule(icons_row, 24, 22, splitwm.tab_shape, "#000000ff")
-
     local hunger_apples_capsule = capsule(hunger_parts.apples, 22, 22, splitwm.tab_shape, "#000000ff")
     local hunger_row = wibox.layout.fixed.horizontal()
     hunger_row.spacing = bar_margin
     hunger_row:add(hunger_parts.button)
     hunger_row:add(hunger_apples_capsule)
 
-    -- Date / clock capsule — tab profile on right side
+    -- Combined status + clock capsule (icons | date | clock)
+    local icons_row = wibox.layout.fixed.horizontal()
+    icons_row.spacing = 4
+    icons_row:add(wibox.container.margin(chip_widget, 0, 0, 0, icon_bottom_pad))
+    icons_row:add(wibox.container.margin(bat_widget,  0, 0, 0, icon_bottom_pad))
+    icons_row:add(wibox.container.margin(vol_widget,  0, 0, 0, icon_bottom_pad))
     local dt_row = wibox.layout.fixed.horizontal()
     dt_row.spacing = 8
     dt_row:add(mydate)
     dt_row:add(myclock)
-    local dt_capsule = capsule(wibox.container.margin(dt_row, 0, 0, 0, 0), 26, 26, splitwm.tab_shape, "#000000ff")
+    local combined_row = wibox.layout.fixed.horizontal()
+    combined_row.spacing = 16
+    combined_row:add(icons_row)
+    combined_row:add(dt_row)
+    local status_clock_capsule = capsule(combined_row, 24, 26, splitwm.tab_shape, "#000000ff")
 
     local lock_capsule = wibox.container.margin(
         status.new_lock_widget(capsule_height), 0, 0, wibar_height - capsule_height - 2, 0)
@@ -473,8 +474,7 @@ awful.screen.connect_for_each_screen(function(s)
             layout = wibox.layout.fixed.horizontal,
             spacing = bar_margin,
             wibox.widget.systray(),
-            status_capsule,
-            dt_capsule,
+            status_clock_capsule,
             wibox.container.margin(lock_capsule, 0, bar_margin, 0, 0),
         },
     }
