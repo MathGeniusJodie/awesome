@@ -75,7 +75,7 @@ local function make_overlay(s, x, surf, bg_color)
     return ov
 end
 
-local function animate(s, old_overlay, new_overlay, dx)
+local function animate(s, old_overlay, new_overlay, dx, new_tag)
     cancel_active(s)
     local frames    = math.max(1, math.floor(DURATION_S * FPS))
     local frame     = 0
@@ -96,6 +96,12 @@ local function animate(s, old_overlay, new_overlay, dx)
                 old_overlay.visible = false
                 new_overlay.visible = false
                 active[s] = nil
+                if new_tag then
+                    gears.timer.delayed_call(function()
+                        M.cache[new_tag] = capture_screen(s)
+                        new_tag:emit_signal("transitions::arrived")
+                    end)
+                end
             end
         end,
     }
@@ -156,7 +162,7 @@ function M.switch(s, new_tag)
         -- animate() before view_only() so the timer ticks during the synchronous
         -- wallpaper/layout work triggered by view_only().
         pending[s] = nil
-        animate(s, p.old_overlay, p.new_overlay, p.dx)
+        animate(s, p.old_overlay, p.new_overlay, p.dx, new_tag)
         new_tag:view_only()
         return
     end
@@ -165,7 +171,7 @@ function M.switch(s, new_tag)
     cancel_pending(s)
     cancel_active(s)
     local old_overlay, new_overlay, dx = build_overlays(s, old_tag, new_tag)
-    animate(s, old_overlay, new_overlay, dx)
+    animate(s, old_overlay, new_overlay, dx, new_tag)
     new_tag:view_only()
 end
 
@@ -198,7 +204,12 @@ function M.switch_instant(s, delta)
     cancel_pending(s)
     M.cache[cur] = capture_screen(s)
     local idx = (cur.index - 1 + delta) % #tags + 1
-    tags[idx]:view_only()
+    local new_tag = tags[idx]
+    new_tag:view_only()
+    gears.timer.delayed_call(function()
+        M.cache[new_tag] = capture_screen(s)
+        new_tag:emit_signal("transitions::arrived")
+    end)
 end
 
 function M.setup(config)
@@ -209,6 +220,18 @@ function M.setup(config)
             wp_cache[i] = gears.surface.load_uncached(ws.bg)
         end
     end
+    -- After a reload the cache is empty; capture the current tag on each screen.
+    awesome.connect_signal("startup", function()
+        gears.timer.delayed_call(function()
+            for s in screen do
+                local t = s.selected_tag
+                if t then
+                    M.cache[t] = capture_screen(s)
+                    t:emit_signal("transitions::arrived")
+                end
+            end
+        end)
+    end)
 end
 
 return M

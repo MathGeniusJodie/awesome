@@ -316,9 +316,10 @@ local function make_tag_widget(t, ws)
             function() transitions.switch(t.screen, t) end)
     ))
 
-    t:connect_signal("property::selected", function() update() end)
-    t:connect_signal("tagged",             function() update() end)
-    t:connect_signal("untagged",           function() update() end)
+    t:connect_signal("property::selected",   function() update() end)
+    t:connect_signal("tagged",               function() update() end)
+    t:connect_signal("untagged",             function() update() end)
+    t:connect_signal("transitions::arrived", function() update() end)
 
     update()
     return layout
