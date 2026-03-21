@@ -69,9 +69,8 @@ local TAB_SA     = math.sin(TAB_ALPHA)
 local TAB_CA     = math.cos(TAB_ALPHA)
 local TAB_TA     = math.tan(TAB_ALPHA)
 local function tab_cx(h) return (TAB_CORNER + TAB_EAR) * (1 - TAB_SA) / TAB_CA + h * TAB_TA end
--- Overlap = 2x slant width for tighter nesting. Using a fixed reference height
--- matching the default TITLEBAR_HEIGHT = 30 so TAB_SPACING is stable at load time.
-local TAB_SPACING = -math.floor((tab_cx(30) - TAB_EAR * TAB_CA) * 2)
+-- Overlap = 2x slant width at the actual titlebar height.  Set in M.setup().
+local TAB_SPACING
 
 -- Width of one tab slot including its negative overlap with the next tab.
 -- _BTN_SIZE is injected by setup(), so this must be called after setup().
@@ -97,7 +96,6 @@ M.cache         = titlebar_cache
 M.pickup_idle   = pickup_idle
 M.pickup_client = pickup_client
 M.pickup_split  = pickup_split
-M.TAB_SPACING   = TAB_SPACING
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile
@@ -130,6 +128,8 @@ function M.setup(deps)
     _make_wb_proxy           = deps.make_wb_proxy
     _splitwm                 = deps.splitwm
     _TITLEBAR_HEIGHT         = deps.TITLEBAR_HEIGHT
+    TAB_SPACING              = -math.floor((tab_cx(_TITLEBAR_HEIGHT) - TAB_EAR * TAB_CA) * 2)
+    M.TAB_SPACING            = TAB_SPACING
     _BTN_SIZE                = deps.BTN_SIZE
     _BTN_SPACING             = deps.BTN_SPACING
     _MIN_SPLIT_W             = deps.MIN_SPLIT_W
