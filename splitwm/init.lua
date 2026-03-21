@@ -1200,10 +1200,16 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             awful.layout.arrange(ctx.s)
             return
         end
+        -- Clicking the picked tab again cancels the drag.
+        if tab_state == "picked" and pickup.tag == "client" and pickup.client == tc then
+            pickup = pickup_idle()
+            awful.layout.arrange(ctx.s)
+            return
+        end
         leaf.active_tab = tab_idx
         ctx.state.focused_leaf_id = leaf.id
         tc:emit_signal("request::activate", "mouse_click", {raise = true})
-        if tab_state == "active" or tab_state == "picked" then
+        if tab_state == "active" then
             start_tab_drag()
         end
     end, function()
