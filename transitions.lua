@@ -16,7 +16,7 @@ local cairo = lgi.cairo
 local M = {}
 
 local WORKSPACES = nil
-local cache      = {}   -- [tag] = cairo ImageSurface (screenshot from last departure)
+M.cache          = {}   -- [tag] = cairo ImageSurface (screenshot from last departure)
 local active     = {}   -- [screen] = { timer, overlays }
 
 local DURATION_S = 0.5
@@ -99,7 +99,7 @@ end
 
 -- Returns cached surface for tag, or wallpaper as fallback, or nil.
 local function tag_surf(tag)
-    if cache[tag] then return cache[tag] end
+    if M.cache[tag] then return M.cache[tag] end
     local ws = tag and WORKSPACES and WORKSPACES[tag.index]
     if ws and ws.has_bg then
         return gears.surface.load_uncached(ws.bg)
@@ -121,7 +121,7 @@ function M.switch(s, new_tag)
 
     -- Capture current screen state synchronously before switching
     local old_surf = capture_screen(s)
-    if old_tag then cache[old_tag] = old_surf end
+    if old_tag then M.cache[old_tag] = old_surf end
 
     local old_overlay = make_overlay(s, s.geometry.x,      old_surf,          tag_color(old_tag))
     local new_overlay = make_overlay(s, s.geometry.x - dx, tag_surf(new_tag), tag_color(new_tag))
@@ -156,7 +156,7 @@ function M.switch_instant(s, delta)
     local cur  = s.selected_tag
     if not cur then return end
     cancel_active(s)
-    cache[cur] = capture_screen(s)
+    M.cache[cur] = capture_screen(s)
     local idx = (cur.index - 1 + delta) % #tags + 1
     tags[idx]:view_only()
 end

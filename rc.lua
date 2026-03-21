@@ -250,107 +250,76 @@ local function parse_hex(hex)
            tonumber(hex:sub(5,6), 16) / 255
 end
 
---- Build a single tag button: colored circle + dots drawn via Cairo below.
-local function make_tag_widget(t, color)
-    -- Custom dot-indicator widget: draws N white circles via Cairo directly.
-    -- This avoids all container/layout sizing issues.
-    local dots = wibox.widget.base.make_widget()
-    dots.n        = 0
-    dots.selected = false
-    dots.forced_height = 7
+--- Build a single tag button: wallpaper/screenshot thumbnail in a rounded-rect frame.
+-- Empty tags show the wallpaper. Tags with windows show the screenshot from
+-- transitions.cache, which is captured synchronously on every tag departure.
+local function make_tag_widget(t, ws)
+    local CORNER  = 4
+    local geo     = t.screen.geometry
+    local thumb_h = beautiful.splitwm_gap - 6
+    local thumb_w = math.floor(thumb_h * geo.width / geo.height)
 
-    function dots:fit(_, w, h)
-        if self.n == 0 then return 0, 7 end
-        local show = math.min(self.n, 3)
-        return math.ceil(show * 5 + (show - 1) * 3), 7
-    end
+    local thumb = wibox.widget.base.make_widget()
+    thumb.has_wins = false
+    thumb.selected = false
+    thumb.forced_width  = thumb_w
+    thumb.forced_height = thumb_h
 
-    local dr, dg, db = parse_hex(color.dark)  -- pre-computed once, reused in draw
+    local wp_surface = ws.has_bg and gears.surface.load(ws.bg) or nil
+    local dr, dg, db = parse_hex(ws.dark)
 
-    function dots:draw(_, cr, w, h)
-        if self.n == 0 then return end
-        local show  = math.min(self.n, 3)
-        local r     = 2.5
-        local gap   = 3
-        local pad   = 2
-        local total = show * (r * 2) + (show - 1) * gap
-        local cap_w = total + pad * 2
-        local cap_x = (w - cap_w) / 2
+    function thumb:fit(_, w, h) return self.forced_width, h end
 
-        -- Capsule background: dark color variant, opaque when selected else semi-transparent
-        cr:set_source_rgba(dr, dg, db, self.selected and 1 or 0.5)
+    function thumb:draw(_, cr, w, h)
+        local surf = (self.has_wins and transitions.cache[t]) or wp_surface
+
         cr:save()
-        cr:translate(cap_x, 0)
-        gears.shape.rounded_rect(cr, cap_w, h, h / 2)
-        cr:restore()
-        cr:fill()
+        gears.shape.rounded_rect(cr, w, h, CORNER)
+        cr:clip()
 
-        -- Dots centered inside capsule
-        local x0 = cap_x + pad + r
-        cr:set_source_rgba(1, 1, 1, 1)
-        for i = 1, show do
-            if i == 3 and self.n > 3 then
-                local cx = x0 + (i - 1) * (r * 2 + gap)
-                local cy = h / 2
-                local arm = r + 0.5
-                cr:set_line_width(1.5)
-                cr:move_to(cx - arm, cy) cr:line_to(cx + arm, cy) cr:stroke()
-                cr:move_to(cx, cy - arm) cr:line_to(cx, cy + arm) cr:stroke()
-            else
-                cr:arc(x0 + (i - 1) * (r * 2 + gap), h / 2, r, 0, math.pi * 2)
-                cr:fill()
-            end
+        if surf then
+            local sw = surf:get_width()
+            local sh = surf:get_height()
+            local scale = math.max(w / sw, h / sh)
+            cr:save()
+            cr:translate((w - sw * scale) / 2, (h - sh * scale) / 2)
+            cr:scale(scale, scale)
+            cr:set_source_surface(surf, 0, 0)
+            cr:paint()
+            cr:restore()
+        else
+            cr:set_source_rgb(dr, dg, db)
+            cr:paint()
+        end
+
+        cr:restore()
+
+        if self.selected then
+            cr:set_source_rgba(1, 1, 1, 0.9)
+            cr:set_line_width(2)
+            cr:translate(1, 1)
+            gears.shape.rounded_rect(cr, w - 2, h - 2, CORNER)
+            cr:stroke()
         end
     end
 
-    local function update_dots()
-        dots.n = #t:clients()
-        dots:emit_signal("widget::layout_changed")
-        dots:emit_signal("widget::redraw_needed")
+    local function update()
+        thumb.has_wins = #t:clients() > 0
+        thumb.selected = t.selected
+        thumb:emit_signal("widget::redraw_needed")
     end
 
-    -- Outer ring: white when selected, transparent otherwise
-    local ring = wibox.container.background()
-    ring.forced_width  = capsule_height
-    ring.forced_height = capsule_height
-    ring.shape         = gears.shape.circle
-    ring.bg            = "#00000000"
-
-    -- Inner colored circle, inset 2px on each side to reveal the ring
-    local circle = wibox.container.background()
-    circle.forced_width  = capsule_height - 4
-    circle.forced_height = capsule_height - 4
-    circle.shape         = gears.shape.circle
-    circle.bg            = color.dark
-    circle:set_widget(wibox.container.place())
-
-    local place_inner = wibox.container.place()
-    place_inner:set_widget(circle)
-    ring:set_widget(place_inner)
-
-    local function update_circle()
-        ring.bg    = t.selected and "#ffffff" or "#00000000"
-        circle.bg  = t.selected and color.light or color.dark
-        dots.selected = t.selected
-        dots:emit_signal("widget::redraw_needed")
-    end
-
-    -- Circle pinned to top; dots (self-drawing capsule) pushed to the very bottom
-    local tag_layout = wibox.layout.stack()
-    tag_layout:add(wibox.container.margin(ring, 0, 0, bar_margin, bar_margin))
-    tag_layout:add(wibox.container.margin(dots, 0, 0, wibar_height - bar_margin - dots.forced_height, 0))
-
-    tag_layout:buttons(gears.table.join(
+    local layout = wibox.container.margin(thumb, 0, 0, wibar_height - thumb_h - 2, 2)
+    layout:buttons(gears.table.join(
         awful.button({}, 1, function() transitions.switch(t.screen, t) end)
     ))
 
-    t:connect_signal("property::selected", function() update_circle() end)
-    t:connect_signal("tagged",             function() update_circle(); update_dots() end)
-    t:connect_signal("untagged",           function() update_circle(); update_dots() end)
+    t:connect_signal("property::selected", function() update() end)
+    t:connect_signal("tagged",             function() update() end)
+    t:connect_signal("untagged",           function() update() end)
 
-    update_circle()
-    update_dots()
-    return tag_layout
+    update()
+    return layout
 end
 
 awful.screen.connect_for_each_screen(function(s)
