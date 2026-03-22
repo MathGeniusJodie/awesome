@@ -365,11 +365,11 @@ awful.screen.connect_for_each_screen(function(s)
         return wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
     end
 
-    local hunger_apples_capsule = capsule(hunger_parts.apples, 22, 22, splitwm.tab_shape, "#000000ff")
-    local hunger_row = wibox.layout.fixed.horizontal()
-    hunger_row.spacing = bar_margin
-    hunger_row:add(hunger_parts.button)
-    hunger_row:add(hunger_apples_capsule)
+    local hunger_inner = wibox.layout.fixed.horizontal()
+    hunger_inner.spacing = bar_margin
+    hunger_inner:add(wibox.container.margin(hunger_parts.button, 2, 0, 0, -7))
+    hunger_inner:add(hunger_parts.apples)
+    local hunger_row = capsule(hunger_inner, 14, 14, splitwm.tab_shape, "#000000ff")
 
     local status_clock_capsule = status.new_status_clock_capsule(
         bar_margin, capsule_height, icon_bottom_pad, splitwm.tab_shape)

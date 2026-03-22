@@ -69,7 +69,7 @@ gears.timer {
 
 -- btn_height should match capsule_height from rc.lua (typically 24)
 function hunger.new_widget(btn_height)
-    btn_height = (btn_height or 24) + 4
+    btn_height = (btn_height or 24) + 8
 
     -- Apple imagebox row (left=fills last, right=fills first)
     local apple_imgs = {}
@@ -141,7 +141,11 @@ function hunger.new_widget(btn_height)
     update_all()
 
     return {
-        button = wibox.container.margin(wibox.container.place(btn_bg), 0, 0, 0, 2),
+        button = (function()
+            local p = wibox.container.place(btn_bg)
+            p.valign = "bottom"
+            return p
+        end)(),
         apples = (function()
             local p = wibox.container.place(apple_row)
             p.valign = "bottom"
