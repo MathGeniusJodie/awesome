@@ -51,10 +51,6 @@ local CAIRO_LINE_CAP_ROUND = 1
 -- Bottom padding applied to round buttons so they sit 2 px above centre.
 local BTN_V_RAISE = 4
 
--- Number of split-control buttons (swap, split, close).  Used to compute the
--- right-margin reserve in the above-layer tab row so tabs don't overlap controls.
-local NUM_CTRL_BTNS = 3
-
 -- Tab color picker menu geometry.
 local MENU_CIRC_SIZE = 18
 local MENU_CIRC_GAP  = 4
@@ -64,6 +60,30 @@ local MENU_BW        = 2   -- border on left / right / bottom
 
 -- Left/right padding inside each tab widget (drives close-button x-offset).
 local TAB_PAD_H = 21
+
+-- Spacing between the app icon and the close button inside a tab.
+-- Must match the `spacing` value in the tab content row widget.
+local ICON_CLOSE_GAP = 2
+
+-- Top/bottom padding inside each tab's content margin.
+-- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep these in sync.
+local TAB_CONTENT_V_PAD = 1
+
+-- Gap between the last tab and the "+" new-tab button.
+local PLUS_BTN_GAP = 24
+
+-- Corner radius for the tab bar's top-left/top-right background shape.
+local TAB_BAR_CORNER = 4
+
+-- Corner radius for the focus-border widget on empty (no-tab) leaves.
+-- Distinct from beautiful.splitwm_empty_radius (which styles the content background).
+local EMPTY_SPLIT_RADIUS = 14
+
+-- Icon size used for app-launcher widgets in empty splits.
+local LAUNCHER_ICON_SIZE = 34
+
+-- Minimum vertical movement (px) before a drag-handle drag activates.
+local DRAG_THRESHOLD_PX = 4
 
 -- Tab shape geometry.  TAB_ALPHA is the slant angle from vertical.
 local TAB_ALPHA  = math.rad(20)
@@ -79,7 +99,7 @@ local TAB_SPACING
 -- Width of one tab slot including its negative overlap with the next tab.
 -- _BTN_SIZE is injected by setup(), so this must be called after setup().
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + 2 + _BTN_SIZE + TAB_PAD_H + TAB_SPACING
+    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_SPACING
 end
 
 ---------------------------------------------------------------------------
@@ -174,7 +194,7 @@ end
 ---------------------------------------------------------------------------
 
 local function rounded_top(cr, w, h)
-    local r = 4
+    local r = TAB_BAR_CORNER
     cr:new_sub_path()
     cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
     cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
@@ -203,7 +223,7 @@ local function run_v_drag(s, get_b, on_start, on_stop)
                 if on_stop then on_stop() end
                 return false
             end
-            if not moved and math.abs(m.y - start_y) < 4 then return true end
+            if not moved and math.abs(m.y - start_y) < DRAG_THRESHOLD_PX then return true end
             moved = true
             local b = get_b()
             if not b then if on_stop then on_stop() end; return false end
@@ -706,9 +726,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         tab_draw,
         {
             {
-                icon_widget, close_btn, spacing = 2, layout = wibox.layout.fixed.horizontal,
+                icon_widget, close_btn, spacing = ICON_CLOSE_GAP, layout = wibox.layout.fixed.horizontal,
             },
-            left = TAB_PAD_H, right = TAB_PAD_H, top = 1, bottom = 1, widget = wibox.container.margin,
+            left = TAB_PAD_H, right = TAB_PAD_H, top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD, widget = wibox.container.margin,
         },
         layout = wibox.layout.stack,
     }
@@ -972,7 +992,7 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
                 {
                     {
                         { spacing = TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
-                        right = (NUM_CTRL_BTNS + 1) * _BTN_SIZE + NUM_CTRL_BTNS * _BTN_SPACING, widget = wibox.container.margin,
+                        right = _MIN_SPLIT_W, widget = wibox.container.margin,
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
                 },
@@ -1100,7 +1120,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             top_pad      = math.max(gap, _TITLEBAR_HEIGHT) - _TITLEBAR_HEIGHT,
             tb_h         = tb_h,
             tb_bar_h     = tb_h,
-            icon_size    = tb_h - 4,
+            icon_size    = tb_h - 2 * TAB_CONTENT_V_PAD,
             tab_btn_font = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
         }
 
@@ -1122,14 +1142,13 @@ local function update_titlebars(s, t, state, geos, leaves)
                 ctx.state.focused_leaf_id = leaf.id
                 if _splitwm.on_menu_request then _splitwm.on_menu_request() end
             end),
-            left = #leaf.tabs > 0 and 24 or 0, bottom = BTN_V_RAISE, widget = wibox.container.margin,
+            left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0, bottom = BTN_V_RAISE, widget = wibox.container.margin,
         })
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
 
-        local empty_r     = 14
         local border_draw = #leaf.tabs == 0
-            and tb_build_border_widget(is_focused and color_fg or nil, tb_h, bw, empty_r)
+            and tb_build_border_widget(is_focused and color_fg or nil, tb_h, bw, EMPTY_SPLIT_RADIUS)
             or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, nil, entry)
 
         local drag_pill
@@ -1163,7 +1182,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         if #leaf.tabs == 0 then
             local launcher_ws = {}
             for _, e in ipairs(_splitwm.launchers) do
-                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, 34, function()
+                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, LAUNCHER_ICON_SIZE, function()
                     ctx.state.focused_leaf_id = leaf.id
                     if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
                 end)
