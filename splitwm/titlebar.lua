@@ -1000,18 +1000,22 @@ local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw
         icon_grid = { spacing = _BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) }
     end
     local corner_r = beautiful.splitwm_empty_radius
+    local bw       = beautiful.splitwm_focus_border_width
     entry.wb:setup {
         -- Layer 1: content background
         {
             { forced_height = ctx.tb_bar_h, widget = wibox.container.background },
             {
                 {
-                    { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
+                    {
+                        { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
+                        widget = wibox.container.background,
+                    },
+                    bg    = color_btn_bg,
+                    shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, corner_r) end,
                     widget = wibox.container.background,
                 },
-                bg    = color_btn_bg,
-                shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, corner_r) end,
-                widget = wibox.container.background,
+                left = bw, right = bw, bottom = bw, widget = wibox.container.margin,
             },
             layout = wibox.layout.align.vertical,
         },
