@@ -119,7 +119,7 @@ function hunger.new_widget(btn_height)
     btn_bg:set_widget(wibox.container.place(hunger_icon))
 
     local function update_btn()
-        btn_bg.bg = (get_level() <= 0) and beautiful.splitwm_close_fg or beautiful.splitwm_btn_bg
+        btn_bg.bg = (get_level() <= 0) and beautiful.splitwm_accent or beautiful.splitwm_btn_bg
         btn_bg:emit_signal("widget::redraw_needed")
     end
 

@@ -62,13 +62,11 @@ beautiful.titlebar_bg_normal = "#00000000"
 -- Splitwm colors
 beautiful.splitwm_color_bg       = "#000000ff"
 beautiful.splitwm_color_fg       = "#ffffffff"
-beautiful.splitwm_fg_disabled    = "#ffffff40"
-beautiful.splitwm_close_fg       = "#ff6666ff"
+beautiful.splitwm_accent         = "#ff6666ff"
 beautiful.splitwm_btn_bg         = "#00000080"  -- transparent circle button bg
 beautiful.splitwm_transparent    = "#00000000"  -- fully transparent
-beautiful.splitwm_fg_hover       = "#ffffff22"  -- hover highlight
+beautiful.splitwm_fg_disabled    = "#ffffff55"
 beautiful.splitwm_handle_color   = "#ffffff55"  -- drag handle pill (vertical handles + titlebar pill)
-beautiful.splitwm_color_accent   = "#7799dd"   -- accent / focus highlight (calendar today, borders)
 
 -- Splitwm layout
 beautiful.splitwm_gap              = 34

@@ -390,13 +390,12 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
         return string.format("#%02x%02x%02x", ri, gi, bi)
     end
 
-    local raw_bg       = beautiful.splitwm_color_bg or "#000000"
+    local raw_bg       = beautiful.splitwm_color_bg
     local color_bg     = blend(raw_bg,                            "#000000")
     local color_fg     = blend(beautiful.splitwm_color_fg,        raw_bg)
     local color_muted  = blend(beautiful.splitwm_fg_disabled,     raw_bg)
     local color_dow    = blend(beautiful.splitwm_handle_color,    raw_bg)
-    local color_accent = blend(beautiful.splitwm_color_accent,    raw_bg)
-    local color_today  = blend(beautiful.splitwm_close_fg,        raw_bg)
+    local color_today  = blend(beautiful.splitwm_accent,          raw_bg)
 
     local rows = wibox.layout.fixed.vertical()
     rows.spacing = gap

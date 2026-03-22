@@ -20,7 +20,6 @@ local splitwm = {}
 local color_bg             -- pure black
 local color_fg             -- pure white
 local color_fg_disabled    -- dimmed foreground for disabled icons
-local color_close          -- close-button hover
 local color_btn_bg         -- transparent circle button bg
 local color_transparent    -- fully transparent
 local color_fg_hover       -- hover highlight
@@ -1153,10 +1152,8 @@ function splitwm.setup()
     color_bg             = beautiful.splitwm_color_bg
     color_fg             = beautiful.splitwm_color_fg
     color_fg_disabled    = beautiful.splitwm_fg_disabled
-    color_close          = beautiful.splitwm_close_fg
     color_btn_bg         = beautiful.splitwm_btn_bg
     color_transparent    = beautiful.splitwm_transparent
-    color_fg_hover       = beautiful.splitwm_fg_hover
     color_handle         = beautiful.splitwm_handle_color
 
     awesome.register_xproperty("splitwm_color", "string")
@@ -1179,7 +1176,6 @@ function splitwm.setup()
         color_bg                = color_bg,
         color_fg                = color_fg,
         color_fg_disabled       = color_fg_disabled,
-        color_close             = color_close,
         color_btn_bg            = color_btn_bg,
         color_transparent       = color_transparent,
         color_fg_hover          = color_fg_hover,
