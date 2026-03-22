@@ -273,17 +273,20 @@ local function make_tag_widget(t, ws)
 
     function thumb:draw(_, cr, w, h)
         local surf = (self.has_wins and transitions.cache[t]) or wp_surface
+        local pad = 2  -- space reserved outside the thumbnail for the border
 
         cr:save()
-        gears.shape.rounded_rect(cr, w, h, CORNER)
+        cr:translate(pad, pad)
+        gears.shape.rounded_rect(cr, w - 2*pad, h - 2*pad, CORNER)
         cr:clip()
 
         if surf then
             local sw = surf:get_width()
             local sh = surf:get_height()
-            local scale = math.max(w / sw, h / sh)
+            local cw, ch = w - 2*pad, h - 2*pad
+            local scale = math.max(cw / sw, ch / sh)
             cr:save()
-            cr:translate((w - sw * scale) / 2, (h - sh * scale) / 2)
+            cr:translate((cw - sw * scale) / 2, (ch - sh * scale) / 2)
             cr:scale(scale, scale)
             cr:set_source_surface(surf, 0, 0)
             cr:paint()
@@ -298,8 +301,8 @@ local function make_tag_widget(t, ws)
         if self.selected then
             cr:set_source_rgba(1, 1, 1, 0.9)
             cr:set_line_width(2)
-            cr:translate(1, 1)
-            gears.shape.rounded_rect(cr, w - 2, h - 2, CORNER)
+            cr:translate(pad - 1, pad - 1)
+            gears.shape.rounded_rect(cr, w - 2*(pad - 1), h - 2*(pad - 1), CORNER)
             cr:stroke()
         end
     end
@@ -390,7 +393,7 @@ awful.screen.connect_for_each_screen(function(s)
         layout = wibox.layout.align.horizontal,
         { -- Left
             layout = wibox.layout.fixed.horizontal,
-            wibox.container.margin(s.mytaglist, bar_margin, 0, 0, 0),
+            wibox.container.margin(s.mytaglist, 0, 0, 0, 0),
             s.mypromptbox,
         },
         wibox.container.place(hunger_row), -- Center
