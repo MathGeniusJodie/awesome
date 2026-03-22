@@ -69,7 +69,7 @@ gears.timer {
 
 -- btn_height should match capsule_height from rc.lua (typically 24)
 function hunger.new_widget(btn_height)
-    btn_height = (btn_height or 24) + 8
+    btn_height = (btn_height or 24) + 6
 
     -- Apple imagebox row (left=fills last, right=fills first)
     local apple_imgs = {}

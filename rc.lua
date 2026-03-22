@@ -370,7 +370,7 @@ awful.screen.connect_for_each_screen(function(s)
 
     local hunger_inner = wibox.layout.fixed.horizontal()
     hunger_inner.spacing = bar_margin
-    hunger_inner:add(wibox.container.margin(hunger_parts.button, 2, 0, 0, -7))
+    hunger_inner:add(wibox.container.margin(hunger_parts.button, 2, 0, 3, -5))
     hunger_inner:add(hunger_parts.apples)
     local hunger_row = capsule(hunger_inner, 14, 14, splitwm.tab_shape, "#000000ff")
 

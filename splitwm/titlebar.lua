@@ -235,10 +235,17 @@ local function make_launcher_widget(entry, size, callback)
         }
     else
         inner = wibox.widget {
-            text   = entry.label or "?",
-            align  = "center",
-            font   = "monospace bold " .. math.floor(size * 0.7) .. "px",
-            widget = wibox.widget.textbox,
+            {
+                text   = entry.label or "?",
+                align  = "center",
+                font   = "monospace bold " .. math.floor(size * 0.55) .. "px",
+                widget = wibox.widget.textbox,
+            },
+            bg            = color_btn_bg,
+            shape         = gears.shape.circle,
+            forced_width  = size,
+            forced_height = size,
+            widget        = wibox.container.background,
         }
     end
 
@@ -250,7 +257,7 @@ local function make_launcher_widget(entry, size, callback)
                 valign = "center",
                 widget = wibox.container.place,
             },
-            left = 4, right = 4, top = 2, bottom = 2,
+            left = 2, right = 2, top = 0, bottom = 0,
             widget = wibox.container.margin,
         },
         bg     = color_transparent,
@@ -1158,7 +1165,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         if #leaf.tabs == 0 then
             local launcher_ws = {}
             for _, e in ipairs(_splitwm.launchers) do
-                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, 30, function()
+                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, 34, function()
                     ctx.state.focused_leaf_id = leaf.id
                     if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
                 end)
