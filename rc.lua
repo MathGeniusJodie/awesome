@@ -251,11 +251,14 @@ end
 --- Build a single tag button: wallpaper/screenshot thumbnail in a rounded-rect frame.
 -- Empty tags show the wallpaper. Tags with windows show the screenshot from
 -- transitions.cache, which is captured synchronously on every tag departure.
+local TAG_PAD = 2  -- border/padding around each tag thumbnail
+
 local function make_tag_widget(t, ws)
     local CORNER  = 4
+    local PAD     = TAG_PAD
     local geo     = t.screen.geometry
     local thumb_h = wibar_height
-    local thumb_w = math.floor(thumb_h * geo.width / geo.height)
+    local thumb_w = math.floor((thumb_h - 2*PAD) * geo.width / geo.height) + 2*PAD
 
     local thumb = wibox.widget.base.make_widget()
     thumb.has_wins = false
@@ -270,7 +273,7 @@ local function make_tag_widget(t, ws)
 
     function thumb:draw(_, cr, w, h)
         local surf = (self.has_wins and transitions.cache[t]) or wp_surface
-        local pad = 2  -- space reserved outside the thumbnail for the border
+        local pad = PAD
 
         cr:save()
         cr:translate(pad, pad)
@@ -345,7 +348,7 @@ awful.screen.connect_for_each_screen(function(s)
     -- Build taglist manually so we have direct widget references (no
     -- get_children_by_id indirection that proved unreliable).
     local taglist_layout = wibox.layout.fixed.horizontal()
-    taglist_layout.spacing = 2
+    taglist_layout.spacing = 0
     for i, t in ipairs(s.tags) do
         taglist_layout:add(make_tag_widget(t, WORKSPACES[i]))
     end
