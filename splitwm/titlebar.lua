@@ -15,6 +15,7 @@ local beautiful = require("beautiful")
 local icons     = require("splitwm.icons")
 local tree      = require("splitwm.tree")
 local colors    = require("splitwm.colors")
+local underlay  = require("splitwm.underlay")
 
 ---------------------------------------------------------------------------
 -- Shared pickup / pending-drag state
@@ -35,7 +36,6 @@ local function pickup_split(id)         return { tag = "split",  split_id = id }
 local _geo_cache, _client_actual_geo, _split_anim_active
 local _try_drop_picked_up, _handle_split_pickup
 local _make_split_action_callbacks
-local _get_or_create_underlay, _make_wb_proxy
 local _splitwm
 local _TITLEBAR_HEIGHT, _BTN_SIZE, _BTN_SPACING, _MIN_SPLIT_W, _MIN_SPLIT_H
 local color_bg, color_fg, color_fg_disabled, color_close
@@ -135,8 +135,6 @@ function M.setup(deps)
     _try_drop_picked_up      = deps.try_drop_picked_up
     _handle_split_pickup     = deps.handle_split_pickup
     _make_split_action_callbacks = deps.make_split_action_callbacks
-    _get_or_create_underlay  = deps.get_or_create_underlay
-    _make_wb_proxy           = deps.make_wb_proxy
     _splitwm                 = deps.splitwm
     _TITLEBAR_HEIGHT         = deps.TITLEBAR_HEIGHT
     TAB_SPACING              = -math.floor((tab_cx(_TITLEBAR_HEIGHT) - TAB_EAR * TAB_CA) * 2)
@@ -475,7 +473,7 @@ local function tb_get_or_create_entry(s, leaf)
     local entry = cache[leaf.id]
     if entry then return entry end
     entry = {
-        wb                = _make_wb_proxy(_get_or_create_underlay(s).chrome_layer, s),
+        wb                = underlay.make_wb_proxy(underlay.get_or_create_underlay(s).chrome_layer, s),
         tooltip           = awful.tooltip {
             text = "", delay_show = 0.3, font = "monospace bold 12px",
             bg = color_bg, fg = color_fg, border_width = 0,
