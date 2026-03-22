@@ -118,11 +118,14 @@ local menu_was_open_this_event = false
 
 local M = {}
 
-M.drag          = drag
-M.cache         = titlebar_cache
-M.pickup_idle   = pickup_idle
-M.pickup_client = pickup_client
-M.pickup_split  = pickup_split
+M.drag               = drag
+M.cache              = titlebar_cache
+M.pickup_idle        = pickup_idle
+M.pickup_client      = pickup_client
+M.pickup_split       = pickup_split
+-- Exported for init.lua hover-tab calculation; depends on _BTN_SIZE/TAB_SPACING set in setup().
+M.tab_step           = tab_step
+M.TAB_CONTENT_V_PAD  = TAB_CONTENT_V_PAD
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile

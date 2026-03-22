@@ -21,6 +21,9 @@ local M = {}
 local BTN_SIZE, MIN_SPLIT_W, MIN_SPLIT_H
 local color_bg, color_fg, color_transparent, color_handle
 
+-- Total px subtracted from gap to get handle widget width (inset on each side).
+local HANDLE_INSET = 4
+
 function M.setup(deps)
     BTN_SIZE          = deps.BTN_SIZE
     MIN_SPLIT_W       = deps.MIN_SPLIT_W
@@ -186,18 +189,12 @@ local function get_drag_handle(s, i)
                 if not mouse.buttons[1] then
                     handle_state = "idle"; wb.bg = color_transparent; awful.layout.arrange(s); return false
                 end
-                local igap = b.parent_gap or 0
-                if b.dir == tree.DIR_H then
-                    local usable = b.parent_w - igap
-                    local min_r  = MIN_SPLIT_W / usable
-                    b.branch.ratio = math.max(min_r, math.min(1 - min_r, (mouse.x - b.parent_x - math.floor(igap / 2)) / usable))
-                    wb.x = mouse.x - math.floor(hw / 2)
-                else
-                    local usable = b.parent_h - igap
-                    local min_r  = MIN_SPLIT_H / usable
-                    b.branch.ratio = math.max(min_r, math.min(1 - min_r, (mouse.y - b.parent_y) / usable))
-                    wb.y = mouse.y - math.floor(hw / 2)
-                end
+                local igap   = b.parent_gap or 0
+                local usable = b.parent_w - igap
+                local min_r  = MIN_SPLIT_W / usable
+                b.branch.ratio = math.max(min_r, math.min(1 - min_r,
+                    (mouse.x - b.parent_x - math.floor(igap / 2)) / usable))
+                wb.x = mouse.x - math.floor(hw / 2)
                 awful.layout.arrange(s)
                 return true
             end, b.dir == tree.DIR_H and "sb_h_double_arrow" or "sb_v_double_arrow")
@@ -221,7 +218,7 @@ function M.update_drag_handles(s, state, bounds)
     end
 
     local gap      = beautiful.splitwm_gap
-    local handle_w = gap - 4
+    local handle_w = gap - HANDLE_INSET
     local hi       = 0
 
     for _, b in ipairs(bounds) do

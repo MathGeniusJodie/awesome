@@ -39,6 +39,23 @@ local MIN_SPLIT_H  = TITLEBAR_HEIGHT
 -- Initial ratio when splitting a leaf (golden ratio: larger side for existing content).
 local SPLIT_RATIO = 0.618
 
+-- Ratio delta applied per grow/shrink keypress.
+local RESIZE_STEP = 0.05
+
+-- Effective titlebar height: grows to match gap so the bar never disappears into it.
+local function effective_tb_h(gap) return math.max(TITLEBAR_HEIGHT, gap) end
+
+-- Geometry of the client area inside a leaf, accounting for border and titlebar.
+-- geo is the raw leaf rectangle from compute_tree; the wibox extends gap above it.
+local function client_geo(geo, bw, gap, tb_h)
+    return {
+        x      = geo.x + bw,
+        y      = geo.y - gap + tb_h,
+        width  = math.max(1, geo.width  - bw * 2),
+        height = math.max(1, geo.height + gap - bw - tb_h),
+    }
+end
+
 ---------------------------------------------------------------------------
 -- App launchers (configurable from rc.lua via splitwm.launchers)
 ---------------------------------------------------------------------------
@@ -567,7 +584,7 @@ local function arrange(p)
     if type(s) == "number" then s = screen[s] end
     geo_cache[tag] = { geos = geos, bounds = bounds }
     local bw   = beautiful.splitwm_focus_border_width
-    local tb_h = math.max(TITLEBAR_HEIGHT, gap)
+    local tb_h = effective_tb_h(gap)
 
     for _, leaf in ipairs(tree.collect_leaves(root)) do
         local new_tabs = {}
@@ -584,12 +601,7 @@ local function arrange(p)
                 c.hidden = false
                 c.border_width = 0
                 if not c.fullscreen and not split_anim_active[s] then
-                    local tgt = {
-                        x      = geo.x + bw,
-                        y      = geo.y - gap + tb_h,
-                        width  = math.max(1, geo.width - bw * 2),
-                        height = math.max(1, geo.height + gap - bw - tb_h),
-                    }
+                    local tgt = client_geo(geo, bw, gap, tb_h)
                     local ag   = client_actual_geo[c]
                     local last = client_last_target[c]
                     local skip = ag and last
@@ -687,7 +699,7 @@ local function apply_leaf_geo(s, leaf_id, geo)
     if not state then return end
     local gap  = beautiful.splitwm_gap
     local bw   = beautiful.splitwm_focus_border_width
-    local tb_h = math.max(TITLEBAR_HEIGHT, gap)
+    local tb_h = effective_tb_h(gap)
     local tc   = tb.cache[s] and tb.cache[s][leaf_id]
     if tc then
         tc.wb.x      = geo.x
@@ -699,12 +711,7 @@ local function apply_leaf_geo(s, leaf_id, geo)
     if leaf then
         local c = leaf.tabs[leaf.active_tab]
         if c and c.valid and not c.fullscreen then
-            c:geometry({
-                x      = geo.x + bw,
-                y      = geo.y - gap + tb_h,
-                width  = math.max(1, geo.width  - bw * 2),
-                height = math.max(1, geo.height + gap - bw - tb_h),
-            })
+            c:geometry(client_geo(geo, bw, gap, tb_h))
         end
     end
 end
@@ -858,8 +865,8 @@ splitwm.next_tab         = function() with_tag(function(t) cycle_tab(t, 1) end) 
 splitwm.prev_tab         = function() with_tag(function(t) cycle_tab(t, -1) end) end
 splitwm.move_tab_next    = function() with_tag(function(t) move_tab_to_direction(t, "next") end) end
 splitwm.move_tab_prev    = function() with_tag(function(t) move_tab_to_direction(t, "prev") end) end
-splitwm.resize_grow      = function() with_tag(function(t) resize_focused(t, 0.05) end) end
-splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -0.05) end) end
+splitwm.resize_grow      = function() with_tag(function(t) resize_focused(t,  RESIZE_STEP) end) end
+splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -RESIZE_STEP) end) end
 splitwm.close_split = function()
     local s = awful.screen.focused()
     local t = s and s.selected_tag
@@ -900,9 +907,9 @@ local function start_drag_hover_poll()
             end
             local mx, my   = m.x, m.y
             local gap      = beautiful.splitwm_gap
-            local tb_h     = math.max(TITLEBAR_HEIGHT, gap)
-            local icon_sz  = tb_h - 4
-            local step     = (21 + icon_sz + 2 + BTN_SIZE + 21) + tb.TAB_SPACING
+            local tb_h     = effective_tb_h(gap)
+            local icon_sz  = tb_h - 2 * tb.TAB_CONTENT_V_PAD
+            local step     = tb.tab_step(icon_sz)
             for s in screen do
                 local t = s.selected_tag
                 if not t then goto continue end
