@@ -712,7 +712,8 @@ function status.new_status_clock_capsule(bar_margin, capsule_height, icon_bottom
             gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
         end
         bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
-        return wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
+        local m = wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
+        return wibox.container.constraint(m, "exact", nil, capsule_height + bar_margin + 2)
     end
 
     local chip_widget = status.new_chip_widget()

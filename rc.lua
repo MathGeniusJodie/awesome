@@ -69,7 +69,7 @@ beautiful.splitwm_fg_disabled    = "#ffffff55"
 beautiful.splitwm_handle_color   = "#ffffff55"  -- drag handle pill (vertical handles + titlebar pill)
 
 -- Splitwm layout
-beautiful.splitwm_gap              = 34
+beautiful.splitwm_gap              = 48
 beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_border_radius    = 2
 beautiful.splitwm_empty_radius     = 14
@@ -239,7 +239,7 @@ beautiful.fg_focus       = "#ffffff"
 
 local bar_margin     = 3
 local capsule_height = 24
-local wibar_height   = bar_margin * 2 + capsule_height  -- equal top + bottom padding
+local wibar_height   = beautiful.splitwm_gap - beautiful.splitwm_focus_border_width
 local icon_bottom_pad = 4  -- gap between icon bottom and capsule bottom edge
 
 local function parse_hex(hex)
@@ -363,7 +363,8 @@ awful.screen.connect_for_each_screen(function(s)
             gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
         end
         bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
-        return wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
+        local m = wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
+        return wibox.container.constraint(m, "exact", nil, capsule_height + bar_margin + 2)
     end
 
     local hunger_inner = wibox.layout.fixed.horizontal()
@@ -394,12 +395,12 @@ awful.screen.connect_for_each_screen(function(s)
             wibox.container.margin(s.mytaglist, 0, 0, 0, 0),
             s.mypromptbox,
         },
-        wibox.container.place(hunger_row), -- Center
+        { widget = wibox.container.place, valign = "bottom", hunger_row }, -- Center
         { -- Right: status capsule flush with the wibar's right (gap) edge
             layout = wibox.layout.fixed.horizontal,
             spacing = bar_margin,
             wibox.widget.systray(),
-            status_clock_capsule,
+            { widget = wibox.container.place, valign = "bottom", status_clock_capsule },
         },
     }
 
