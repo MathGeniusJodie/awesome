@@ -97,9 +97,10 @@ local function animate(s, old_overlay, new_overlay, dx, new_tag)
                 new_overlay.visible = false
                 active[s] = nil
                 if new_tag then
-                    gears.timer.delayed_call(function()
+                    gears.timer.start_new(0.15, function()
                         M.cache[new_tag] = capture_screen(s)
                         new_tag:emit_signal("transitions::arrived")
+                        return false
                     end)
                 end
             end
@@ -206,9 +207,10 @@ function M.switch_instant(s, delta)
     local idx = (cur.index - 1 + delta) % #tags + 1
     local new_tag = tags[idx]
     new_tag:view_only()
-    gears.timer.delayed_call(function()
+    gears.timer.start_new(0.15, function()
         M.cache[new_tag] = capture_screen(s)
         new_tag:emit_signal("transitions::arrived")
+        return false
     end)
 end
 
