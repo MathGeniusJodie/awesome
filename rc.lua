@@ -69,7 +69,7 @@ beautiful.splitwm_fg_disabled    = "#ffffff55"
 beautiful.splitwm_handle_color   = "#ffffff55"  -- drag handle pill (vertical handles + titlebar pill)
 
 -- Splitwm layout
-beautiful.splitwm_gap              = 48
+beautiful.splitwm_gap              = 42 -- minimum 32
 beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_border_radius    = 2
 beautiful.splitwm_empty_radius     = 14
@@ -237,9 +237,8 @@ beautiful.font           = "monospace bold 12px"
 beautiful.fg_normal      = "#ffffff"
 beautiful.fg_focus       = "#ffffff"
 
-local bar_margin     = 3
 local capsule_height = 24
-local wibar_height   = beautiful.splitwm_gap - beautiful.splitwm_focus_border_width
+local wibar_height   = beautiful.splitwm_gap
 local icon_bottom_pad = 4  -- gap between icon bottom and capsule bottom edge
 
 local function parse_hex(hex)
@@ -255,7 +254,7 @@ end
 local function make_tag_widget(t, ws)
     local CORNER  = 4
     local geo     = t.screen.geometry
-    local thumb_h = beautiful.splitwm_gap - 6
+    local thumb_h = wibar_height
     local thumb_w = math.floor(thumb_h * geo.width / geo.height)
 
     local thumb = wibox.widget.base.make_widget()
@@ -311,7 +310,7 @@ local function make_tag_widget(t, ws)
         thumb:emit_signal("widget::redraw_needed")
     end
 
-    local layout = wibox.container.margin(thumb, 0, 0, wibar_height - thumb_h - 2, 2)
+    local layout = wibox.container.margin(thumb, 0, 0, 0, 0)
     layout:buttons(gears.table.join(
         awful.button({}, 1,
             function() transitions.prepare(t.screen, t) end,
@@ -346,7 +345,7 @@ awful.screen.connect_for_each_screen(function(s)
     -- Build taglist manually so we have direct widget references (no
     -- get_children_by_id indirection that proved unreliable).
     local taglist_layout = wibox.layout.fixed.horizontal()
-    taglist_layout.spacing = 4
+    taglist_layout.spacing = 2
     for i, t in ipairs(s.tags) do
         taglist_layout:add(make_tag_widget(t, WORKSPACES[i]))
     end
@@ -363,18 +362,18 @@ awful.screen.connect_for_each_screen(function(s)
             gears.shape.partially_rounded_rect(cr, w, h, true, true, false, false, capsule_height / 2)
         end
         bg:set_widget(wibox.container.margin(inner, pad_l or 10, pad_r or 10, 0, 0))
-        local m = wibox.container.margin(bg, 0, 0, bar_margin + 2, 0)
-        return wibox.container.constraint(m, "exact", nil, capsule_height + bar_margin + 2)
+        local m = wibox.container.margin(bg, 0, 0, 2, 0)
+        return wibox.container.constraint(m, "exact", nil, capsule_height + 2)
     end
 
     local hunger_inner = wibox.layout.fixed.horizontal()
-    hunger_inner.spacing = bar_margin
+    hunger_inner.spacing = 0
     hunger_inner:add(wibox.container.margin(hunger_parts.button, 0, 0, 3, -5))
     hunger_inner:add(hunger_parts.apples)
     local hunger_row = capsule(hunger_inner, 16, 20, splitwm.tab_shape, "#000000ff")
 
     local status_clock_capsule = status.new_status_clock_capsule(
-        bar_margin, capsule_height, icon_bottom_pad, splitwm.tab_shape)
+        0, capsule_height, icon_bottom_pad, splitwm.tab_shape)
 
     local sg = beautiful.splitwm_gap
     s.mywibox = wibox({
@@ -398,14 +397,14 @@ awful.screen.connect_for_each_screen(function(s)
         { widget = wibox.container.place, valign = "bottom", hunger_row }, -- Center
         { -- Right: status capsule flush with the wibar's right (gap) edge
             layout = wibox.layout.fixed.horizontal,
-            spacing = bar_margin,
+            spacing = 0,
             wibox.widget.systray(),
             { widget = wibox.container.place, valign = "bottom", status_clock_capsule },
         },
     }
 
     -- Lock button in its own wibox at the actual screen corner
-    local lock_w = capsule_height + bar_margin
+    local lock_w = capsule_height
     s.mylock_wibox = wibox({
         x       = s.geometry.x + s.geometry.width - lock_w,
         y       = s.geometry.y + s.geometry.height - wibar_height,
@@ -419,7 +418,7 @@ awful.screen.connect_for_each_screen(function(s)
     })
     s.mylock_wibox:setup {
         wibox.container.margin(
-            status.new_lock_widget(capsule_height), 0, bar_margin, wibar_height - capsule_height - 2, 0),
+            status.new_lock_widget(capsule_height), 0, 0, wibar_height - capsule_height - 2, 0),
         layout = wibox.layout.fixed.horizontal,
     }
 end)
