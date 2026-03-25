@@ -142,8 +142,6 @@ local function tab_path(cr, w, h)
     cr:arc_negative(w, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
 end
 
-
--- might be dead code
 function M.tab_shape(cr, w, h)
     tab_path(cr, w, h)
     cr:close_path()
@@ -181,8 +179,7 @@ end
 ---------------------------------------------------------------------------
 -- Flush caches (called from splitwm.flush_caches)
 ---------------------------------------------------------------------------
-
--- might be dead code
+ 
 function M.flush_caches()
     for _, sc in pairs(titlebar_cache) do
         for _, entry in pairs(sc) do
@@ -247,7 +244,7 @@ end
 -- Widget helpers
 ---------------------------------------------------------------------------
 
--- this is either dead code or should be in underlay.lua
+-- todo: this should be in underlay.lua
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
     local inner

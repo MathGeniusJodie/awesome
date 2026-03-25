@@ -875,6 +875,7 @@ splitwm.close_split = function()
     close_leaf_with_anim(t, s, state, state.focused_leaf_id)
 end
 
+
 function splitwm.cancel_pickup()
     drag.pending = nil
     if drag.pickup.tag ~= "idle" then
