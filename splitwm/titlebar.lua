@@ -52,18 +52,18 @@ local CAIRO_LINE_CAP_ROUND = 1
 local BTN_V_RAISE = 4
 
 -- Tab color picker menu geometry.
-local MENU_CIRC_SIZE = 18
+local MENU_CIRC_SIZE = 25
 local MENU_CIRC_GAP  = 4
-local MENU_PAD_H     = 8
-local MENU_PAD_V     = 6
+local MENU_PAD_H     = 0
+local MENU_PAD_V     = 8
 local MENU_BW        = 2   -- border on left / right / bottom
 
 -- Left/right padding inside each tab widget (drives close-button x-offset).
-local TAB_PAD_H = 21
+local TAB_PAD_H = 22
 
 -- Spacing between the app icon and the close button inside a tab.
 -- Must match the `spacing` value in the tab content row widget.
-local ICON_CLOSE_GAP = 2
+local ICON_CLOSE_GAP = 0
 
 -- Top/bottom padding inside each tab's content margin.
 -- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep these in sync.
@@ -73,7 +73,7 @@ local TAB_CONTENT_V_PAD = 1
 local PLUS_BTN_GAP = 24
 
 -- Corner radius for the tab bar's top-left/top-right background shape.
-local TAB_BAR_CORNER = 4
+local TAB_BAR_CORNER = 0 -- dead code
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (which styles the content background).
@@ -87,8 +87,8 @@ local DRAG_THRESHOLD_PX = 4
 
 -- Tab shape geometry.  TAB_ALPHA is the slant angle from vertical.
 local TAB_ALPHA  = math.rad(20)
-local TAB_EAR    = 11
-local TAB_CORNER = 8
+local TAB_EAR    = 12
+local TAB_CORNER = 9
 local TAB_SA     = math.sin(TAB_ALPHA)
 local TAB_CA     = math.cos(TAB_ALPHA)
 local TAB_TA     = math.tan(TAB_ALPHA)
@@ -142,6 +142,8 @@ local function tab_path(cr, w, h)
     cr:arc_negative(w, h - TAB_EAR, TAB_EAR, math.pi - TAB_ALPHA, math.pi / 2)
 end
 
+
+-- might be dead code
 function M.tab_shape(cr, w, h)
     tab_path(cr, w, h)
     cr:close_path()
@@ -180,6 +182,7 @@ end
 -- Flush caches (called from splitwm.flush_caches)
 ---------------------------------------------------------------------------
 
+-- might be dead code
 function M.flush_caches()
     for _, sc in pairs(titlebar_cache) do
         for _, entry in pairs(sc) do
@@ -196,6 +199,7 @@ end
 -- Drawing helpers
 ---------------------------------------------------------------------------
 
+-- might be dead code, this is for the bg of the bar I think, which is completely transparent and invisible
 local function rounded_top(cr, w, h)
     local r = TAB_BAR_CORNER
     cr:new_sub_path()
@@ -243,6 +247,7 @@ end
 -- Widget helpers
 ---------------------------------------------------------------------------
 
+-- this is either dead code or should be in underlay.lua
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
     local inner
@@ -328,6 +333,7 @@ end
 
 local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_color, tab_w)
     local ms        = tab_color_menu_state
+    -- todo: move this to top of file
     local COLS      = 3
     local ROWS      = 3
     local content_w = COLS * MENU_CIRC_SIZE + (COLS - 1) * MENU_CIRC_GAP
@@ -584,6 +590,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local icon_widget = wibox.widget {
         tab_icon, halign = "center", valign = "center", widget = wibox.container.place,
     }
+    -- todo: the background with rounded corners is invisible, simplify this, the button is just a naked icon
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
         bg           = color_transparent,
@@ -890,6 +897,7 @@ end
 -- Build the focus border drawn around the client area
 ---------------------------------------------------------------------------
 
+-- todo: investigate using builtin roundrect
 local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
     local w   = wibox.widget.base.make_widget()
     w._bc     = border_color
@@ -1011,6 +1019,7 @@ end
 -- Assemble the titlebar wibox for an empty leaf
 ---------------------------------------------------------------------------
 
+-- todo: investigate mergin this with the full split code? also this isn't a seperate wibox anymore so name is confusing?
 local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
     local row1, row2 = {}, {}
     local mid = math.ceil(#launcher_ws / 2)
