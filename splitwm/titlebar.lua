@@ -54,6 +54,8 @@ local BTN_V_RAISE = 4
 -- Tab color picker menu geometry.
 local MENU_CIRC_SIZE = 25
 local MENU_CIRC_GAP  = 4
+local MENU_CIRC_COLS = 3
+local MENU_CIRC_ROWS = 3
 local MENU_PAD_H     = 0
 local MENU_PAD_V     = 8
 local MENU_BW        = 2   -- border on left / right / bottom
@@ -71,9 +73,6 @@ local TAB_CONTENT_V_PAD = 1
 
 -- Gap between the last tab and the "+" new-tab button.
 local PLUS_BTN_GAP = 24
-
--- Corner radius for the tab bar's top-left/top-right background shape.
-local TAB_BAR_CORNER = 0 -- dead code
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (which styles the content background).
@@ -196,15 +195,6 @@ end
 -- Drawing helpers
 ---------------------------------------------------------------------------
 
--- might be dead code, this is for the bg of the bar I think, which is completely transparent and invisible
-local function rounded_top(cr, w, h)
-    local r = TAB_BAR_CORNER
-    cr:new_sub_path()
-    cr:arc(r,     r, r, math.pi,       1.5 * math.pi)
-    cr:arc(w - r, r, r, 1.5 * math.pi, 2   * math.pi)
-    cr:line_to(w, h) cr:line_to(0, h) cr:close_path()
-end
-
 local function draw_tab_border(cr, w, h)
     tab_path(cr, w, h)
 end
@@ -244,7 +234,6 @@ end
 -- Widget helpers
 ---------------------------------------------------------------------------
 
--- todo: this should be in underlay.lua
 local function make_launcher_widget(entry, size, callback)
     local icon_path = entry.icon
     local inner
@@ -330,12 +319,9 @@ end
 
 local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_color, tab_w)
     local ms        = tab_color_menu_state
-    -- todo: move this to top of file
-    local COLS      = 3
-    local ROWS      = 3
-    local content_w = COLS * MENU_CIRC_SIZE + (COLS - 1) * MENU_CIRC_GAP
+    local content_w = MENU_CIRC_COLS * MENU_CIRC_SIZE + (MENU_CIRC_COLS - 1) * MENU_CIRC_GAP
     local menu_w    = tab_w or (MENU_BW * 2 + MENU_PAD_H * 2 + content_w)
-    local menu_h    = MENU_PAD_V * 2 + ROWS * MENU_CIRC_SIZE + (ROWS - 1) * MENU_CIRC_GAP + MENU_BW
+    local menu_h    = MENU_PAD_V * 2 + MENU_CIRC_ROWS * MENU_CIRC_SIZE + (MENU_CIRC_ROWS - 1) * MENU_CIRC_GAP + MENU_BW
 
     if not ms.wb then
         ms.wb = wibox { ontop = true, visible = false, border_width = 0 }
@@ -399,10 +385,10 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     if ms.last_menu_w ~= menu_w then
         ms.last_menu_w = menu_w
         local grid = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.vertical }
-        for row = 0, ROWS - 1 do
+        for row = 0, MENU_CIRC_ROWS - 1 do
             local row_spec = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.horizontal }
-            for col = 1, COLS do
-                local idx = row * COLS + col
+            for col = 1, MENU_CIRC_COLS do
+                local idx = row * MENU_CIRC_COLS + col
                 if ms.circs[idx] then table.insert(row_spec, ms.circs[idx]) end
             end
             table.insert(grid, wibox.widget(row_spec))
@@ -587,12 +573,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local icon_widget = wibox.widget {
         tab_icon, halign = "center", valign = "center", widget = wibox.container.place,
     }
-    -- todo: the background with rounded corners is invisible, simplify this, the button is just a naked icon
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-        bg           = color_transparent,
         fg           = tab_state == "active" and color_fg or color_transparent,
-        shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, 4) end,
         forced_width = _BTN_SIZE,
         widget       = wibox.container.background,
     }
@@ -894,7 +877,6 @@ end
 -- Build the focus border drawn around the client area
 ---------------------------------------------------------------------------
 
--- todo: investigate using builtin roundrect
 local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
     local w   = wibox.widget.base.make_widget()
     w._bc     = border_color
@@ -977,7 +959,7 @@ local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
     return {
         {
             { bar_content, top = ctx.top_pad, widget = wibox.container.margin },
-            bg = ctx.bar_bg, shape = rounded_top, forced_height = ctx.tb_bar_h,
+            bg = ctx.bar_bg, forced_height = ctx.tb_bar_h,
             widget = wibox.container.background,
         },
         layout = wibox.layout.fixed.vertical,
@@ -1016,8 +998,7 @@ end
 -- Assemble the titlebar wibox for an empty leaf
 ---------------------------------------------------------------------------
 
--- todo: investigate mergin this with the full split code? also this isn't a seperate wibox anymore so name is confusing?
-local function tb_assemble_empty_wibox(entry, bar_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
+local function tb_assemble_empty_leaf(entry, bar_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
     local row1, row2 = {}, {}
     local mid = math.ceil(#launcher_ws / 2)
     for i, w in ipairs(launcher_ws) do
@@ -1196,7 +1177,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                     if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
                 end)
             end
-            tb_assemble_empty_wibox(entry, tab_widgets, controls, border_draw, drag_pill, launcher_ws, ctx)
+            tb_assemble_empty_leaf(entry, tab_widgets, controls, border_draw, drag_pill, launcher_ws, ctx)
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
                 if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
                 if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
