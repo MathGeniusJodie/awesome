@@ -726,8 +726,15 @@ function status.new_status_clock_capsule(bar_margin, capsule_height, icon_bottom
     icons_row:add(wibox.container.margin(bat_widget,  0, 0, 0, icon_bottom_pad))
     icons_row:add(wibox.container.margin(vol_widget,  0, 0, 0, icon_bottom_pad))
 
+    local tray = wibox.widget.systray()
+    tray:set_base_size(capsule_height - 4)
+    local tray_placed = wibox.container.place()
+    tray_placed.valign = "bottom"
+    tray_placed:set_widget(wibox.container.margin(tray, 0, 0, 0, 0))
+
     local combined_row = wibox.layout.fixed.horizontal()
     combined_row.spacing = 16
+    combined_row:add(tray_placed)
     combined_row:add(icons_row)
     combined_row:add(status.new_datetime_widget())
 
@@ -748,7 +755,7 @@ function status.setup(deps)
 end
 
 local CAPSULE_HEIGHT  = 24
-local ICON_BOTTOM_PAD = 4   -- gap between icon bottom and capsule bottom edge
+local ICON_BOTTOM_PAD = 3   -- gap between icon bottom and capsule bottom edge
 local TAG_PAD         = 2   -- border/padding around each tag thumbnail
 
 local function parse_hex(hex)
@@ -897,7 +904,6 @@ function status.setup_screen(s)
         { -- Right: status capsule flush with the wibar's right (gap) edge
             layout = wibox.layout.fixed.horizontal,
             spacing = 0,
-            wibox.widget.systray(),
             { widget = wibox.container.place, valign = "bottom", status_clock_capsule },
         },
     }
