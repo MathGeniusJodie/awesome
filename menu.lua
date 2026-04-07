@@ -98,7 +98,6 @@ function menu.setup(opts)
             { "Browser",      function() splitwm._append_next_client = true; awful.spawn(browser)     end, launcher_icon(browser)     },
             { "File Manager", function() splitwm._append_next_client = true; awful.spawn(filemanager) end, launcher_icon(filemanager) },
             { "Obsidian",     function() splitwm._append_next_client = true; awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
-            { "yt-gtk",       function() splitwm._append_next_client = true; awful.spawn("/home/jodie/yt-scrape/target/release/yt-gtk") end, lookup({"video"}) },
             { "Claude",       function() splitwm._append_next_client = true; awful.spawn("claude-desktop") end, lookup({"claude-desktop"}) },
             { "─────────────" },
         }

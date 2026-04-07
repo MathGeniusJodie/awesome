@@ -150,11 +150,6 @@ splitwm.launchers = {
         cmd        = "obsidian",
     },
     {
-        label      = "YT",
-        icon_names = {"video"},
-        cmd        = "/home/jodie/yt-scrape/target/release/yt-gtk",
-    },
-    {
         label      = "AI",
         icon_names = {"claude-desktop"},
         cmd        = "claude-desktop",
