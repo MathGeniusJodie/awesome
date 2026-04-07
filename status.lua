@@ -656,7 +656,7 @@ function status.new_datetime_widget()
             y            = sg.y + sg.height - wibar_h - cal_h,
             width        = cal_w,
             height       = cal_h,
-            bg           = beautiful.splitwm_color_bg or "#000000",
+            bg           = beautiful.splitwm_color_bg,
             border_width = 0,
             ontop        = true,
             visible      = true,
@@ -738,7 +738,7 @@ function status.new_status_clock_capsule(bar_margin, capsule_height, icon_bottom
     combined_row:add(icons_row)
     combined_row:add(status.new_datetime_widget())
 
-    return capsule(combined_row, 24, 26, tab_shape, "#000000ff")
+    return capsule(combined_row, 24, 26, tab_shape, beautiful.splitwm_color_bg)
 end
 
 ---------------------------------------------------------------------------
@@ -755,7 +755,7 @@ function status.setup(deps)
 end
 
 local CAPSULE_HEIGHT  = 24
-local ICON_BOTTOM_PAD = 3   -- gap between icon bottom and capsule bottom edge
+local ICON_BOTTOM_PAD = 4   -- gap between icon bottom and capsule bottom edge
 local TAG_PAD         = 2   -- border/padding around each tag thumbnail
 
 local function parse_hex(hex)
@@ -876,7 +876,7 @@ function status.setup_screen(s)
     hunger_inner.spacing = 0
     hunger_inner:add(wibox.container.margin(hunger_parts.button, 0, 0, 3, -5))
     hunger_inner:add(hunger_parts.apples)
-    local hunger_row = capsule(hunger_inner, 16, 20, _splitwm.tab_shape, "#000000ff")
+    local hunger_row = capsule(hunger_inner, 16, 20, _splitwm.tab_shape, beautiful.splitwm_color_bg)
 
     local status_clock_capsule = status.new_status_clock_capsule(
         0, CAPSULE_HEIGHT, ICON_BOTTOM_PAD, _splitwm.tab_shape)
@@ -923,7 +923,7 @@ function status.setup_screen(s)
     })
     s.mylock_wibox:setup {
         wibox.container.margin(
-            status.new_lock_widget(CAPSULE_HEIGHT), 0, 0, wibar_height - CAPSULE_HEIGHT - 2, 0),
+            status.new_lock_widget(CAPSULE_HEIGHT), 0, 2, wibar_height - CAPSULE_HEIGHT - 2, 0),
         layout = wibox.layout.fixed.horizontal,
     }
 end
