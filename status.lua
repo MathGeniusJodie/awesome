@@ -935,7 +935,7 @@ function status.setup_screen(s)
     -- Power button above the lock button
     s.mypower_wibox = wibox({
         x       = s.geometry.x + s.geometry.width - lock_w,
-        y       = s.geometry.y + s.geometry.height - lock_w - lock_w - 4,
+        y       = s.geometry.y + s.geometry.height - lock_w - lock_w - 2,
         width   = lock_w,
         height  = lock_w,
         bg      = "#00000000",
