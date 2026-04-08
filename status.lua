@@ -208,7 +208,7 @@ local function make_circle_icon_btn_widget(size, icon_fn, cmd)
     bg.shape        = gears.shape.circle
     bg.forced_width  = size
     bg.forced_height = size
-    bg:set_widget(wibox.container.margin(wibox.container.place(icon), 0, 0, 0, 2))
+    bg:set_widget(wibox.container.margin(wibox.container.place(icon), 0, 0, 1, 1))
 
     bg:buttons(gears.table.join(awful.button({}, 1, cmd)))
 
@@ -218,6 +218,11 @@ end
 function status.new_lock_widget(size)
     return make_circle_icon_btn_widget(size, icons.lock,
         function() awful.spawn(_home .. "/.local/bin/xflock4") end)
+end
+
+function status.new_power_widget(size)
+    return make_circle_icon_btn_widget(size, icons.power,
+        function() awful.spawn("poweroff") end)
 end
 
 ---------------------------------------------------------------------------
@@ -909,12 +914,12 @@ function status.setup_screen(s)
     }
 
     -- Lock button in its own wibox at the actual screen corner
-    local lock_w = CAPSULE_HEIGHT
+    local lock_w = 26
     s.mylock_wibox = wibox({
         x       = s.geometry.x + s.geometry.width - lock_w,
-        y       = s.geometry.y + s.geometry.height - wibar_height,
+        y       = s.geometry.y + s.geometry.height - lock_w - 2,
         width   = lock_w,
-        height  = wibar_height,
+        height  = lock_w,
         bg      = "#00000000",
         ontop   = false,
         screen  = s,
@@ -923,7 +928,24 @@ function status.setup_screen(s)
     })
     s.mylock_wibox:setup {
         wibox.container.margin(
-            status.new_lock_widget(CAPSULE_HEIGHT), 0, 2, wibar_height - CAPSULE_HEIGHT - 2, 0),
+            status.new_lock_widget(lock_w), 0, 2, 2, 0),
+        layout = wibox.layout.fixed.horizontal,
+    }
+
+    -- Power button above the lock button
+    s.mypower_wibox = wibox({
+        x       = s.geometry.x + s.geometry.width - lock_w,
+        y       = s.geometry.y + s.geometry.height - lock_w - lock_w - 4,
+        width   = lock_w,
+        height  = lock_w,
+        bg      = "#00000000",
+        ontop   = false,
+        screen  = s,
+        visible = true,
+        type    = "dock",
+    })
+    s.mypower_wibox:setup {
+        wibox.container.margin(status.new_power_widget(lock_w), 0, 2, 2, 0),
         layout = wibox.layout.fixed.horizontal,
     }
 end

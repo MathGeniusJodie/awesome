@@ -77,18 +77,33 @@ function icons.lock(cr, w, h)
     local cx = w / 2
     -- Shackle: arc on top
     cr:set_line_width(w * 0.165)
-    local sy = h * 0.465
+    local sy = h * 0.34
     local sr = w * 0.275
     cr:arc(cx, sy, sr, math.pi, 0)
     cr:stroke()
     -- Body: rounded rect, lower portion
-    local bx, by = w * 0.09, h * 0.41
-    local bw, bh = w * 0.82, h * 0.56
+    local bx, by = w * 0.01, h * 0.36
+    local bw, bh = w * 0.98, h * 0.68
     cr:save()
     cr:translate(bx, by)
     gears.shape.rounded_rect(cr, bw, bh, bw * 0.18)
     cr:restore()
     cr:fill()
+end
+
+function icons.power(cr, w, h)
+    local cx, cy = w / 2, h / 2
+    local r = w * 0.42
+    local lw = w * 0.165
+    cr:set_line_width(lw)
+    -- Arc: ~300° ring with small gap at top
+    local gap = math.pi * 0.12
+    cr:arc(cx, cy, r, -math.pi / 2 + gap, -math.pi / 2 - gap + 2 * math.pi)
+    cr:stroke()
+    -- Vertical stem from center up through the gap
+    cr:move_to(cx, cy)
+    cr:line_to(cx, cy - r - lw * 1.0)
+    cr:stroke()
 end
 
 function icons.speaker(cr, w, h)
