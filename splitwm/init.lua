@@ -368,6 +368,9 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     local target_leaf = state.leaf_map[leaf_id]
     if not target_leaf then drag.pickup = pickup_idle(); return false end
 
+    -- Capture old geometry before tree mutation for animation.
+    local old_geo = geo_cache[t] and geo_cache[t].geos[leaf_id]
+
     local c       = drag.pickup.client
     local src_tag = drag.pickup.client_tag
 
@@ -402,6 +405,20 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     colors.resolve_color_conflict(child_new, c)
     state.focused_leaf_id = child_new.id
     drag.pickup = pickup_idle()
+
+    -- Queue split animation: existing leaf animates from old_geo, new leaf slides in from edge.
+    if old_geo then
+        local s = t.screen
+        if type(s) == "number" then s = screen[s] end
+        if s then
+            split_anim_pending[s] = {
+                old_geo = old_geo,
+                a_id    = child_existing.id,
+                b_id    = child_new.id,
+                dir     = direction,
+            }
+        end
+    end
 
     if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
     return true
