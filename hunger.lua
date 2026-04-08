@@ -143,7 +143,7 @@ function hunger.new_widget(btn_height)
 
     local function in_eating_window()
         local n = now_s()
-        return n >= MEAL_TIMES[1] and n < DAY_END_S
+        return n >= MEAL_TIMES[1] and n < FEED_WINDOW_END * 3600
     end
 
     local function update_apples()
@@ -189,7 +189,11 @@ function hunger.new_widget(btn_height)
         btn_bg:emit_signal("widget::redraw_needed")
     end
 
+    local capsule_widget  -- set via set_capsule() after construction
+
     local function update_all()
+        local visible = in_eating_window()
+        if capsule_widget then capsule_widget.visible = visible end
         update_apples()
         update_btn()
     end
@@ -218,6 +222,7 @@ function hunger.new_widget(btn_height)
             apples_container = p
             return p
         end)(),
+        set_capsule = function(w) capsule_widget = w end,
     }
 end
 

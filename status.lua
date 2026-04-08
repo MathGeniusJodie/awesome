@@ -883,6 +883,7 @@ function status.setup_screen(s)
     hunger_inner:add(wibox.container.margin(hunger_parts.button, 0, 0, 3, -5))
     hunger_inner:add(hunger_parts.apples)
     local hunger_row = capsule(hunger_inner, 16, 20, _splitwm.tab_shape, beautiful.splitwm_color_bg)
+    hunger_parts.set_capsule(hunger_row)
 
     local status_clock_capsule = status.new_status_clock_capsule(
         0, CAPSULE_HEIGHT, ICON_BOTTOM_PAD, _splitwm.tab_shape)
