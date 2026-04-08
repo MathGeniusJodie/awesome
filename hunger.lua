@@ -139,7 +139,17 @@ function hunger.new_widget(btn_height)
         apple_row:add(img)
     end
 
+    local apples_container  -- set below, used in update_apples
+
+    local function in_eating_window()
+        local n = now_s()
+        return n >= MEAL_TIMES[1] and n < DAY_END_S
+    end
+
     local function update_apples()
+        if apples_container then
+            apples_container.visible = in_eating_window()
+        end
         local level = get_level()
         for i = 1, NUM_APPLES do
             local fill = math.max(0, math.min(1, level - (i - 1)))
@@ -169,7 +179,12 @@ function hunger.new_widget(btn_height)
     btn_bg.forced_height = btn_height
     btn_bg:set_widget(wibox.container.place(hunger_icon))
 
+    local btn_container  -- set below, used in update_btn
+
     local function update_btn()
+        if btn_container then
+            btn_container.visible = in_eating_window()
+        end
         btn_bg.bg = (get_level() <= 0) and beautiful.splitwm_accent or beautiful.splitwm_btn_bg
         btn_bg:emit_signal("widget::redraw_needed")
     end
@@ -194,11 +209,13 @@ function hunger.new_widget(btn_height)
         button = (function()
             local p = wibox.container.place(btn_bg)
             p.valign = "bottom"
+            btn_container = p
             return p
         end)(),
         apples = (function()
             local p = wibox.container.place(apple_row)
             p.valign = "bottom"
+            apples_container = p
             return p
         end)(),
     }
