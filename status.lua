@@ -191,10 +191,11 @@ function status.new_chip_widget()
     return w
 end
 
-local function make_circle_icon_btn_widget(size, icon_fn, cmd)
+local function make_circle_icon_btn_widget(size, icon_fn, cmd, icon_scale)
+    icon_scale = icon_scale or 0.54
     local icon = wibox.widget.base.make_widget()
-    icon.forced_width  = math.floor(size * 0.54)
-    icon.forced_height = math.floor(size * 0.54)
+    icon.forced_width  = math.floor(size * icon_scale)
+    icon.forced_height = math.floor(size * icon_scale)
 
     function icon:fit(_, w, h) return self.forced_width, self.forced_height end
 
@@ -217,7 +218,7 @@ end
 
 function status.new_lock_widget(size)
     return make_circle_icon_btn_widget(size, icons.lock,
-        function() awful.spawn(_home .. "/.local/bin/xflock4") end)
+        function() awful.spawn(_home .. "/.local/bin/xflock4") end, 0.48)
 end
 
 function status.new_power_widget(size)
