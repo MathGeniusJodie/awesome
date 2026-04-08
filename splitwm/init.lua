@@ -358,6 +358,55 @@ local function try_drop_picked_up(t, leaf_id)
     return true
 end
 
+-- Drop a picked-up tab into a newly created split adjacent to target_leaf.
+-- direction: tree.DIR_H or tree.DIR_V
+-- new_leaf_first: true = new leaf is child_a (left/top), false = child_b (right/bottom)
+local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
+    if drag.pickup.tag ~= "client" then return false end
+    if not drag.pickup.client.valid then drag.pickup = pickup_idle(); return false end
+    local state = get_state(t)
+    local target_leaf = state.leaf_map[leaf_id]
+    if not target_leaf then drag.pickup = pickup_idle(); return false end
+
+    local c       = drag.pickup.client
+    local src_tag = drag.pickup.client_tag
+
+    if src_tag then
+        local src_state = tag_state[src_tag]
+        if src_state then unpin_client(src_state.root, c) end
+    end
+    if src_tag ~= t then c:move_to_tag(t) end
+
+    -- Build the two new children: one keeps the target's tabs, one gets the dragged client.
+    local child_existing = tree.make_leaf()
+    child_existing.tabs       = target_leaf.tabs
+    child_existing.active_tab = target_leaf.active_tab
+    local child_new = tree.make_leaf()
+    table.insert(child_new.tabs, c)
+    child_new.active_tab = 1
+
+    state.leaf_map[leaf_id]           = nil
+    state.leaf_map[child_existing.id] = child_existing
+    state.leaf_map[child_new.id]      = child_new
+
+    local child_a = new_leaf_first and child_new or child_existing
+    local child_b = new_leaf_first and child_existing or child_new
+    local new_branch = tree.make_branch(direction, SPLIT_RATIO, child_a, child_b)
+    if target_leaf == state.root then
+        state.root = new_branch
+    else
+        local parent, idx = tree.find_parent(state.root, target_leaf)
+        parent.children[idx] = new_branch
+    end
+
+    colors.resolve_color_conflict(child_new, c)
+    state.focused_leaf_id = child_new.id
+    drag.pickup = pickup_idle()
+
+    if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
+    return true
+end
+
 ---------------------------------------------------------------------------
 -- Split operations
 ---------------------------------------------------------------------------
@@ -968,6 +1017,7 @@ function splitwm.setup()
         split_anim_active       = split_anim_active,
         try_drop_picked_up      = try_drop_picked_up,
         handle_split_pickup     = handle_split_pickup,
+        drop_into_new_split     = drop_into_new_split,
         make_split_action_callbacks = make_split_action_callbacks,
         splitwm                 = splitwm,
         TITLEBAR_HEIGHT         = TITLEBAR_HEIGHT,
@@ -1074,6 +1124,33 @@ function splitwm.setup()
                             try_drop_picked_up(t, lid)
                             awful.layout.arrange(s)
                             return false
+                        end
+                    end
+                    -- Dropped in a gap: create a new split at the nearest leaf.
+                    local best_lid, best_dist = nil, math.huge
+                    for lid, _ in pairs(state.leaf_map) do
+                        local g = cached.geos[lid]
+                        if g then
+                            local dx = mx < g.x and (g.x - mx) or (mx >= g.x + g.width and (mx - g.x - g.width) or 0)
+                            local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
+                            local dist = dx + dy
+                            if dist < best_dist then best_dist = dist; best_lid = lid end
+                        end
+                    end
+                    if best_lid then
+                        local g    = cached.geos[best_lid]
+                        local dx_l = math.max(0, g.x - mx)
+                        local dx_r = math.max(0, mx - (g.x + g.width))
+                        local dy_t = math.max(0, (g.y - gap) - my)
+                        local dy_b = math.max(0, my - (g.y + g.height))
+                        local direction, new_first
+                        if math.max(dx_l, dx_r) >= math.max(dy_t, dy_b) then
+                            direction = tree.DIR_H; new_first = dx_l > dx_r
+                        else
+                            direction = tree.DIR_V; new_first = dy_t > dy_b
+                        end
+                        if drop_into_new_split(t, best_lid, direction, new_first) then
+                            awful.layout.arrange(s)
                         end
                     end
                 end

@@ -34,7 +34,7 @@ local function pickup_split(id)         return { tag = "split",  split_id = id }
 ---------------------------------------------------------------------------
 
 local _geo_cache, _client_actual_geo, _split_anim_active
-local _try_drop_picked_up, _handle_split_pickup
+local _try_drop_picked_up, _handle_split_pickup, _drop_into_new_split
 local _make_split_action_callbacks
 local _splitwm
 local _TITLEBAR_HEIGHT, _BTN_SIZE, _BTN_SPACING, _MIN_SPLIT_W, _MIN_SPLIT_H
@@ -156,6 +156,7 @@ function M.setup(deps)
     _split_anim_active       = deps.split_anim_active
     _try_drop_picked_up      = deps.try_drop_picked_up
     _handle_split_pickup     = deps.handle_split_pickup
+    _drop_into_new_split     = deps.drop_into_new_split
     _make_split_action_callbacks = deps.make_split_action_callbacks
     _splitwm                 = deps.splitwm
     _TITLEBAR_HEIGHT         = deps.TITLEBAR_HEIGHT
@@ -652,7 +653,35 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 end
             end
         end
-        -- Released outside all splits: stay in pickup mode so user can switch tags and drop there.
+        -- Released in a gap (between splits or at screen edges): create a new split there.
+        if cached then
+            local best_lid, best_dist = nil, math.huge
+            for lid, _ in pairs(ctx.state.leaf_map) do
+                local g = cached.geos[lid]
+                if g then
+                    local dx = mx < g.x and (g.x - mx) or (mx >= g.x + g.width and (mx - g.x - g.width) or 0)
+                    local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
+                    local dist = dx + dy
+                    if dist < best_dist then best_dist = dist; best_lid = lid end
+                end
+            end
+            if best_lid then
+                local g     = cached.geos[best_lid]
+                local dx_l  = math.max(0, g.x - mx)
+                local dx_r  = math.max(0, mx - (g.x + g.width))
+                local dy_t  = math.max(0, (g.y - gap) - my)
+                local dy_b  = math.max(0, my - (g.y + g.height))
+                local direction, new_first
+                if math.max(dx_l, dx_r) >= math.max(dy_t, dy_b) then
+                    direction = tree.DIR_H; new_first = dx_l > dx_r
+                else
+                    direction = tree.DIR_V; new_first = dy_t > dy_b
+                end
+                if _drop_into_new_split(ctx.t, best_lid, direction, new_first) then
+                    awful.layout.arrange(ctx.s)
+                end
+            end
+        end
         return false
     end
 
