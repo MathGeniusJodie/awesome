@@ -5,11 +5,18 @@ local beautiful = require("beautiful")
 
 local hunger = {}
 
-local config_dir     = gears.filesystem.get_configuration_dir()
-local STATE_FILE     = config_dir .. "hunger_state"
-local TOTAL_DURATION = 3 * 60 * 60  -- 3 hours in seconds
-local NUM_APPLES     = 10
-local ICON_SIZE      = 18
+local config_dir = gears.filesystem.get_configuration_dir()
+local STATE_FILE = config_dir .. "hunger_state"
+local NUM_APPLES = 10
+local ICON_SIZE  = 18
+
+---------------------------------------------------------------------------
+-- Tweakable meal schedule
+---------------------------------------------------------------------------
+
+local FEED_WINDOW_START = 7   -- hour of first meal (wake time)
+local FEED_WINDOW_END   = 21  -- hour of last meal  (9 pm)
+local NUM_MEALS         = 5
 
 -- Apple images: 0=full, 1=slightly eaten, 2=more eaten, 3=core
 local APPLE_IMGS = {}
@@ -17,6 +24,40 @@ for i = 0, 3 do
     APPLE_IMGS[i] = config_dir .. "applew" .. i .. "-fs8.png"
 end
 local HUNGER_BTN_ICON = config_dir .. "hunger-fs8.png"
+
+---------------------------------------------------------------------------
+-- Meal time helpers (all times are seconds since midnight)
+---------------------------------------------------------------------------
+
+local MEAL_TIMES = (function()
+    local t     = {}
+    local start = FEED_WINDOW_START * 3600
+    local stop  = FEED_WINDOW_END   * 3600
+    for i = 1, NUM_MEALS do
+        t[i] = start + (i - 1) * (stop - start) / (NUM_MEALS - 1)
+    end
+    return t
+end)()
+
+local DAY_END_S = 24 * 3600  -- midnight caps the last slot
+
+local function now_s()
+    local t = os.date("*t")
+    return t.hour * 3600 + t.min * 60 + t.sec
+end
+
+-- Returns slot_start, slot_end (seconds from midnight) for the current time,
+-- or nil if we are before the first meal of the day.
+local function current_slot()
+    local n = now_s()
+    if n < MEAL_TIMES[1] then return nil end
+    for i = 1, NUM_MEALS do
+        local s = MEAL_TIMES[i]
+        local e = (i < NUM_MEALS) and MEAL_TIMES[i + 1] or DAY_END_S
+        if n >= s and n < e then return s, e end
+    end
+    return nil
+end
 
 ---------------------------------------------------------------------------
 -- State persistence
@@ -29,7 +70,7 @@ local function load_last_feed()
         f:close()
         if ts then return ts end
     end
-    return os.time()
+    return 0  -- epoch → treated as "never fed today"
 end
 
 local function save_last_feed(ts)
@@ -37,14 +78,29 @@ local function save_last_feed(ts)
     if f then f:write(tostring(ts)); f:close() end
 end
 
--- Module-level: loaded once per awesome session, survives awesome.restart
--- because it reads from disk each time awesome starts.
 hunger._last_feed = load_last_feed()
 
+---------------------------------------------------------------------------
+-- Level calculation
+---------------------------------------------------------------------------
+
 local function get_level()
-    local elapsed = os.time() - hunger._last_feed
-    local frac    = math.max(0, math.min(1, elapsed / TOTAL_DURATION))
-    return (1 - frac) * NUM_APPLES  -- 10.0 = full, 0.0 = empty
+    local slot_start, slot_end = current_slot()
+    if not slot_start then return 0 end  -- before first meal
+
+    -- Was the button pressed during the current slot today?
+    local feed_today = os.date("%Y%j", hunger._last_feed)
+    local today      = os.date("%Y%j")
+    local lt         = os.date("*t", hunger._last_feed)
+    local feed_s     = lt.hour * 3600 + lt.min * 60 + lt.sec
+
+    if feed_today ~= today or feed_s < slot_start or feed_s >= slot_end then
+        return 0  -- haven't eaten in this slot
+    end
+
+    -- Deplete linearly from full → 0 as we approach the next meal time
+    local frac = math.max(0, (slot_end - now_s()) / (slot_end - slot_start))
+    return frac * NUM_APPLES
 end
 
 ---------------------------------------------------------------------------
@@ -53,7 +109,6 @@ end
 
 local _update_fns = {}
 
--- Single module-level timer drives all instances
 gears.timer {
     timeout   = 30,
     autostart = true,
@@ -71,7 +126,6 @@ gears.timer {
 function hunger.new_widget(btn_height)
     btn_height = (btn_height or 24) + 6
 
-    -- Apple imagebox row (left=fills last, right=fills first)
     local apple_imgs = {}
     local apple_row  = wibox.layout.fixed.horizontal()
     apple_row.spacing = 2
@@ -88,8 +142,6 @@ function hunger.new_widget(btn_height)
     local function update_apples()
         local level = get_level()
         for i = 1, NUM_APPLES do
-            -- fill_i: 1.0 when apple i is fully present, 0.0 when gone
-            -- rightmost apple (i=10) depletes first, leftmost (i=1) last
             local fill = math.max(0, math.min(1, level - (i - 1)))
             if fill >= 0.75 then
                 apple_imgs[i].image = APPLE_IMGS[0]
@@ -105,7 +157,6 @@ function hunger.new_widget(btn_height)
         end
     end
 
-    -- Circle button with hunger icon
     local hunger_icon = wibox.widget.imagebox(HUNGER_BTN_ICON)
     hunger_icon.forced_width  = ICON_SIZE
     hunger_icon.forced_height = ICON_SIZE
@@ -131,7 +182,6 @@ function hunger.new_widget(btn_height)
     local function on_feed()
         hunger._last_feed = os.time()
         save_last_feed(hunger._last_feed)
-        -- Refresh every instance (all screens)
         for _, fn in ipairs(_update_fns) do fn() end
     end
 
