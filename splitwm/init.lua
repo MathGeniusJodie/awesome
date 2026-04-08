@@ -800,9 +800,17 @@ start_split_anim = function(s, t, old_geo, a_id, b_id, dir)
     local start_a = old_geo
     local start_b
     if dir == tree.DIR_H then
-        start_b = { x = geo_b.x + geo_b.width, y = geo_b.y, width = 1, height = geo_b.height }
+        if geo_b.x < geo_a.x then
+            start_b = { x = geo_b.x,              y = geo_b.y, width = 1, height = geo_b.height }
+        else
+            start_b = { x = geo_b.x + geo_b.width, y = geo_b.y, width = 1, height = geo_b.height }
+        end
     else
-        start_b = { x = geo_b.x, y = geo_b.y + geo_b.height, width = geo_b.width, height = 1 }
+        if geo_b.y < geo_a.y then
+            start_b = { x = geo_b.x, y = geo_b.y,               width = geo_b.width, height = 1 }
+        else
+            start_b = { x = geo_b.x, y = geo_b.y + geo_b.height, width = geo_b.width, height = 1 }
+        end
     end
 
     apply_leaf_geo(s, a_id, start_a)
