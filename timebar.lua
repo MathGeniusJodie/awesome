@@ -14,15 +14,15 @@ local wibox = require("wibox")
 local gears = require("gears")
 
 -- Layout constants — tweak these to reshape both bars at once.
-local BAR_WIDTH   = 10   -- px width of each bar (corner radius = BAR_WIDTH / 2)
+local BAR_WIDTH   = 8   -- px width of each bar (corner radius = BAR_WIDTH / 2)
 local BAR_SPACING = 3   -- px gap between the two bars
 local BAR_MARGIN  = 4 -- px gap between screen left edge and bar 1
 
 local M = {}
 
-local DAY_START_MIN = 6 * 60 + 30    -- 6:30am  = 390 min since midnight
-local DAY_END_MIN   = 23 * 60 + 30   -- 11:30pm = 1410 min since midnight
-local TOTAL_BLOCKS  = 102             -- (1410 - 390) / 10
+local DAY_START_MIN = 7 * 60 + 00    -- 07:00am
+local DAY_END_MIN   = 24 * 60 + 30   -- 12:30pm
+local TOTAL_BLOCKS  = (DAY_END_MIN - DAY_START_MIN) / 10
 
 local function get_state()
     local t    = os.date("*t")
@@ -74,8 +74,8 @@ function M.setup(s)
         elseif remaining > 0 then
             -- Black pills stacked from the bottom upward, 1px apart.
             cr:set_source_rgb(0, 0, 0)
-            local gap    = 1
-            local pill_h = (usable - 101 * gap) / 102
+            local gap    = 2
+            local pill_h = (usable - (TOTAL_BLOCKS-1) * gap) / TOTAL_BLOCKS
             local r      = math.min(r_full, pill_h * 0.5)
             for i = 0, remaining - 1 do
                 -- Bottom of pill i is at (h-3), stacking upward.
