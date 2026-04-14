@@ -14,8 +14,8 @@ local ICON_SIZE  = 18
 -- Tweakable meal schedule
 ---------------------------------------------------------------------------
 
-local FEED_WINDOW_START = 7   -- hour of first meal (wake time)
-local FEED_WINDOW_END   = 21  -- hour of last meal  (9 pm)
+local FEED_WINDOW_START = 6   -- hour of first meal (wake time)
+local FEED_WINDOW_END   = 20  -- hour of last meal  (8 pm)
 local NUM_MEALS         = 5
 
 -- Apple images: 0=full, 1=slightly eaten, 2=more eaten, 3=core

@@ -20,8 +20,8 @@ local BAR_MARGIN  = 4 -- px gap between screen left edge and bar 1
 
 local M = {}
 
-local DAY_START_MIN = 7 * 60 + 00    -- 07:00am
-local DAY_END_MIN   = 24 * 60 + 30   -- 12:30pm
+local DAY_START_MIN = 6 * 60 + 00    -- 06:00am
+local DAY_END_MIN   = 23 * 60 + 30   -- 11:30pm
 local TOTAL_BLOCKS  = (DAY_END_MIN - DAY_START_MIN) / 10
 
 local function get_state()
