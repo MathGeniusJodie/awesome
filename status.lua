@@ -915,12 +915,14 @@ function status.setup_screen(s)
         },
     }
 
-    -- Lock button in its own wibox at the actual screen corner
-    local lock_w = 26
+    -- Lock and power buttons side-by-side at bottom-right corner.
+    local lock_w  = 26
+    local btn_gap = 2
+    local total_w = lock_w * 2 + btn_gap
     s.mylock_wibox = wibox({
-        x       = s.geometry.x + s.geometry.width - lock_w,
-        y       = s.geometry.y + s.geometry.height - lock_w - 2,
-        width   = lock_w,
+        x       = s.geometry.x + s.geometry.width - total_w,
+        y       = s.geometry.y + s.geometry.height - lock_w,
+        width   = total_w,
         height  = lock_w,
         bg      = "#00000000",
         ontop   = false,
@@ -929,27 +931,13 @@ function status.setup_screen(s)
         type    = "dock",
     })
     s.mylock_wibox:setup {
-        wibox.container.margin(
-            status.new_lock_widget(lock_w), 0, 2, 2, 0),
-        layout = wibox.layout.fixed.horizontal,
+        layout  = wibox.layout.fixed.horizontal,
+        spacing = btn_gap,
+        wibox.container.margin(status.new_power_widget(lock_w), 0, 0, 2, 0),
+        wibox.container.margin(status.new_lock_widget(lock_w),  0, 0, 2, 0),
     }
-
-    -- Power button above the lock button
-    s.mypower_wibox = wibox({
-        x       = s.geometry.x + s.geometry.width - lock_w,
-        y       = s.geometry.y + s.geometry.height - lock_w - lock_w - 2,
-        width   = lock_w,
-        height  = lock_w,
-        bg      = "#00000000",
-        ontop   = false,
-        screen  = s,
-        visible = true,
-        type    = "dock",
-    })
-    s.mypower_wibox:setup {
-        wibox.container.margin(status.new_power_widget(lock_w), 0, 2, 2, 0),
-        layout = wibox.layout.fixed.horizontal,
-    }
+    -- Keep mypower_wibox nil so nothing breaks if rc.lua references it.
+    s.mypower_wibox = nil
 end
 
 ---------------------------------------------------------------------------

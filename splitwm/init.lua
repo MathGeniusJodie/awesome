@@ -45,11 +45,11 @@ local RESIZE_STEP = 0.05
 -- Effective titlebar height: grows to match gap so the bar never disappears into it.
 local function effective_tb_h(gap) return math.max(TITLEBAR_HEIGHT, gap) end
 
--- Geometry of the client area inside a leaf, accounting for border and titlebar.
--- geo is the raw leaf rectangle from compute_tree; the wibox extends gap above it.
-local function client_geo(geo, bw, gap, tb_h)
+-- Geometry of the client area inside a leaf, accounting for border, titlebar, and scroll.
+-- geo is the raw leaf rectangle from compute_tree (canvas coords); scroll_x shifts x left.
+local function client_geo(geo, bw, gap, tb_h, scroll_x)
     return {
-        x      = geo.x + bw,
+        x      = geo.x + bw - (scroll_x or 0),
         y      = geo.y - gap + tb_h,
         width  = math.max(1, geo.width  - bw * 2),
         height = math.max(1, geo.height + gap - bw - tb_h),
@@ -90,6 +90,7 @@ local client_last_target = {}   -- [client] = last geometry we requested in arra
 local split_anim_pending = {}   -- [screen] = {old_geo, a_id, b_id, dir}
 local close_anim_pending = {}   -- [screen] = {old_geos, leaf_ids}
 local split_anim_active  = {}   -- [screen] = {timer}
+local scroll_anim_active = {}   -- [screen] = {timer}
 
 -- Per-tag restore data loaded from file at startup.
 local tag_restore_specs = {}
@@ -207,10 +208,14 @@ local function get_state(t)
                 focused_leaf_id = focused_id,
                 leaf_map        = leaf_map,
                 _restore_ptl    = path_to_leaf,
+                scroll_x        = 0,
+                scroll_target   = 0,
+                canvas_w        = nil,
             }
         else
             local root = tree.make_leaf()
-            tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root } }
+            tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root },
+                             scroll_x = 0, scroll_target = 0, canvas_w = nil }
         end
     end
     return tag_state[t]
@@ -635,7 +640,10 @@ local function arrange(p)
     local cls   = p.clients
     local gap   = beautiful.splitwm_gap
 
-    local root = state.root
+    local root     = state.root
+    local scroll_x = state.scroll_x or 0
+    local canvas_w = state.canvas_w or wa.width
+
     local pinned = {}
     for _, leaf in ipairs(tree.collect_leaves(root)) do
         for _, tc in ipairs(leaf.tabs) do pinned[tc] = true end
@@ -645,7 +653,7 @@ local function arrange(p)
     end
 
     local geos, bounds = {}, {}
-    tree.compute_tree(root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
+    tree.compute_tree(root, wa.x, wa.y, canvas_w, wa.height, gap, geos, bounds)
     local s = p.screen
     if type(s) == "number" then s = screen[s] end
     geo_cache[tag] = { geos = geos, bounds = bounds }
@@ -662,12 +670,18 @@ local function arrange(p)
 
         local geo = geos[leaf.id]
         if not geo then goto continue end
+
+        -- Check if split is entirely outside the visible viewport.
+        local vis_left  = geo.x - scroll_x
+        local vis_right = vis_left + geo.width
+        local off_screen = vis_right <= wa.x or vis_left >= wa.x + wa.width
+
         for i, c in ipairs(leaf.tabs) do
-            if i == leaf.active_tab then
+            if i == leaf.active_tab and not off_screen then
                 c.hidden = false
                 c.border_width = 0
                 if not c.fullscreen and not split_anim_active[s] then
-                    local tgt = client_geo(geo, bw, gap, tb_h)
+                    local tgt = client_geo(geo, bw, gap, tb_h, scroll_x)
                     local ag   = client_actual_geo[c]
                     local last = client_last_target[c]
                     local skip = ag and last
@@ -725,14 +739,15 @@ local function update_ui(s)
     if cached then
         geos, bounds = cached.geos, cached.bounds
     else
-        local wa = s.workarea
-        geos, bounds = {}, {}
-        tree.compute_tree(state.root, wa.x, wa.y, wa.width, wa.height, gap, geos, bounds)
+        local wa       = s.workarea
+        local canvas_w = state.canvas_w or wa.width
+        geos, bounds   = {}, {}
+        tree.compute_tree(state.root, wa.x, wa.y, canvas_w, wa.height, gap, geos, bounds)
     end
 
     local leaves = tree.collect_leaves(state.root)
     tb.update(s, t, state, geos, leaves)
-    underlay.update_drag_handles(s, state, bounds)
+    underlay.update_drag_handles(s, state, bounds, state.scroll_x or 0)
 
     local pending = split_anim_pending[s]
     if pending then
@@ -763,12 +778,13 @@ end
 local function apply_leaf_geo(s, leaf_id, geo)
     local _, state = get_active_state(s)
     if not state then return end
-    local gap  = beautiful.splitwm_gap
-    local bw   = beautiful.splitwm_focus_border_width
-    local tb_h = effective_tb_h(gap)
-    local tc   = tb.cache[s] and tb.cache[s][leaf_id]
+    local gap      = beautiful.splitwm_gap
+    local bw       = beautiful.splitwm_focus_border_width
+    local tb_h     = effective_tb_h(gap)
+    local scroll_x = state.scroll_x or 0
+    local tc       = tb.cache[s] and tb.cache[s][leaf_id]
     if tc then
-        tc.wb.x      = geo.x
+        tc.wb.x      = geo.x - scroll_x
         tc.wb.y      = geo.y - gap
         tc.wb.width  = math.max(1, geo.width)
         tc.wb.height = math.max(1, geo.height + gap)
@@ -777,7 +793,7 @@ local function apply_leaf_geo(s, leaf_id, geo)
     if leaf then
         local c = leaf.tabs[leaf.active_tab]
         if c and c.valid and not c.fullscreen then
-            c:geometry(client_geo(geo, bw, gap, tb_h))
+            c:geometry(client_geo(geo, bw, gap, tb_h, scroll_x))
         end
     end
 end
@@ -893,6 +909,158 @@ start_close_anim = function(s, t, old_geos, leaf_ids)
 end
 
 ---------------------------------------------------------------------------
+-- Horizontal scroll system
+---------------------------------------------------------------------------
+
+local SCROLL_STEP         = 60   -- pixels per discrete scroll event
+local SCROLL_ANIM_FPS     = 60
+local SCROLL_ANIM_DURATION = 0.18  -- seconds
+
+local function start_scroll_anim(s, tag)
+    local a = scroll_anim_active[s]
+    if a then a.timer:stop(); scroll_anim_active[s] = nil end
+    local state   = get_state(tag)
+    local start_x = state.scroll_x or 0
+    local target_x = state.scroll_target or 0
+    if start_x == target_x then return end
+    local frames = math.max(1, math.floor(SCROLL_ANIM_DURATION * SCROLL_ANIM_FPS))
+    local frame  = 0
+    local tim
+    tim = gears.timer {
+        timeout   = 1 / SCROLL_ANIM_FPS,
+        autostart = true,
+        call_now  = false,
+        callback  = function()
+            frame = frame + 1
+            local p = math.min(frame / frames, 1.0)
+            -- ease out quad
+            p = 1 - (1 - p) * (1 - p)
+            state.scroll_x = math.floor(start_x + (target_x - start_x) * p)
+            awful.layout.arrange(s)
+            if frame >= frames then
+                state.scroll_x = target_x
+                tim:stop()
+                scroll_anim_active[s] = nil
+                awful.layout.arrange(s)
+            end
+        end,
+    }
+    scroll_anim_active[s] = { timer = tim }
+end
+
+local function scroll_to(s, tag, target_x)
+    local state    = get_state(tag)
+    local wa       = s.workarea
+    local canvas_w = state.canvas_w or wa.width
+    local max_s    = math.max(0, canvas_w - wa.width)
+    state.scroll_target = math.max(0, math.min(max_s, target_x))
+    start_scroll_anim(s, tag)
+end
+
+local function ensure_in_view(s, tag)
+    local state = tag_state[tag]
+    if not state then return end
+    local wa      = s.workarea
+    local cached  = geo_cache[tag]
+    if not cached then return end
+    local geo = cached.geos[state.focused_leaf_id]
+    if not geo then return end
+    local sx   = state.scroll_x or 0
+    local target = sx
+    if geo.x - sx < wa.x then
+        target = geo.x - wa.x
+    elseif geo.x + geo.width - sx > wa.x + wa.width then
+        target = geo.x + geo.width - wa.x - wa.width
+    end
+    if target ~= sx then scroll_to(s, tag, target) end
+end
+
+-- Returns the computed pixel width of a tree node given its parent's usable space.
+local function node_width(node, parent_usable, gap, cached_geos)
+    if node.abs_left_w then return node.abs_left_w end
+    -- Fall back to geo_cache, then ratio * usable.
+    local leaves = tree.collect_leaves(node)
+    if cached_geos and #leaves > 0 then
+        local first = cached_geos[leaves[1].id]
+        local last  = cached_geos[leaves[#leaves].id]
+        if first and last then
+            return last.x + last.width - first.x
+        end
+    end
+    return math.floor(parent_usable * node.ratio)
+end
+
+-- Insert a new full-height leaf to the right of branch.children[1].
+-- Grows canvas_w by wa.width + gap, and locks ancestor widths so only the
+-- insertion side expands.
+local function insert_column_at_gap(t, s, b)
+    local state     = get_state(t)
+    local wa        = s.workarea
+    local gap       = beautiful.splitwm_gap
+    local default_w = wa.width
+    local branch    = b.branch
+    local cached    = geo_cache[t] and geo_cache[t].geos
+
+    -- Compute current left-child width (canvas coords) for the clicked branch.
+    local b_usable  = (b.parent_w or wa.width) - (b.parent_gap or gap)
+    local cur_left_w = branch.abs_left_w or math.floor(b_usable * branch.ratio)
+
+    -- Build [new_leaf | old_right], with new_leaf getting default_w.
+    local new_leaf  = tree.make_leaf()
+    state.leaf_map[new_leaf.id] = new_leaf
+    local old_right = branch.children[2]
+    local new_sub   = tree.make_branch(tree.DIR_H, 0.5, new_leaf, old_right)
+    new_sub.abs_left_w = default_w
+    branch.children[2] = new_sub
+
+    -- Lock left side of the clicked branch so it doesn't shrink.
+    branch.abs_left_w = cur_left_w
+
+    -- Grow canvas and propagate abs_left_w up through horizontal ancestors so
+    -- only the inserted side expands; siblings on the other side stay the same.
+    local delta   = default_w + gap
+    state.canvas_w = (state.canvas_w or wa.width) + delta
+
+    local child = branch
+    while true do
+        local parent, child_idx = tree.find_parent(state.root, child)
+        if not parent then break end
+        if parent.direction == tree.DIR_H then
+            local left_node  = parent.children[1]
+            local right_node = parent.children[2]
+            -- Compute current left child absolute width.
+            local pleft_w
+            if parent.abs_left_w then
+                pleft_w = parent.abs_left_w
+            else
+                local p_usable_est = (state.canvas_w or wa.width) - gap - delta
+                pleft_w = math.floor(p_usable_est * parent.ratio)
+                -- Try geo_cache for more precision.
+                local ll = tree.collect_leaves(left_node)[1]
+                local rr = tree.collect_leaves(right_node)[1]
+                local gl = cached and ll and cached[ll.id]
+                local gr = cached and rr and cached[rr.id]
+                if gl and gr then pleft_w = gl.width end
+            end
+            if child_idx == 1 then
+                -- Our subtree is the left child; it grew. Lock right side.
+                parent.abs_left_w = pleft_w + delta
+            else
+                -- Our subtree is the right child; left side unchanged. Lock it.
+                parent.abs_left_w = pleft_w
+            end
+        end
+        -- Vertical ancestors: no width effect needed, just continue upward.
+        child = parent
+    end
+
+    state.focused_leaf_id = new_leaf.id
+    awful.layout.arrange(s)
+    gears.timer.delayed_call(function() ensure_in_view(s, t) end)
+end
+splitwm.insert_column_at_gap = insert_column_at_gap
+
+---------------------------------------------------------------------------
 -- Layout object
 ---------------------------------------------------------------------------
 
@@ -933,8 +1101,22 @@ local function do_split_with_anim(dir)
 end
 splitwm.split_horizontal = function() do_split_with_anim(tree.DIR_H) end
 splitwm.split_vertical   = function() do_split_with_anim(tree.DIR_V) end
-splitwm.focus_next_split = function() with_tag(function(t) focus_direction(t, "next") end) end
-splitwm.focus_prev_split = function() with_tag(function(t) focus_direction(t, "prev") end) end
+splitwm.focus_next_split = function()
+    local s = awful.screen.focused()
+    local t = s and s.selected_tag
+    if t and focus_direction(t, "next") ~= false then
+        awful.layout.arrange(s)
+        gears.timer.delayed_call(function() ensure_in_view(s, t) end)
+    end
+end
+splitwm.focus_prev_split = function()
+    local s = awful.screen.focused()
+    local t = s and s.selected_tag
+    if t and focus_direction(t, "prev") ~= false then
+        awful.layout.arrange(s)
+        gears.timer.delayed_call(function() ensure_in_view(s, t) end)
+    end
+end
 splitwm.next_tab         = function() with_tag(function(t) cycle_tab(t, 1) end) end
 splitwm.prev_tab         = function() with_tag(function(t) cycle_tab(t, -1) end) end
 splitwm.move_tab_next    = function() with_tag(function(t) move_tab_to_direction(t, "next") end) end
@@ -1034,6 +1216,20 @@ function splitwm.setup()
         color_fg          = color_fg,
         color_transparent = color_transparent,
         color_handle      = color_handle,
+        SCROLL_STEP       = SCROLL_STEP,
+        do_scroll         = function(s, delta_x)
+            local t = s.selected_tag
+            if not t then return end
+            local state = get_state(t)
+            scroll_to(s, t, (state.scroll_x or 0) + delta_x)
+        end,
+        insert_column_at_gap = function(s, b)
+            local t = s.selected_tag
+            if not t then return end
+            insert_column_at_gap(t, s, b)
+        end,
+        get_state        = get_state,
+        get_active_state = get_active_state,
     })
 
     tb.setup({
@@ -1099,6 +1295,8 @@ function splitwm.setup()
             state.focused_leaf_id = leaf.id
             awful.layout.arrange(c.screen)
         end
+        local t = c.first_tag
+        if t then gears.timer.delayed_call(function() ensure_in_view(c.screen, t) end) end
     end)
 
     client.connect_signal("property::fullscreen", function(c)

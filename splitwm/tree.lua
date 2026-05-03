@@ -85,7 +85,13 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
     local dir, ratio, inner = node.direction, node.ratio, gap
     if dir == tree.DIR_H then
         local usable = w - inner
-        local w1 = math.floor(usable * ratio)
+        local w1
+        if node.abs_left_w then
+            w1 = node.abs_left_w
+            node.ratio = usable > 0 and (w1 / usable) or ratio
+        else
+            w1 = math.floor(usable * ratio)
+        end
         if bounds then
             table.insert(bounds, { branch = node, dir = tree.DIR_H, pos = x + w1 + math.floor(inner / 2),
                 start = y, span = h, parent_x = x, parent_w = w, parent_gap = inner })

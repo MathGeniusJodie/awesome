@@ -1087,13 +1087,17 @@ local function update_titlebars(s, t, state, geos, leaves)
         local geo = geos[leaf.id]
         if not geo then return end
 
-        local entry = tb_get_or_create_entry(s, leaf)
-        entry.tb_h  = tb_h
-        local wb    = entry.wb
+        local entry    = tb_get_or_create_entry(s, leaf)
+        entry.tb_h     = tb_h
+        local wb       = entry.wb
+        local scroll_x = state.scroll_x or 0
         local border_ref_client = leaf.tabs[leaf.active_tab]
-        wb.visible = true
-        if not _split_anim_active[s] then
-            wb.x      = geo.x
+        local wa = s.workarea
+        local vis_x = geo.x - scroll_x
+        local off_screen = vis_x + geo.width <= wa.x or vis_x >= wa.x + wa.width
+        wb.visible = not off_screen
+        if not off_screen and not _split_anim_active[s] then
+            wb.x      = vis_x
             wb.y      = geo.y - gap
             wb.width  = geo.width
             wb.height = geo.height + gap
