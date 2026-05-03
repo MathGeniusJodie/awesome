@@ -997,7 +997,7 @@ local function insert_column_at_gap(t, s, b)
     local state     = get_state(t)
     local wa        = s.workarea
     local gap       = beautiful.splitwm_gap
-    local default_w = wa.width
+    local default_w = math.floor(wa.width / 2)
     local branch    = b.branch
     local cached    = geo_cache[t] and geo_cache[t].geos
 
@@ -1059,6 +1059,51 @@ local function insert_column_at_gap(t, s, b)
     gears.timer.delayed_call(function() ensure_in_view(s, t) end)
 end
 splitwm.insert_column_at_gap = insert_column_at_gap
+
+local function insert_at_right_edge(t, s)
+    local state  = get_state(t)
+    local wa     = s.workarea
+    local gap    = beautiful.splitwm_gap
+    local new_w  = math.floor(wa.width / 2)
+    local old_cw = state.canvas_w or wa.width
+
+    local new_leaf = tree.make_leaf()
+    state.leaf_map[new_leaf.id] = new_leaf
+
+    local old_root = state.root
+    local new_root = tree.make_branch(tree.DIR_H, 0.5, old_root, new_leaf)
+    new_root.abs_left_w = old_cw
+    state.root     = new_root
+    state.canvas_w = old_cw + new_w + gap
+
+    state.focused_leaf_id = new_leaf.id
+    awful.layout.arrange(s)
+    gears.timer.delayed_call(function() ensure_in_view(s, t) end)
+end
+
+local function insert_at_left_edge(t, s)
+    local state  = get_state(t)
+    local wa     = s.workarea
+    local gap    = beautiful.splitwm_gap
+    local new_w  = math.floor(wa.width / 2)
+    local old_cw = state.canvas_w or wa.width
+
+    local new_leaf = tree.make_leaf()
+    state.leaf_map[new_leaf.id] = new_leaf
+
+    local old_root = state.root
+    local new_root = tree.make_branch(tree.DIR_H, 0.5, new_leaf, old_root)
+    new_root.abs_left_w = new_w
+    state.root     = new_root
+    state.canvas_w = old_cw + new_w + gap
+    -- Shift scroll so existing content stays at the same screen position.
+    state.scroll_x      = (state.scroll_x or 0) + new_w + gap
+    state.scroll_target = state.scroll_x
+
+    state.focused_leaf_id = new_leaf.id
+    awful.layout.arrange(s)
+    gears.timer.delayed_call(function() ensure_in_view(s, t) end)
+end
 
 ---------------------------------------------------------------------------
 -- Layout object
@@ -1227,6 +1272,16 @@ function splitwm.setup()
             local t = s.selected_tag
             if not t then return end
             insert_column_at_gap(t, s, b)
+        end,
+        insert_at_right_edge = function(s)
+            local t = s.selected_tag
+            if not t then return end
+            insert_at_right_edge(t, s)
+        end,
+        insert_at_left_edge = function(s)
+            local t = s.selected_tag
+            if not t then return end
+            insert_at_left_edge(t, s)
         end,
         get_state        = get_state,
         get_active_state = get_active_state,

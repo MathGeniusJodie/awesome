@@ -21,7 +21,8 @@ local M = {}
 local BTN_SIZE, MIN_SPLIT_W, MIN_SPLIT_H
 local color_bg, color_fg, color_transparent, color_handle
 local SCROLL_STEP
-local _do_scroll, _insert_column_at_gap, _get_state, _get_active_state
+local _do_scroll, _insert_column_at_gap, _insert_at_right_edge, _insert_at_left_edge
+local _get_state, _get_active_state
 
 function M.setup(deps)
     BTN_SIZE          = deps.BTN_SIZE
@@ -32,8 +33,10 @@ function M.setup(deps)
     color_transparent = deps.color_transparent
     color_handle      = deps.color_handle
     SCROLL_STEP       = deps.SCROLL_STEP or 60
-    _do_scroll        = deps.do_scroll
-    _insert_column_at_gap = deps.insert_column_at_gap
+    _do_scroll             = deps.do_scroll
+    _insert_column_at_gap  = deps.insert_column_at_gap
+    _insert_at_right_edge  = deps.insert_at_right_edge
+    _insert_at_left_edge   = deps.insert_at_left_edge
     _get_state        = deps.get_state
     _get_active_state = deps.get_active_state
 end
@@ -203,6 +206,7 @@ local function get_drag_handle(s, i)
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
             if not ref.b then return end
+            if ref.b.edge then return end  -- edge handles have no drag resize
             local b, hw = ref.b, ref.handle_w
             -- Determine drag zone from click position relative to gap center.
             local mx0 = mouse.coords().x
@@ -338,7 +342,10 @@ local function get_plus_btn(s, i)
     end)
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
-            if ref.b and _insert_column_at_gap then
+            if not ref.b then return end
+            if ref.b.insert_fn then
+                ref.b.insert_fn()
+            elseif _insert_column_at_gap then
                 _insert_column_at_gap(s, ref.b)
             end
         end),
@@ -404,6 +411,40 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
             end
         end
     end
+
+    -- Edge handles: + buttons at left and right canvas boundaries.
+    local canvas_w_val = (state and state.canvas_w) or wa.width
+    local function add_edge_handle(pos_canvas, inward, insert_fn)
+        local vis_pos = pos_canvas - scroll_x
+        -- inward = 1 means pill extends right (left edge), -1 means extends left (right edge)
+        local pill_x = inward == 1 and vis_pos or vis_pos - handle_w
+        local btn_x  = inward == 1 and vis_pos or vis_pos - PLUS_BTN_SIZE
+        -- Show when any part of the pill is on screen.
+        if pill_x + handle_w > wa.x and pill_x < wa.x + wa.width then
+            hi = hi + 1
+            local entry   = get_drag_handle(s, hi)
+            local wb_h, ref_h = entry.wb, entry.ref
+            ref_h.b = { edge = true, pos = pos_canvas, start = wa.y, span = wa.height }
+            ref_h.handle_w = handle_w
+            wb_h.x      = pill_x
+            wb_h.y      = wa.y
+            wb_h.width  = handle_w
+            wb_h.height = wa.height
+            wb_h.cursor = "left_ptr"
+            wb_h.visible = true
+
+            pi = pi + 1
+            local pe  = get_plus_btn(s, pi)
+            pe.ref.b  = { edge = true, insert_fn = insert_fn }
+            pe.wb.x      = btn_x
+            pe.wb.y      = wa.y + math.floor((wa.height - PLUS_BTN_SIZE) / 2)
+            pe.wb.width  = PLUS_BTN_SIZE
+            pe.wb.height = PLUS_BTN_SIZE
+            pe.wb.visible = true
+        end
+    end
+    add_edge_handle(wa.x,                 1,  function() if _insert_at_left_edge  then _insert_at_left_edge(s)  end end)
+    add_edge_handle(wa.x + canvas_w_val, -1,  function() if _insert_at_right_edge then _insert_at_right_edge(s) end end)
 
     local pool = drag_handle_pool[s]
     if pool then
