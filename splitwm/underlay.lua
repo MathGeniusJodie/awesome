@@ -222,6 +222,7 @@ local function get_drag_handle(s, i)
             handle_state = "dragging"
             wb.bg = color_fg
             local wa = s.workarea
+            local wb_x_offset = wb.x - mx0  -- offset from mouse to handle left edge at drag start
 
             -- Capture initial geometry once to avoid delta accumulation across frames.
             local igap_init        = b.parent_gap or 0
@@ -271,11 +272,11 @@ local function get_drag_handle(s, i)
                     st2.scroll_target = st2.scroll_x
                 end
                 awful.layout.arrange(s)
-                -- Position handle at gap screen position (tracks mouse via scroll when room allows).
                 if zone == "right" then
-                    wb.x = right_start_init - (st2.scroll_x or 0) - math.floor(hw / 2)
-                else
-                    wb.x = mouse_m.x - math.floor(hw / 2)
+                    -- update_drag_handles may hide or misplace this handle when the gap
+                    -- scrolls off-screen, so force position and visibility manually.
+                    wb.visible = true
+                    wb.x = mouse_m.x + wb_x_offset
                 end
                 return true
             end, "sb_h_double_arrow")
