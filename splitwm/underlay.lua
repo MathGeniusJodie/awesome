@@ -238,22 +238,41 @@ local function get_drag_handle(s, i)
                 local gap_e         = beautiful.splitwm_gap or 24
                 local root_e        = state.root
                 local is_left       = ref.b.edge == "left"
-                local old_left_w_e
-                if is_left and root_e and root_e.direction == tree.DIR_H then
-                    old_left_w_e = root_e.abs_left_w
-                        or math.floor((canvas_w_init - gap_e) * root_e.ratio)
+                -- Pre-compute initial absolute widths for n-ary root.
+                local N_e, usable_init_e, init_abs_e
+                if root_e and root_e.direction == tree.DIR_H then
+                    N_e = #root_e.children
+                    usable_init_e = canvas_w_init - (N_e - 1) * gap_e
+                    local rs = 0
+                    for _, r in ipairs(root_e.ratios) do rs = rs + r end
+                    if rs <= 0 then rs = 1 end
+                    init_abs_e = {}
+                    for j = 1, N_e do init_abs_e[j] = root_e.ratios[j] / rs * usable_init_e end
                 end
                 start_drag(function(mouse_m, st2)
                     local delta = mouse_m.x - mx0
-                    if is_left and old_left_w_e and root_e and root_e.direction == tree.DIR_H then
-                        local new_left_w   = math.max(MIN_SPLIT_W, old_left_w_e - delta)
-                        local canvas_delta = new_left_w - old_left_w_e
-                        root_e.abs_left_w  = new_left_w
+                    if is_left and init_abs_e and root_e and root_e.direction == tree.DIR_H then
+                        -- Left edge: drag left = leftmost child grows.
+                        local new_left_w   = math.max(MIN_SPLIT_W, init_abs_e[1] - delta)
+                        local canvas_delta = new_left_w - init_abs_e[1]
                         st2.canvas_w       = canvas_w_init + canvas_delta
-                        root_e.ratio       = (st2.canvas_w - gap_e) > 0
-                            and (new_left_w / (st2.canvas_w - gap_e)) or root_e.ratio
-                        st2.scroll_x       = scroll_x_init + canvas_delta
-                        st2.scroll_target  = st2.scroll_x
+                        local new_usable   = usable_init_e + canvas_delta
+                        local new_abs = {}
+                        for j = 1, N_e do new_abs[j] = init_abs_e[j] end
+                        new_abs[1] = new_left_w
+                        for j = 1, N_e do root_e.ratios[j] = new_abs[j] / new_usable end
+                        st2.scroll_x      = scroll_x_init + canvas_delta
+                        st2.scroll_target = st2.scroll_x
+                    elseif not is_left and init_abs_e and root_e and root_e.direction == tree.DIR_H then
+                        -- Right edge: rightmost child grows.
+                        local new_cw       = math.max(MIN_SPLIT_W * 2, canvas_w_init + delta)
+                        local canvas_delta = new_cw - canvas_w_init
+                        st2.canvas_w       = new_cw
+                        local new_usable   = usable_init_e + canvas_delta
+                        local new_abs = {}
+                        for j = 1, N_e do new_abs[j] = init_abs_e[j] end
+                        new_abs[N_e] = new_abs[N_e] + canvas_delta
+                        for j = 1, N_e do root_e.ratios[j] = new_abs[j] / new_usable end
                     else
                         st2.canvas_w = math.max(MIN_SPLIT_W * 2, canvas_w_init + delta)
                     end
@@ -271,37 +290,54 @@ local function get_drag_handle(s, i)
                       or canvas_mx > b.pos + zone_half and "right"
                       or "middle"
 
-            local igap_init        = b.parent_gap or 0
-            local usable_init      = b.parent_w - igap_init
-            local old_left_w_init  = b.branch.abs_left_w or math.floor(usable_init * b.branch.ratio)
-            local old_right_w_init = usable_init - old_left_w_init
-            local canvas_w_init    = state.canvas_w or wa.width
-            local scroll_x_init    = scroll_x
-            -- Middle/left: gap center moves to mouse_m.x, so center pill on mouse.
-            -- Right: gap moves by delta, so preserve click-relative offset (pass nil).
+            local canvas_w_init = state.canvas_w or wa.width
+            local scroll_x_init = scroll_x
+            local N = #b.branch.children
+            -- Pre-compute initial absolute widths from current ratios.
+            local rs = 0
+            for _, r in ipairs(b.branch.ratios) do rs = rs + r end
+            if rs <= 0 then rs = 1 end
+            local init_abs = {}
+            for j = 1, N do init_abs[j] = b.branch.ratios[j] / rs * b.usable end
+            -- Middle/left: gap center tracks mouse; center pill on cursor.
+            -- Right: gap moves by delta; preserve click-relative offset.
             local gap_wb_x_off = zone ~= "right" and -math.floor(hw / 2) or nil
 
             start_drag(function(mouse_m, st2)
                 local sx = st2.scroll_x or 0
                 if zone == "middle" then
-                    local min_r = MIN_SPLIT_W / usable_init
-                    b.branch.ratio = math.max(min_r, math.min(1 - min_r,
-                        (mouse_m.x + sx - b.parent_x - math.floor(igap_init / 2)) / usable_init))
-                    b.branch.abs_left_w = nil
+                    -- Only the two neighbors change; combined width stays the same.
+                    local new_left_w  = math.max(MIN_SPLIT_W,
+                        mouse_m.x + sx - b.left_x - math.floor(b.parent_gap / 2))
+                    local combined    = init_abs[b.left_idx] + init_abs[b.left_idx + 1]
+                    local new_right_w = math.max(MIN_SPLIT_W, combined - new_left_w)
+                    new_left_w = combined - new_right_w
+                    b.branch.ratios[b.left_idx]     = new_left_w / b.usable
+                    b.branch.ratios[b.left_idx + 1] = new_right_w / b.usable
                 elseif zone == "left" then
+                    -- Left neighbor grows; canvas expands; all others keep abs width.
                     local new_left_w = math.max(MIN_SPLIT_W,
-                        mouse_m.x + sx - b.parent_x - math.floor(igap_init / 2))
-                    b.branch.abs_left_w = new_left_w
-                    b.branch.ratio = usable_init > 0 and (new_left_w / usable_init) or b.branch.ratio
-                    st2.canvas_w = canvas_w_init + (new_left_w - old_left_w_init)
+                        mouse_m.x + sx - b.left_x - math.floor(b.parent_gap / 2))
+                    local delta      = new_left_w - init_abs[b.left_idx]
+                    st2.canvas_w     = canvas_w_init + delta
+                    local new_usable = b.usable + delta
+                    local new_abs    = {}
+                    for j = 1, N do new_abs[j] = init_abs[j] end
+                    new_abs[b.left_idx] = new_left_w
+                    for j = 1, N do b.branch.ratios[j] = new_abs[j] / new_usable end
                     st2.scroll_x      = math.min(st2.scroll_x or 0, math.max(0, st2.canvas_w - wa.width))
                     st2.scroll_target = st2.scroll_x
                 else -- right
+                    -- Right neighbor grows; canvas expands; all others keep abs width.
                     local delta       = mouse_m.x - mx0
-                    local new_right_w = math.max(MIN_SPLIT_W, old_right_w_init - delta)
-                    b.branch.abs_left_w = old_left_w_init
-                    b.branch.ratio = usable_init > 0 and (old_left_w_init / usable_init) or b.branch.ratio
-                    st2.canvas_w = canvas_w_init + (new_right_w - old_right_w_init)
+                    local new_right_w = math.max(MIN_SPLIT_W, init_abs[b.left_idx + 1] - delta)
+                    local canvas_delta = new_right_w - init_abs[b.left_idx + 1]
+                    st2.canvas_w      = canvas_w_init + canvas_delta
+                    local new_usable  = b.usable + canvas_delta
+                    local new_abs     = {}
+                    for j = 1, N do new_abs[j] = init_abs[j] end
+                    new_abs[b.left_idx + 1] = new_right_w
+                    for j = 1, N do b.branch.ratios[j] = new_abs[j] / new_usable end
                     st2.scroll_x      = math.min(scroll_x_init - delta, math.max(0, st2.canvas_w - wa.width))
                     st2.scroll_target = st2.scroll_x
                 end

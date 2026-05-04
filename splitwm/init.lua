@@ -111,7 +111,20 @@ local function ser_node(node)
             if c.valid then table.insert(parts, tostring(c.window)) end
         end
         return "{" .. table.concat(parts, ",") .. "}"
+    elseif node.direction == tree.DIR_H then
+        -- N-ary: ratios as a sub-table, then all children
+        local rparts = {}
+        for _, r in ipairs(node.ratios) do
+            table.insert(rparts, string.format("%.6f", r))
+        end
+        local parts = { '"B"', string.format("%q", node.direction),
+                        "{" .. table.concat(rparts, ",") .. "}" }
+        for _, child in ipairs(node.children) do
+            table.insert(parts, ser_node(child))
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
     else
+        -- DIR_V stays binary
         return string.format('{"B",%q,%.6f,%s,%s}',
             node.direction,
             math.max(0.1, math.min(0.9, node.ratio)),
@@ -125,8 +138,11 @@ local function path_to_leaf_id(node, target_id, path)
     if node.kind == "leaf" then
         return node.id == target_id and path or nil
     end
-    return path_to_leaf_id(node.children[1], target_id, path .. "0")
-        or path_to_leaf_id(node.children[2], target_id, path .. "1")
+    for i, child in ipairs(node.children) do
+        local result = path_to_leaf_id(child, target_id, path .. tostring(i - 1))
+        if result then return result end
+    end
+    return nil
 end
 
 local function save_state()
@@ -148,8 +164,16 @@ local function index_xids(spec, path, key)
             xid_restore_map[spec[i]] = { key = key, path = path, tab_index = i - 2 }
         end
     elseif spec[1] == "B" then
-        index_xids(spec[4], path .. "0", key)
-        index_xids(spec[5], path .. "1", key)
+        if type(spec[3]) == "table" then
+            -- N-ary DIR_H: children start at spec[4]
+            for i = 4, #spec do
+                index_xids(spec[i], path .. tostring(i - 4), key)
+            end
+        else
+            -- Old binary format or DIR_V: children at spec[4] and spec[5]
+            if type(spec[4]) == "table" then index_xids(spec[4], path .. "0", key) end
+            if type(spec[5]) == "table" then index_xids(spec[5], path .. "1", key) end
+        end
     end
 end
 
@@ -180,11 +204,29 @@ local function restore_node(spec, path, path_to_leaf)
         return leaf
     elseif spec[1] == "B" then
         if spec[2] ~= tree.DIR_H and spec[2] ~= tree.DIR_V then return tree.make_leaf() end
-        if type(spec[4]) ~= "table" or type(spec[5]) ~= "table" then return tree.make_leaf() end
-        local ratio = type(spec[3]) == "number" and math.max(0.1, math.min(0.9, spec[3])) or 0.5
-        local left  = restore_node(spec[4], path .. "0", path_to_leaf)
-        local right = restore_node(spec[5], path .. "1", path_to_leaf)
-        return tree.make_branch(spec[2], ratio, left, right)
+        if type(spec[3]) == "table" and spec[2] == tree.DIR_H then
+            -- N-ary DIR_H: spec[3] = ratios table, children at spec[4..]
+            local ratios   = {}
+            for _, r in ipairs(spec[3]) do
+                table.insert(ratios, type(r) == "number" and r or 0.5)
+            end
+            local children = {}
+            for i = 4, #spec do
+                if type(spec[i]) == "table" then
+                    table.insert(children, restore_node(spec[i], path .. tostring(i - 4), path_to_leaf))
+                end
+            end
+            if #children < 2 then return tree.make_leaf() end
+            while #ratios < #children do table.insert(ratios, 1 / #children) end
+            return { kind = "branch", direction = tree.DIR_H, children = children, ratios = ratios }
+        else
+            -- Binary format (old saves or DIR_V)
+            if type(spec[4]) ~= "table" or type(spec[5]) ~= "table" then return tree.make_leaf() end
+            local ratio = type(spec[3]) == "number" and math.max(0.1, math.min(0.9, spec[3])) or 0.5
+            local left  = restore_node(spec[4], path .. "0", path_to_leaf)
+            local right = restore_node(spec[5], path .. "1", path_to_leaf)
+            return tree.make_branch(spec[2], ratio, left, right)
+        end
     else
         return tree.make_leaf()
     end
@@ -399,12 +441,32 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
 
     local child_a = new_leaf_first and child_new or child_existing
     local child_b = new_leaf_first and child_existing or child_new
-    local new_branch = tree.make_branch(direction, SPLIT_RATIO, child_a, child_b)
-    if target_leaf == state.root then
-        state.root = new_branch
-    else
+
+    if direction == tree.DIR_H then
         local parent, idx = tree.find_parent(state.root, target_leaf)
-        parent.children[idx] = new_branch
+        if parent and parent.direction == tree.DIR_H then
+            -- Flatten: insert into existing horizontal branch.
+            local old_r = parent.ratios[idx]
+            parent.ratios[idx] = old_r * SPLIT_RATIO
+            table.insert(parent.ratios, idx + 1, old_r * (1 - SPLIT_RATIO))
+            parent.children[idx] = child_a
+            table.insert(parent.children, idx + 1, child_b)
+        else
+            local new_branch = tree.make_branch(direction, SPLIT_RATIO, child_a, child_b)
+            if target_leaf == state.root then
+                state.root = new_branch
+            else
+                parent.children[idx] = new_branch
+            end
+        end
+    else
+        local new_branch = tree.make_branch(direction, SPLIT_RATIO, child_a, child_b)
+        if target_leaf == state.root then
+            state.root = new_branch
+        else
+            local parent, idx = tree.find_parent(state.root, target_leaf)
+            parent.children[idx] = new_branch
+        end
     end
 
     colors.resolve_color_conflict(child_new, c)
@@ -447,6 +509,21 @@ local function split_leaf(t, direction)
     state.leaf_map[child_a.id] = child_a
     state.leaf_map[child_b.id] = child_b
 
+    if direction == tree.DIR_H then
+        local parent, idx = tree.find_parent(state.root, leaf)
+        if parent and parent.direction == tree.DIR_H then
+            -- Flatten: insert child_b right after child_a in the existing branch
+            local old_r = parent.ratios[idx]
+            parent.ratios[idx] = old_r * SPLIT_RATIO
+            table.insert(parent.ratios, idx + 1, old_r * (1 - SPLIT_RATIO))
+            parent.children[idx] = child_a
+            table.insert(parent.children, idx + 1, child_b)
+            state.focused_leaf_id = child_a.id
+            return child_a.id, child_b.id
+        end
+    end
+
+    -- Create new branch (vertical, or horizontal with no horizontal parent)
     local new_branch = tree.make_branch(direction, SPLIT_RATIO, child_a, child_b)
     if leaf == state.root then
         state.root = new_branch
@@ -470,35 +547,61 @@ local function close_leaf(t, leaf_id)
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
 
-    local sibling_idx = idx == 1 and 2 or 1
-    local sibling = parent.children[sibling_idx]
-
-    -- Move the closed leaf's tabs to the sibling's first leaf so no windows are lost.
-    local sibling_leaves = tree.collect_leaves(sibling)
-    local dest = sibling_leaves[1]
+    -- Destination for the closed leaf's tabs: adjacent sibling leaf.
+    local dest_idx = idx > 1 and (idx - 1) or 2
+    local dest_sibling = parent.children[dest_idx]
+    local dest_leaves  = tree.collect_leaves(dest_sibling)
+    local dest         = dest_leaves[1]
     for _, tc in ipairs(leaf.tabs) do
         table.insert(dest.tabs, tc)
         colors.resolve_color_conflict(dest, tc)
     end
     if dest.active_tab == 0 and #dest.tabs > 0 then dest.active_tab = 1 end
 
-    -- Keep the currently focused leaf if it lives in the sibling subtree.
-    local focused_id = state.focused_leaf_id
-    local keep
-    for _, l in ipairs(sibling_leaves) do
-        if l.id == focused_id then keep = l; break end
-    end
-
     state.leaf_map[leaf_id] = nil
 
-    if parent == state.root then
-        state.root = sibling
+    if parent.direction == tree.DIR_H and #parent.children > 2 then
+        -- N-ary: remove this child and redistribute its ratio share.
+        local removed_ratio = parent.ratios[idx]
+        table.remove(parent.children, idx)
+        table.remove(parent.ratios, idx)
+        local remaining_sum = 0
+        for _, r in ipairs(parent.ratios) do remaining_sum = remaining_sum + r end
+        if remaining_sum > 0 then
+            for i = 1, #parent.ratios do
+                parent.ratios[i] = parent.ratios[i] + removed_ratio * parent.ratios[i] / remaining_sum
+            end
+        end
+        -- Keep focused leaf if it's still in the tree, else focus adjacent child.
+        local focused_id = state.focused_leaf_id
+        local keep
+        for _, child in ipairs(parent.children) do
+            for _, l in ipairs(tree.collect_leaves(child)) do
+                if l.id == focused_id then keep = l; break end
+            end
+            if keep then break end
+        end
+        local fallback_idx = math.min(idx, #parent.children)
+        local fallback = tree.collect_leaves(parent.children[fallback_idx])[1]
+        state.focused_leaf_id = keep and keep.id or fallback.id
     else
-        local grand_parent, parent_idx = tree.find_parent(state.root, parent)
-        grand_parent.children[parent_idx] = sibling
+        -- Binary case (or DIR_V): collapse parent, sibling takes its place.
+        local sibling_idx = idx == 1 and 2 or 1
+        local sibling = parent.children[sibling_idx]
+        local sibling_leaves = tree.collect_leaves(sibling)
+        local focused_id = state.focused_leaf_id
+        local keep
+        for _, l in ipairs(sibling_leaves) do
+            if l.id == focused_id then keep = l; break end
+        end
+        if parent == state.root then
+            state.root = sibling
+        else
+            local grand_parent, parent_idx = tree.find_parent(state.root, parent)
+            grand_parent.children[parent_idx] = sibling
+        end
+        state.focused_leaf_id = keep and keep.id or sibling_leaves[1].id
     end
-
-    state.focused_leaf_id = keep and keep.id or sibling_leaves[1].id
     return true
 end
 
@@ -509,11 +612,19 @@ local function close_leaf_with_anim(t, s, state, leaf_id)
     local old_geos, sibling_ids
     local old_scroll_x = state.scroll_x or 0
     if parent then
-        local slvs = tree.collect_leaves(parent.children[pidx == 1 and 2 or 1])
+        -- Collect leaves from ALL remaining children (not just one sibling subtree).
+        local remaining = {}
+        for i, child in ipairs(parent.children) do
+            if i ~= pidx then
+                for _, l in ipairs(tree.collect_leaves(child)) do
+                    table.insert(remaining, l)
+                end
+            end
+        end
         local cached = geo_cache[t]
-        if cached and #slvs > 0 then
+        if cached and #remaining > 0 then
             sibling_ids = {}; old_geos = {}
-            for _, l in ipairs(slvs) do
+            for _, l in ipairs(remaining) do
                 sibling_ids[#sibling_ids + 1] = l.id
                 old_geos[l.id] = cached.geos[l.id]
             end
@@ -590,26 +701,35 @@ local function resize_focused(t, delta)
     if not leaf then return false end
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
-    local new_ratio = parent.ratio
-    if idx == 1 then new_ratio = new_ratio + delta else new_ratio = new_ratio - delta end
-    local min_r, max_r = 0.1, 0.9
-    local cached = geo_cache[t]
-    if cached then
-        local l1 = tree.collect_leaves(parent.children[1])[1]
-        local l2 = tree.collect_leaves(parent.children[2])[1]
-        local g1 = l1 and cached.geos[l1.id]
-        local g2 = l2 and cached.geos[l2.id]
-        if g1 and g2 then
-            local gap = beautiful.splitwm_gap
-            if parent.dir == tree.DIR_H then
-                min_r = MIN_SPLIT_W / (g1.width + g2.width + gap)
-            else
-                min_r = MIN_SPLIT_H / (g1.height + g2.height + gap)
+    if parent.direction == tree.DIR_H then
+        -- N-ary: adjust this child and the adjacent one.
+        local N = #parent.children
+        local other_idx = idx < N and idx + 1 or idx - 1
+        local min_r = 0.01
+        local cur       = parent.ratios[idx]       or (1 / N)
+        local cur_other = parent.ratios[other_idx] or (1 / N)
+        local new_cur   = math.max(min_r, cur + delta)
+        local actual_d  = new_cur - cur
+        parent.ratios[idx]       = new_cur
+        parent.ratios[other_idx] = math.max(min_r, cur_other - actual_d)
+    else
+        -- DIR_V: binary
+        local new_ratio = parent.ratio
+        if idx == 1 then new_ratio = new_ratio + delta else new_ratio = new_ratio - delta end
+        local min_r, max_r = 0.1, 0.9
+        local cached = geo_cache[t]
+        if cached then
+            local l1 = tree.collect_leaves(parent.children[1])[1]
+            local l2 = tree.collect_leaves(parent.children[2])[1]
+            local g1 = l1 and cached.geos[l1.id]
+            local g2 = l2 and cached.geos[l2.id]
+            if g1 and g2 then
+                min_r = MIN_SPLIT_H / (g1.height + g2.height + beautiful.splitwm_gap)
+                max_r = 1 - min_r
             end
-            max_r = 1 - min_r
         end
+        parent.ratio = math.max(min_r, math.min(max_r, new_ratio))
     end
-    parent.ratio = math.max(min_r, math.min(max_r, new_ratio))
     return true
 end
 
@@ -1016,84 +1136,44 @@ local function ensure_in_view(s, tag)
     if target ~= sx then scroll_to(s, tag, target) end
 end
 
--- Returns the computed pixel width of a tree node given its parent's usable space.
-local function node_width(node, parent_usable, gap, cached_geos)
-    if node.abs_left_w then return node.abs_left_w end
-    -- Fall back to geo_cache, then ratio * usable.
-    local leaves = tree.collect_leaves(node)
-    if cached_geos and #leaves > 0 then
-        local first = cached_geos[leaves[1].id]
-        local last  = cached_geos[leaves[#leaves].id]
-        if first and last then
-            return last.x + last.width - first.x
-        end
-    end
-    return math.floor(parent_usable * node.ratio)
-end
-
--- Insert a new full-height leaf to the right of branch.children[1].
--- Grows canvas_w by wa.width + gap, and locks ancestor widths so only the
--- insertion side expands.
+-- Insert a new full-height leaf to the right of branch.children[left_idx].
+-- For root-level branches, grows canvas_w to give the new column its own space.
 local function insert_column_at_gap(t, s, b)
-    local state     = get_state(t)
-    local wa        = s.workarea
-    local gap       = beautiful.splitwm_gap
-    local default_w = math.floor(wa.width / 2)
-    local branch    = b.branch
-    local cached    = geo_cache[t] and geo_cache[t].geos
+    local state   = get_state(t)
+    local wa      = s.workarea
+    local gap     = beautiful.splitwm_gap
+    local branch  = b.branch
+    local N       = #branch.children
+    local old_usable = b.usable  -- usable space of this branch from last layout
 
-    -- Compute current left-child width (canvas coords) for the clicked branch.
-    local b_usable  = (b.parent_w or wa.width) - (b.parent_gap or gap)
-    local cur_left_w = branch.abs_left_w or math.floor(b_usable * branch.ratio)
+    -- Normalize existing ratios to get current absolute widths.
+    local rs = 0
+    for _, r in ipairs(branch.ratios) do rs = rs + r end
+    if rs <= 0 then rs = 1 end
+    local abs_ws = {}
+    for j = 1, N do abs_ws[j] = branch.ratios[j] / rs * old_usable end
 
-    -- Build [new_leaf | old_right], with new_leaf getting default_w.
     local new_leaf  = tree.make_leaf()
     state.leaf_map[new_leaf.id] = new_leaf
-    local old_right = branch.children[2]
-    local new_sub   = tree.make_branch(tree.DIR_H, 0.5, new_leaf, old_right)
-    new_sub.abs_left_w = default_w
-    branch.children[2] = new_sub
 
-    -- Lock left side of the clicked branch so it doesn't shrink.
-    branch.abs_left_w = cur_left_w
-
-    -- Grow canvas and propagate abs_left_w up through horizontal ancestors so
-    -- only the inserted side expands; siblings on the other side stay the same.
-    local delta   = default_w + gap
-    state.canvas_w = (state.canvas_w or wa.width) + delta
-
-    local child = branch
-    while true do
-        local parent, child_idx = tree.find_parent(state.root, child)
-        if not parent then break end
-        if parent.direction == tree.DIR_H then
-            local left_node  = parent.children[1]
-            local right_node = parent.children[2]
-            -- Compute current left child absolute width.
-            local pleft_w
-            if parent.abs_left_w then
-                pleft_w = parent.abs_left_w
-            else
-                local p_usable_est = (state.canvas_w or wa.width) - gap - delta
-                pleft_w = math.floor(p_usable_est * parent.ratio)
-                -- Try geo_cache for more precision.
-                local ll = tree.collect_leaves(left_node)[1]
-                local rr = tree.collect_leaves(right_node)[1]
-                local gl = cached and ll and cached[ll.id]
-                local gr = cached and rr and cached[rr.id]
-                if gl and gr then pleft_w = gl.width end
-            end
-            if child_idx == 1 then
-                -- Our subtree is the left child; it grew. Lock right side.
-                parent.abs_left_w = pleft_w + delta
-            else
-                -- Our subtree is the right child; left side unchanged. Lock it.
-                parent.abs_left_w = pleft_w
-            end
-        end
-        -- Vertical ancestors: no width effect needed, just continue upward.
-        child = parent
+    local default_w, new_usable
+    if branch == state.root then
+        -- Root-level: grow canvas so existing children keep their widths.
+        default_w  = math.floor(wa.width / 2)
+        state.canvas_w = (state.canvas_w or wa.width) + default_w + gap
+        new_usable = old_usable + default_w
+    else
+        -- Nested: redistribute existing space (no canvas change).
+        default_w  = math.floor(old_usable / (N + 1))
+        new_usable = old_usable
+        -- Shrink each existing child proportionally to make room.
+        for j = 1, N do abs_ws[j] = abs_ws[j] * new_usable / (new_usable + default_w) end
     end
+
+    table.insert(abs_ws,          b.left_idx + 1, default_w)
+    table.insert(branch.children, b.left_idx + 1, new_leaf)
+    for j = 1, N + 1 do branch.ratios[j] = abs_ws[j] / new_usable end
+    while #branch.ratios > N + 1 do table.remove(branch.ratios) end
 
     state.focused_leaf_id = new_leaf.id
     awful.layout.arrange(s)
@@ -1102,20 +1182,36 @@ end
 splitwm.insert_column_at_gap = insert_column_at_gap
 
 local function insert_at_right_edge(t, s)
-    local state  = get_state(t)
-    local wa     = s.workarea
-    local gap    = beautiful.splitwm_gap
-    local new_w  = math.floor(wa.width / 2)
-    local old_cw = state.canvas_w or wa.width
+    local state   = get_state(t)
+    local wa      = s.workarea
+    local gap     = beautiful.splitwm_gap
+    local new_w   = math.floor(wa.width / 2)
+    local old_cw  = state.canvas_w or wa.width
 
     local new_leaf = tree.make_leaf()
     state.leaf_map[new_leaf.id] = new_leaf
 
     local old_root = state.root
-    local new_root = tree.make_branch(tree.DIR_H, 0.5, old_root, new_leaf)
-    new_root.abs_left_w = old_cw
-    state.root     = new_root
-    state.canvas_w = old_cw + new_w + gap
+    if old_root.direction == tree.DIR_H then
+        -- Append to existing root horizontal branch.
+        local N = #old_root.children
+        local old_usable = old_cw - (N - 1) * gap
+        local rs = 0
+        for _, r in ipairs(old_root.ratios) do rs = rs + r end
+        if rs <= 0 then rs = 1 end
+        local abs_ws = {}
+        for j = 1, N do abs_ws[j] = old_root.ratios[j] / rs * old_usable end
+        table.insert(abs_ws, new_w)
+        table.insert(old_root.children, new_leaf)
+        state.canvas_w = old_cw + new_w + gap
+        local new_usable = old_usable + new_w
+        for j = 1, N + 1 do old_root.ratios[j] = abs_ws[j] / new_usable end
+        while #old_root.ratios > N + 1 do table.remove(old_root.ratios) end
+    else
+        local r      = old_cw / (old_cw + new_w)
+        state.root   = tree.make_branch(tree.DIR_H, r, old_root, new_leaf)
+        state.canvas_w = old_cw + new_w + gap
+    end
 
     state.focused_leaf_id = new_leaf.id
     awful.layout.arrange(s)
@@ -1123,20 +1219,37 @@ local function insert_at_right_edge(t, s)
 end
 
 local function insert_at_left_edge(t, s)
-    local state  = get_state(t)
-    local wa     = s.workarea
-    local gap    = beautiful.splitwm_gap
-    local new_w  = math.floor(wa.width / 2)
-    local old_cw = state.canvas_w or wa.width
+    local state   = get_state(t)
+    local wa      = s.workarea
+    local gap     = beautiful.splitwm_gap
+    local new_w   = math.floor(wa.width / 2)
+    local old_cw  = state.canvas_w or wa.width
 
     local new_leaf = tree.make_leaf()
     state.leaf_map[new_leaf.id] = new_leaf
 
     local old_root = state.root
-    local new_root = tree.make_branch(tree.DIR_H, 0.5, new_leaf, old_root)
-    new_root.abs_left_w = new_w
-    state.root     = new_root
-    state.canvas_w = old_cw + new_w + gap
+    if old_root.direction == tree.DIR_H then
+        -- Prepend to existing root horizontal branch.
+        local N = #old_root.children
+        local old_usable = old_cw - (N - 1) * gap
+        local rs = 0
+        for _, r in ipairs(old_root.ratios) do rs = rs + r end
+        if rs <= 0 then rs = 1 end
+        local abs_ws = {}
+        for j = 1, N do abs_ws[j] = old_root.ratios[j] / rs * old_usable end
+        table.insert(abs_ws, 1, new_w)
+        table.insert(old_root.children, 1, new_leaf)
+        state.canvas_w = old_cw + new_w + gap
+        local new_usable = old_usable + new_w
+        for j = 1, N + 1 do old_root.ratios[j] = abs_ws[j] / new_usable end
+        while #old_root.ratios > N + 1 do table.remove(old_root.ratios) end
+    else
+        local r      = new_w / (old_cw + new_w)
+        state.root   = tree.make_branch(tree.DIR_H, r, new_leaf, old_root)
+        state.canvas_w = old_cw + new_w + gap
+    end
+
     -- Shift scroll so existing content stays at the same screen position.
     state.scroll_x      = (state.scroll_x or 0) + new_w + gap
     state.scroll_target = state.scroll_x
