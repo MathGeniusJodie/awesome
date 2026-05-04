@@ -91,6 +91,7 @@ local split_anim_pending = {}   -- [screen] = {old_geo, a_id, b_id, dir}
 local close_anim_pending = {}   -- [screen] = {old_geos, leaf_ids}
 local split_anim_active  = {}   -- [screen] = {timer}
 local scroll_anim_active = {}   -- [screen] = {timer}
+local last_focused_leaf  = {}   -- [screen] = leaf_id; used to detect focus changes in update_ui
 
 -- Per-tag restore data loaded from file at startup.
 local tag_restore_specs = {}
@@ -881,6 +882,7 @@ splitwm.set_wallpaper = underlay.set_wallpaper
 
 local start_split_anim  -- forward declaration
 local start_close_anim  -- forward declaration
+local ensure_in_view    -- forward declaration
 
 local function update_ui(s)
     local t, state = get_active_state(s)
@@ -920,6 +922,13 @@ local function update_ui(s)
     if cpending then
         close_anim_pending[s] = nil
         start_close_anim(s, t, cpending.old_geos, cpending.leaf_ids)
+    end
+
+    -- Scroll focused split into view whenever focus changes.
+    local lid = state.focused_leaf_id
+    if last_focused_leaf[s] ~= lid and not split_anim_active[s] then
+        last_focused_leaf[s] = lid
+        ensure_in_view(s, t)
     end
 end
 
@@ -1118,7 +1127,7 @@ local function scroll_to(s, tag, target_x)
     start_scroll_anim(s, tag)
 end
 
-local function ensure_in_view(s, tag)
+ensure_in_view = function(s, tag)
     local state = tag_state[tag]
     if not state then return end
     local wa      = s.workarea
@@ -1126,12 +1135,13 @@ local function ensure_in_view(s, tag)
     if not cached then return end
     local geo = cached.geos[state.focused_leaf_id]
     if not geo then return end
-    local sx   = state.scroll_x or 0
+    local sx     = state.scroll_x or 0
+    local gap    = beautiful.splitwm_gap
     local target = sx
-    if geo.x - sx < wa.x then
-        target = geo.x - wa.x
-    elseif geo.x + geo.width - sx > wa.x + wa.width then
-        target = geo.x + geo.width - wa.x - wa.width
+    if geo.x - sx < wa.x + gap then
+        target = geo.x - wa.x - gap
+    elseif geo.x + geo.width - sx > wa.x + wa.width - gap then
+        target = geo.x + geo.width - wa.x - wa.width + gap
     end
     if target ~= sx then scroll_to(s, tag, target) end
 end
