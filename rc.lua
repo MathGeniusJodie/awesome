@@ -237,6 +237,7 @@ status.setup({
     transitions = transitions,
     hunger_mod  = hunger_mod,
     WORKSPACES  = WORKSPACES,
+    do_scroll   = function(s, delta_x) splitwm.scroll_delta(s, delta_x) end,
 })
 
 awful.screen.connect_for_each_screen(function(s)

@@ -753,11 +753,14 @@ end
 
 local _splitwm, _transitions, _hunger_mod, _WORKSPACES
 
+local _do_scroll
+
 function status.setup(deps)
     _splitwm      = deps.splitwm
     _transitions  = deps.transitions
     _hunger_mod   = deps.hunger_mod
     _WORKSPACES   = deps.WORKSPACES
+    _do_scroll    = deps.do_scroll
 end
 
 local CAPSULE_HEIGHT  = 24
@@ -936,6 +939,15 @@ function status.setup_screen(s)
         wibox.container.margin(status.new_power_widget(lock_w), 0, 0, 2, 0),
         wibox.container.margin(status.new_lock_widget(lock_w),  0, 0, 2, 0),
     }
+    -- Horizontal scroll on the status bar (2-finger trackpad or Shift+wheel).
+    local SCROLL_STEP = 100
+    s.mywibox:buttons(gears.table.join(
+        awful.button({}, 6,        function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
+        awful.button({}, 7,        function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end),
+        awful.button({"Shift"}, 4, function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
+        awful.button({"Shift"}, 5, function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end)
+    ))
+
     -- Keep mypower_wibox nil so nothing breaks if rc.lua references it.
     s.mypower_wibox = nil
 end

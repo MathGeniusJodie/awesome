@@ -1073,9 +1073,9 @@ end
 -- Horizontal scroll system
 ---------------------------------------------------------------------------
 
-local SCROLL_STEP         = 60   -- pixels per discrete scroll event
+local SCROLL_STEP         = 100  -- pixels per discrete scroll event
 local SCROLL_ANIM_FPS     = 60
-local SCROLL_ANIM_DURATION = 0.18  -- seconds
+local SCROLL_ANIM_DURATION = 0.05  -- seconds
 
 local function start_scroll_anim(s, tag)
     local a = scroll_anim_active[s]
@@ -1330,6 +1330,13 @@ splitwm.close_split = function()
     close_leaf_with_anim(t, s, state, state.focused_leaf_id)
 end
 
+
+splitwm.scroll_delta = function(s, delta_x)
+    local t = s and s.selected_tag
+    if not t then return end
+    local state = get_state(t)
+    scroll_to(s, t, (state.scroll_x or 0) + delta_x)
+end
 
 function splitwm.cancel_pickup()
     drag.pending = nil
