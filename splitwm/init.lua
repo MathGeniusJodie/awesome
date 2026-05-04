@@ -507,6 +507,7 @@ local function close_leaf_with_anim(t, s, state, leaf_id)
     local parent, pidx
     if leaf then parent, pidx = tree.find_parent(state.root, leaf) end
     local old_geos, sibling_ids
+    local old_scroll_x = state.scroll_x or 0
     if parent then
         local slvs = tree.collect_leaves(parent.children[pidx == 1 and 2 or 1])
         local cached = geo_cache[t]
@@ -519,8 +520,48 @@ local function close_leaf_with_anim(t, s, state, leaf_id)
         end
     end
     if close_leaf(t, leaf_id) == false then return end
+
+    -- Clamp canvas_w if the remaining tree has no horizontal splits.
+    local new_root = state.root
+    local wa       = s.workarea
+    if new_root and new_root.direction ~= tree.DIR_H then
+        if (state.canvas_w or wa.width) > wa.width then
+            state.canvas_w = wa.width
+        end
+    end
+
     awful.layout.arrange(s)
+
+    -- Recompute scroll_x: keep current value but clamp to the valid range and
+    -- ensure the focused split is within the viewport.  Do this after arrange so
+    -- the new geo_cache is available.
+    local final_scroll = old_scroll_x
+    local cw           = state.canvas_w or wa.width
+    local max_s        = math.max(0, cw - wa.width)
+    local new_cached   = geo_cache[t]
+    if new_cached then
+        local fgeo = new_cached.geos[state.focused_leaf_id]
+        if fgeo then
+            if fgeo.x - final_scroll < wa.x then
+                final_scroll = fgeo.x - wa.x
+            elseif fgeo.x + fgeo.width - final_scroll > wa.x + wa.width then
+                final_scroll = fgeo.x + fgeo.width - wa.x - wa.width
+            end
+        end
+    end
+    final_scroll        = math.max(0, math.min(max_s, final_scroll))
+    state.scroll_x      = final_scroll
+    state.scroll_target = final_scroll
+
     if old_geos then
+        -- Remap old canvas coords so the animation starts from the correct
+        -- screen positions given the new scroll_x.
+        for id, geo in pairs(old_geos) do
+            old_geos[id] = { x      = geo.x - old_scroll_x + final_scroll,
+                             y      = geo.y,
+                             width  = geo.width,
+                             height = geo.height }
+        end
         close_anim_pending[s] = { old_geos = old_geos, leaf_ids = sibling_ids }
     end
 end
