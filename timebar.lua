@@ -14,13 +14,13 @@ local wibox = require("wibox")
 local gears = require("gears")
 
 -- Layout constants.
-local BAR_HEIGHT  = 8   -- px height of each bar (corner radius = BAR_HEIGHT / 2)
-local BAR_SPACING = 3   -- px gap between the two bars
-local BAR_MARGIN  = 0   -- px gap between screen top edge and bar 1
+local BAR_HEIGHT  = 7   -- px height of each bar (corner radius = BAR_HEIGHT / 2)
+local BAR_SPACING = 2   -- px gap between the two bars
+local BAR_MARGIN  = 2   -- px gap between screen top edge and bar 1
 
 local M = {}
 
-local DAY_START_MIN = 6 * 60 + 00    -- 06:00am
+local DAY_START_MIN = 6 * 60 + 30    -- 06:00am
 local DAY_END_MIN   = 23 * 60 + 30   -- 11:30pm
 local TOTAL_BLOCKS  = (DAY_END_MIN - DAY_START_MIN) / 10
 
@@ -69,9 +69,9 @@ function M.setup(s)
             local gap    = 2
             local pill_w = (usable - (TOTAL_BLOCKS - 1) * gap) / TOTAL_BLOCKS
             local r      = math.min(r_full, pill_w * 0.5)
-            -- Remaining pills aligned to right edge.
+            -- Remaining pills aligned to left edge.
             for i = 0, remaining - 1 do
-                local x = usable - (i + 1) * pill_w - i * gap
+                local x = i * (pill_w + gap)
                 cr:save()
                 cr:translate(x, 0)
                 gears.shape.rounded_rect(cr, pill_w, BAR_HEIGHT, r)
