@@ -206,141 +206,106 @@ local function get_drag_handle(s, i)
     wb:buttons(gears.table.join(
         awful.button({}, 1, function()
             if not ref.b then return end
+            local mx0 = mouse.coords().x
+            local _, state = _get_active_state(s)
+            if not state then return end
 
-            -- ── Edge resize ──────────────────────────────────────────────────
-            if ref.b.edge then
-                local mx0             = mouse.coords().x
-                local t_e, st_e       = _get_active_state(s)
-                if not st_e then return end
-                local canvas_w_init   = st_e.canvas_w or s.workarea.width
-                local scroll_x_init   = st_e.scroll_x  or 0
-                local wa_e            = s.workarea
-                local gap_e           = beautiful.splitwm_gap or 24
-                local root_e          = st_e.root
-                local is_left         = ref.b.edge == "left"
-
-                local old_left_w_e
-                if is_left and root_e and root_e.direction == tree.DIR_H then
-                    local usable = canvas_w_init - gap_e
-                    old_left_w_e = root_e.abs_left_w or math.floor(usable * root_e.ratio)
-                end
-
+            -- Shared drag scaffolding: calls on_move(mouse_m, st2) each frame,
+            -- then arranges and repositions the handle widget.
+            local function start_drag(on_move, wb_x_offset_override)
                 handle_state = "dragging"
                 wb.bg = color_fg
-                local wb_x_offset = wb.x - mx0
-
+                local wb_x_offset = wb_x_offset_override ~= nil and wb_x_offset_override or (wb.x - mx0)
                 mousegrabber.run(function(mouse_m)
                     if not mouse_m.buttons[1] then
                         handle_state = "idle"; wb.bg = color_transparent
-                        awful.layout.arrange(s)
-                        return false
+                        awful.layout.arrange(s); return false
                     end
                     local _, st2 = _get_active_state(s)
                     if not st2 then return false end
-                    local delta = mouse_m.x - mx0
-
-                    if is_left then
-                        -- Drag left = left split grows; scroll shifts so right content stays put.
-                        if old_left_w_e and root_e and root_e.direction == tree.DIR_H then
-                            local new_left_w = math.max(MIN_SPLIT_W, old_left_w_e - delta)
-                            local canvas_delta = new_left_w - old_left_w_e
-                            root_e.abs_left_w = new_left_w
-                            st2.canvas_w      = canvas_w_init + canvas_delta
-                            local new_usable  = st2.canvas_w - gap_e
-                            root_e.ratio      = new_usable > 0 and (new_left_w / new_usable) or root_e.ratio
-                            st2.scroll_x      = scroll_x_init + canvas_delta
-                            st2.scroll_target = st2.scroll_x
-                        end
-                    else
-                        -- Right edge: canvas right boundary tracks mouse.
-                        st2.canvas_w = math.max(MIN_SPLIT_W * 2, canvas_w_init + delta)
-                    end
-
+                    on_move(mouse_m, st2)
                     awful.layout.arrange(s)
                     wb.visible = true
                     wb.x = mouse_m.x + wb_x_offset
                     return true
                 end, "sb_h_double_arrow")
+            end
+
+            -- ── Edge resize ──────────────────────────────────────────────────
+            if ref.b.edge then
+                local canvas_w_init = state.canvas_w or s.workarea.width
+                local scroll_x_init = state.scroll_x or 0
+                local gap_e         = beautiful.splitwm_gap or 24
+                local root_e        = state.root
+                local is_left       = ref.b.edge == "left"
+                local old_left_w_e
+                if is_left and root_e and root_e.direction == tree.DIR_H then
+                    old_left_w_e = root_e.abs_left_w
+                        or math.floor((canvas_w_init - gap_e) * root_e.ratio)
+                end
+                start_drag(function(mouse_m, st2)
+                    local delta = mouse_m.x - mx0
+                    if is_left and old_left_w_e and root_e and root_e.direction == tree.DIR_H then
+                        local new_left_w   = math.max(MIN_SPLIT_W, old_left_w_e - delta)
+                        local canvas_delta = new_left_w - old_left_w_e
+                        root_e.abs_left_w  = new_left_w
+                        st2.canvas_w       = canvas_w_init + canvas_delta
+                        root_e.ratio       = (st2.canvas_w - gap_e) > 0
+                            and (new_left_w / (st2.canvas_w - gap_e)) or root_e.ratio
+                        st2.scroll_x       = scroll_x_init + canvas_delta
+                        st2.scroll_target  = st2.scroll_x
+                    else
+                        st2.canvas_w = math.max(MIN_SPLIT_W * 2, canvas_w_init + delta)
+                    end
+                end)
                 return
             end
 
-            local b, hw = ref.b, ref.handle_w
-            -- Determine drag zone from click position relative to gap center.
-            local mx0 = mouse.coords().x
-            local t, state = _get_active_state(s)
-            local scroll_x = (state and state.scroll_x) or 0
-            local canvas_mx = mx0 + scroll_x  -- canvas-space x of click
+            -- ── Gap resize (3-zone) ───────────────────────────────────────────
+            local b, hw     = ref.b, ref.handle_w
+            local wa        = s.workarea
+            local scroll_x  = state.scroll_x or 0
+            local canvas_mx = mx0 + scroll_x
             local zone_half = (b.parent_gap or 0) * ZONE_FRAC
-            local zone
-            if canvas_mx < b.pos - zone_half then
-                zone = "left"
-            elseif canvas_mx > b.pos + zone_half then
-                zone = "right"
-            else
-                zone = "middle"
-            end
+            local zone = canvas_mx < b.pos - zone_half and "left"
+                      or canvas_mx > b.pos + zone_half and "right"
+                      or "middle"
 
-            handle_state = "dragging"
-            wb.bg = color_fg
-            local wa = s.workarea
-            local wb_x_offset = wb.x - mx0  -- offset from mouse to handle left edge at drag start
-
-            -- Capture initial geometry once to avoid delta accumulation across frames.
             local igap_init        = b.parent_gap or 0
             local usable_init      = b.parent_w - igap_init
             local old_left_w_init  = b.branch.abs_left_w or math.floor(usable_init * b.branch.ratio)
             local old_right_w_init = usable_init - old_left_w_init
-            local right_start_init = b.parent_x + old_left_w_init + igap_init
-            local canvas_w_init    = (state and state.canvas_w) or wa.width
-            local scroll_x_init    = scroll_x  -- scroll_x at click time
+            local canvas_w_init    = state.canvas_w or wa.width
+            local scroll_x_init    = scroll_x
+            -- Middle/left: gap center moves to mouse_m.x, so center pill on mouse.
+            -- Right: gap moves by delta, so preserve click-relative offset (pass nil).
+            local gap_wb_x_off = zone ~= "right" and -math.floor(hw / 2) or nil
 
-            mousegrabber.run(function(mouse_m)
-                if not mouse_m.buttons[1] then
-                    handle_state = "idle"; wb.bg = color_transparent
-                    awful.layout.arrange(s)
-                    return false
-                end
-                local t2, st2 = _get_active_state(s)
-                if not st2 then return false end
+            start_drag(function(mouse_m, st2)
                 local sx = st2.scroll_x or 0
-
                 if zone == "middle" then
-                    -- Symmetric resize: split point tracks mouse, canvas unchanged.
                     local min_r = MIN_SPLIT_W / usable_init
                     b.branch.ratio = math.max(min_r, math.min(1 - min_r,
                         (mouse_m.x + sx - b.parent_x - math.floor(igap_init / 2)) / usable_init))
                     b.branch.abs_left_w = nil
                 elseif zone == "left" then
-                    -- Left child grows/shrinks; right child width stays constant; canvas changes.
                     local new_left_w = math.max(MIN_SPLIT_W,
                         mouse_m.x + sx - b.parent_x - math.floor(igap_init / 2))
                     b.branch.abs_left_w = new_left_w
                     b.branch.ratio = usable_init > 0 and (new_left_w / usable_init) or b.branch.ratio
                     st2.canvas_w = canvas_w_init + (new_left_w - old_left_w_init)
-                    local max_sl = math.max(0, st2.canvas_w - wa.width)
-                    st2.scroll_x      = math.min(st2.scroll_x or 0, max_sl)
+                    st2.scroll_x      = math.min(st2.scroll_x or 0, math.max(0, st2.canvas_w - wa.width))
                     st2.scroll_target = st2.scroll_x
-                else -- zone == "right"
-                    -- Right child shrinks when dragging right; left child locked.
-                    -- scroll_x adjusts to keep the gap at the mouse position.
-                    local delta = mouse_m.x - mx0
+                else -- right
+                    local delta       = mouse_m.x - mx0
                     local new_right_w = math.max(MIN_SPLIT_W, old_right_w_init - delta)
                     b.branch.abs_left_w = old_left_w_init
                     b.branch.ratio = usable_init > 0 and (old_left_w_init / usable_init) or b.branch.ratio
                     st2.canvas_w = canvas_w_init + (new_right_w - old_right_w_init)
-                    local max_sr = math.max(0, st2.canvas_w - wa.width)
-                    st2.scroll_x      = math.min(scroll_x_init - delta, max_sr)
+                    st2.scroll_x      = math.min(scroll_x_init - delta, math.max(0, st2.canvas_w - wa.width))
                     st2.scroll_target = st2.scroll_x
                 end
-                awful.layout.arrange(s)
-                if zone == "right" then
-                    -- update_drag_handles may hide or misplace this handle when the gap
-                    -- scrolls off-screen, so force position and visibility manually.
-                    wb.visible = true
-                    wb.x = mouse_m.x + wb_x_offset
-                end
-                return true
-            end, "sb_h_double_arrow")
+            end, gap_wb_x_off)
         end),
         -- Pass scroll events through the handle to the main scroll handler.
         awful.button({}, 6,        function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
@@ -470,23 +435,34 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
     end
 
     -- Edge handles: + buttons at left and right canvas boundaries.
+    -- Vertical span = union of all horizontal-gap spans (matches gap handle heights).
     local canvas_w_val = (state and state.canvas_w) or wa.width
-    local function add_edge_handle(pos_canvas, inward, edge_side, insert_fn)
+    local edge_top, edge_bot = wa.y + wa.height, wa.y
+    for _, b in ipairs(bounds) do
+        if b.dir == tree.DIR_H then
+            edge_top = math.min(edge_top, b.start)
+            edge_bot = math.max(edge_bot, b.start + b.span)
+        end
+    end
+    if edge_top >= edge_bot then  -- no horizontal gaps: fall back to inner workarea
+        edge_top, edge_bot = wa.y + gap, wa.y + wa.height - gap
+    end
+    local edge_span = edge_bot - edge_top
+
+    local function add_edge_handle(pos_canvas, edge_side, insert_fn)
         local vis_pos = pos_canvas - scroll_x
-        -- inward = 1 means pill extends right (left edge), -1 means extends left (right edge)
-        local pill_x = inward == 1 and vis_pos or vis_pos - handle_w
-        local btn_x  = inward == 1 and vis_pos or vis_pos - PLUS_BTN_SIZE
-        -- Show when any part of the pill is on screen.
+        local pill_x  = vis_pos - math.floor(handle_w / 2)
+        local btn_x   = vis_pos - math.floor(PLUS_BTN_SIZE / 2)
         if pill_x + handle_w > wa.x and pill_x < wa.x + wa.width then
             hi = hi + 1
             local entry   = get_drag_handle(s, hi)
             local wb_h, ref_h = entry.wb, entry.ref
-            ref_h.b = { edge = edge_side, pos = pos_canvas, start = wa.y, span = wa.height }
+            ref_h.b = { edge = edge_side, pos = pos_canvas, start = edge_top, span = edge_span }
             ref_h.handle_w = handle_w
             wb_h.x      = pill_x
-            wb_h.y      = wa.y
+            wb_h.y      = edge_top
             wb_h.width  = handle_w
-            wb_h.height = wa.height
+            wb_h.height = edge_span
             wb_h.cursor = "left_ptr"
             wb_h.visible = true
 
@@ -494,14 +470,14 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
             local pe  = get_plus_btn(s, pi)
             pe.ref.b  = { edge = true, insert_fn = insert_fn }
             pe.wb.x      = btn_x
-            pe.wb.y      = wa.y + math.floor((wa.height - PLUS_BTN_SIZE) / 2)
+            pe.wb.y      = edge_top + math.floor((edge_span - PLUS_BTN_SIZE) / 2)
             pe.wb.width  = PLUS_BTN_SIZE
             pe.wb.height = PLUS_BTN_SIZE
             pe.wb.visible = true
         end
     end
-    add_edge_handle(wa.x,                 1,  "left",  function() if _insert_at_left_edge  then _insert_at_left_edge(s)  end end)
-    add_edge_handle(wa.x + canvas_w_val, -1, "right", function() if _insert_at_right_edge then _insert_at_right_edge(s) end end)
+    add_edge_handle(wa.x + math.floor(gap / 2),                  "left",  function() if _insert_at_left_edge  then _insert_at_left_edge(s)  end end)
+    add_edge_handle(wa.x + canvas_w_val - math.floor(gap / 2), "right", function() if _insert_at_right_edge then _insert_at_right_edge(s) end end)
 
     local pool = drag_handle_pool[s]
     if pool then
