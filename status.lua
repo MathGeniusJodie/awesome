@@ -922,6 +922,8 @@ function status.setup_screen(s)
     local lock_w  = 26
     local btn_gap = 2
     local total_w = lock_w * 2 + btn_gap
+    -- Shrink the status wibox so it doesn't extend under the lock/power buttons.
+    s.mywibox.width = s.geometry.width - sg - total_w
     s.mylock_wibox = wibox({
         x       = s.geometry.x + s.geometry.width - total_w,
         y       = s.geometry.y + s.geometry.height - lock_w,
