@@ -697,6 +697,7 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
         minimize_toggle = function()
             local leaf = state.leaf_map[leaf_id]
             if not leaf then return end
+            local is_minimizing = not leaf.minimized
             local cached = geo_cache[t]
             local old_geos, leaf_ids = {}, {}
             if cached then
@@ -707,7 +708,9 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
             end
             leaf.minimized = not leaf.minimized
             if #leaf_ids > 0 then
-                minimize_anim_pending[s] = { old_geos = old_geos, leaf_ids = leaf_ids }
+                local min_leaf = is_minimizing and leaf or nil
+                if min_leaf then min_leaf.min_anim = true end
+                minimize_anim_pending[s] = { old_geos = old_geos, leaf_ids = leaf_ids, min_leaf = min_leaf }
             end
             awful.layout.arrange(s)
         end,
@@ -857,7 +860,7 @@ local function arrange(p)
         local off_screen = vis_right <= wa.x or vis_left >= wa.x + wa.width
 
         for i, c in ipairs(leaf.tabs) do
-            if i == leaf.active_tab and not off_screen and not leaf.minimized then
+            if i == leaf.active_tab and not off_screen and (not leaf.minimized or leaf.min_anim) then
                 c.hidden = false
                 c.border_width = 0
                 if not c.fullscreen and not split_anim_active[s] then
@@ -900,6 +903,7 @@ splitwm.set_wallpaper = underlay.set_wallpaper
 
 local start_split_anim  -- forward declaration
 local start_close_anim  -- forward declaration
+local start_minimize_anim  -- forward declaration
 local ensure_in_view    -- forward declaration
 
 local function update_ui(s)
@@ -945,7 +949,7 @@ local function update_ui(s)
     local mpending = minimize_anim_pending[s]
     if mpending then
         minimize_anim_pending[s] = nil
-        start_close_anim(s, t, mpending.old_geos, mpending.leaf_ids)
+        start_minimize_anim(s, t, mpending.old_geos, mpending.leaf_ids, mpending.min_leaf)
         return
     end
 
@@ -996,6 +1000,7 @@ end
 local function cancel_split_anim(s)
     local a = split_anim_active[s]
     if not a then return end
+    if a.min_leaf then a.min_leaf.min_anim = nil end
     a.timer:stop()
     split_anim_active[s] = nil
 end
@@ -1101,6 +1106,62 @@ start_close_anim = function(s, t, old_geos, leaf_ids)
         end,
     }
     split_anim_active[s] = { timer = tim }
+end
+
+start_minimize_anim = function(s, t, old_geos, leaf_ids, min_leaf)
+    cancel_split_anim(s)
+    local cached = geo_cache[t]
+    if not cached then
+        if min_leaf then min_leaf.min_anim = nil end
+        return
+    end
+    local end_geos = {}
+    for _, id in ipairs(leaf_ids) do
+        local g = cached.geos[id]
+        if not g then
+            if min_leaf then min_leaf.min_anim = nil end
+            return
+        end
+        end_geos[id] = g
+    end
+    for _, id in ipairs(leaf_ids) do
+        if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
+    end
+    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
+    local frame  = 0
+    local tim
+    tim = gears.timer {
+        timeout   = 1 / SPLIT_ANIM_FPS,
+        autostart = true,
+        call_now  = false,
+        callback  = function()
+            frame = frame + 1
+            local p = ease_out_back(math.min(frame / frames, 1.0))
+            local function lg(g0, g1)
+                return {
+                    x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
+                    y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
+                    width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
+                    height = math.floor(g0.height + (g1.height - g0.height) * p),
+                }
+            end
+            for _, id in ipairs(leaf_ids) do
+                if old_geos[id] and end_geos[id] then
+                    apply_leaf_geo(s, id, lg(old_geos[id], end_geos[id]))
+                end
+            end
+            if frame >= frames then
+                tim:stop()
+                split_anim_active[s] = nil
+                if min_leaf then
+                    min_leaf.min_anim = nil
+                    for _, c in ipairs(min_leaf.tabs) do c.hidden = true end
+                end
+                update_ui(s)
+            end
+        end,
+    }
+    split_anim_active[s] = { timer = tim, min_leaf = min_leaf }
 end
 
 ---------------------------------------------------------------------------

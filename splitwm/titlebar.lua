@@ -507,6 +507,7 @@ local function tb_compute_fingerprint(leaf, state, geo)
         state.focused_leaf_id == leaf.id and 1 or 0,
         tostring(leaf.v_bound_above),
         leaf.minimized and "m" or "",
+        leaf.min_anim  and "a" or "",
         (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id) and "S" or "",
         geo and geo.width or 0,
         geo and geo.height or 0,
@@ -1224,7 +1225,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         local par_for_min = tree.find_parent(ctx.state.root, leaf)
         local par_dir_min = par_for_min and par_for_min.direction
 
-        if leaf.minimized and par_dir_min == tree.DIR_H then
+        if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
             entry.wb:setup {
                 {
                     {
@@ -1253,7 +1254,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 if event_close_menu_if_open() then return end
                 ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
             end)))
-        elseif leaf.minimized then
+        elseif leaf.minimized and not leaf.min_anim then
             -- Vertical squeeze: show only the tab bar, no border or content overlay.
             entry.wb:setup(tb_build_bar_layer(tab_widgets, controls, drag_pill, ctx))
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
