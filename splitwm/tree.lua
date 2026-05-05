@@ -90,7 +90,7 @@ end
 -- Geometry computation
 ---------------------------------------------------------------------------
 
-local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above)
+local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above, tb_h)
     if node.kind == "leaf" then
         if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
         if bounds ~= nil then node.v_bound_above = v_bound_above end
@@ -156,13 +156,13 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
                     parent_x  = x, parent_w = w, parent_gap = inner,
                 })
             end
-            compute_tree_inner(node.children[i], cx, y, cw, h, gap, geos, bounds, v_bound_above)
+            compute_tree_inner(node.children[i], cx, y, cw, h, gap, geos, bounds, v_bound_above, tb_h)
             cx = cx + cw + inner
         end
     else
-        -- DIR_V: binary; minimized child gets a fixed gap-sized slot.
+        -- DIR_V: minimized child gets a slot just tall enough for the titlebar (no leftover gap).
         local usable = h - inner
-        local min_sz  = gap
+        local min_sz  = math.max(0, (tb_h or gap) - inner)
         local c1_min  = node.children[1].kind == "leaf" and node.children[1].minimized
         local c2_min  = node.children[2].kind == "leaf" and node.children[2].minimized
         local h1
@@ -180,13 +180,13 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
                 start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner }
             table.insert(bounds, bnd)
         end
-        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds, v_bound_above)
-        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, bnd)
+        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds, v_bound_above, tb_h)
+        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, bnd,          tb_h)
     end
 end
 
-function tree.compute_tree(node, x, y, w, h, gap, geos, bounds)
-    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil)
+function tree.compute_tree(node, x, y, w, h, gap, geos, bounds, tb_h)
+    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil, tb_h)
 end
 
 return tree

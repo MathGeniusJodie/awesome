@@ -1221,8 +1221,10 @@ local function update_titlebars(s, t, state, geos, leaves)
             end)))
         end
 
-        -- Minimized: show only the expand button, nothing else.
-        if leaf.minimized then
+        local par_for_min = tree.find_parent(ctx.state.root, leaf)
+        local par_dir_min = par_for_min and par_for_min.direction
+
+        if leaf.minimized and par_dir_min == tree.DIR_H then
             entry.wb:setup {
                 {
                     {
@@ -1234,8 +1236,26 @@ local function update_titlebars(s, t, state, geos, leaves)
                     forced_height = ctx.tb_h,
                     widget        = wibox.container.background,
                 },
-                layout = wibox.layout.fixed.vertical,
+                {
+                    {
+                        bg     = "#000000",
+                        shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.min(w, h) / 2) end,
+                        widget = wibox.container.background,
+                    },
+                    left = 4, right = 4, top = 4, bottom = 4,
+                    widget = wibox.container.margin,
+                },
+                layout = wibox.layout.align.vertical,
             }
+            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
+                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
+                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
+                if event_close_menu_if_open() then return end
+                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
+            end)))
+        elseif leaf.minimized then
+            -- Vertical squeeze: show only the tab bar, no border or content overlay.
+            entry.wb:setup(tb_build_bar_layer(tab_widgets, controls, drag_pill, ctx))
             entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
                 if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
                 if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end

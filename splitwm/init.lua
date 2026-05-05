@@ -821,7 +821,7 @@ local function arrange(p)
     end
 
     local geos, bounds = {}, {}
-    tree.compute_tree(root, wa.x, wa.y, canvas_w, wa.height, gap, geos, bounds)
+    tree.compute_tree(root, wa.x, wa.y, canvas_w, wa.height, gap, geos, bounds, effective_tb_h(gap))
     local s = p.screen
     if type(s) == "number" then s = screen[s] end
     geo_cache[tag] = { geos = geos, bounds = bounds }
@@ -911,7 +911,7 @@ local function update_ui(s)
         local wa       = s.workarea
         local canvas_w = state.canvas_w or wa.width
         geos, bounds   = {}, {}
-        tree.compute_tree(state.root, wa.x, wa.y, canvas_w, wa.height, gap, geos, bounds)
+        tree.compute_tree(state.root, wa.x, wa.y, canvas_w, wa.height, gap, geos, bounds, effective_tb_h(gap))
     end
 
     local leaves = tree.collect_leaves(state.root)
