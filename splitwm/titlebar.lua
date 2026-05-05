@@ -736,15 +736,30 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     function tab_draw:draw(_, cr, w2, h2)
         local h = h2 - 1  -- 1px breathing room at top so the border stroke isn't clipped
         cr:translate(0, 1)
-        tab_path(cr, w2, h)
-        cr:close_path()
-        cr:set_source(tab_bg_pat)
-        cr:fill()
-        if tab_state == "active" or tab_state == "picked" then
-            draw_tab_border(cr, w2, h)
-            cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
-            cr:set_line_width(2)
-            cr:stroke()
+        if ctx.simple_tabs then
+            local r = math.floor(h / 4)
+            local sw = w2 - 2 * (TAB_EAR + 4)
+            cr:translate(TAB_EAR + 4, 0)
+            gears.shape.rounded_rect(cr, sw, h, r)
+            cr:set_source(tab_bg_pat)
+            cr:fill()
+            if tab_state == "active" or tab_state == "picked" then
+                gears.shape.rounded_rect(cr, sw, h, r)
+                cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
+                cr:set_line_width(2)
+                cr:stroke()
+            end
+        else
+            tab_path(cr, w2, h)
+            cr:close_path()
+            cr:set_source(tab_bg_pat)
+            cr:fill()
+            if tab_state == "active" or tab_state == "picked" then
+                draw_tab_border(cr, w2, h)
+                cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
+                cr:set_line_width(2)
+                cr:stroke()
+            end
         end
     end
     function tab_draw:fit(_, _, _) return 0, 0 end
@@ -1153,6 +1168,8 @@ local function update_titlebars(s, t, state, geos, leaves)
         local focus_color   = active_picked and color_fg
             or (active_color and active_color.light)
             or color_fg
+        local par_for_min = tree.find_parent(state.root, leaf)
+        local par_dir_min = par_for_min and par_for_min.direction
         local ctx = {
             s            = s,
             t            = t,
@@ -1165,6 +1182,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             tb_bar_h     = tb_h,
             icon_size    = tb_h - 2 * TAB_CONTENT_V_PAD,
             tab_btn_font = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
+            simple_tabs  = leaf.minimized and not leaf.min_anim and par_dir_min ~= tree.DIR_H,
         }
 
         -- Detach tooltip from previous tab widgets before rebuilding.
@@ -1221,9 +1239,6 @@ local function update_titlebars(s, t, state, geos, leaves)
                     function() entry.pill_dragging = false; entry.pill_bg.bg = color_transparent end)
             end)))
         end
-
-        local par_for_min = tree.find_parent(ctx.state.root, leaf)
-        local par_dir_min = par_for_min and par_for_min.direction
 
         if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
             entry.wb:setup {
