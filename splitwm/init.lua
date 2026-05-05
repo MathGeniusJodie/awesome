@@ -87,9 +87,10 @@ local PERSIST_FILE = (os.getenv("HOME") or "") .. "/.cache/awesome/splitwm_state
 local geo_cache          = setmetatable({}, { __mode = "k" })  -- [tag] = { geos={}, bounds={} }
 local client_actual_geo  = {}   -- [client] = actual geometry after size-hint snapping
 local client_last_target = {}   -- [client] = last geometry we requested in arrange()
-local split_anim_pending = {}   -- [screen] = {old_geo, a_id, b_id, dir}
-local close_anim_pending = {}   -- [screen] = {old_geos, leaf_ids}
-local split_anim_active  = {}   -- [screen] = {timer}
+local split_anim_pending    = {}   -- [screen] = {old_geo, a_id, b_id, dir}
+local close_anim_pending    = {}   -- [screen] = {old_geos, leaf_ids}
+local minimize_anim_pending = {}   -- [screen] = {old_geos, leaf_ids}
+local split_anim_active     = {}   -- [screen] = {timer}
 local scroll_anim_active = {}   -- [screen] = {timer}
 local last_focused_leaf  = {}   -- [screen] = leaf_id; used to detect focus changes in update_ui
 
@@ -696,7 +697,18 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
         minimize_toggle = function()
             local leaf = state.leaf_map[leaf_id]
             if not leaf then return end
+            local cached = geo_cache[t]
+            local old_geos, leaf_ids = {}, {}
+            if cached then
+                for id, g in pairs(cached.geos) do
+                    old_geos[id] = g
+                    table.insert(leaf_ids, id)
+                end
+            end
             leaf.minimized = not leaf.minimized
+            if #leaf_ids > 0 then
+                minimize_anim_pending[s] = { old_geos = old_geos, leaf_ids = leaf_ids }
+            end
             awful.layout.arrange(s)
         end,
     }
@@ -928,6 +940,13 @@ local function update_ui(s)
     if cpending then
         close_anim_pending[s] = nil
         start_close_anim(s, t, cpending.old_geos, cpending.leaf_ids)
+        return
+    end
+    local mpending = minimize_anim_pending[s]
+    if mpending then
+        minimize_anim_pending[s] = nil
+        start_close_anim(s, t, mpending.old_geos, mpending.leaf_ids)
+        return
     end
 
     -- Scroll focused split into view whenever focus changes.
