@@ -23,8 +23,9 @@ local color_fg             -- pure white
 local color_fg_disabled    -- dimmed foreground for disabled icons
 local color_btn_bg         -- transparent circle button bg
 local color_transparent    -- fully transparent
-local color_fg_hover       -- hover highlight
+local color_fg_hover       -- hover highlight for launcher widgets
 local color_handle         -- drag handle pill color
+local color_close          -- close-button hover foreground
 
 -- Base height of the tab bar.
 local TITLEBAR_HEIGHT = 30
@@ -166,7 +167,7 @@ local function index_xids(spec, path, key)
             xid_restore_map[spec[i]] = { key = key, path = path, tab_index = i - 2 }
         end
     elseif spec[1] == "B" then
-        if type(spec[3]) == "table" then
+        if spec[2] == tree.DIR_H and type(spec[3]) == "table" then
             -- N-ary DIR_H: children start at spec[4]
             for i = 4, #spec do
                 index_xids(spec[i], path .. tostring(i - 4), key)
@@ -860,7 +861,7 @@ local function arrange(p)
         local off_screen = vis_right <= wa.x or vis_left >= wa.x + wa.width
 
         for i, c in ipairs(leaf.tabs) do
-            if i == leaf.active_tab and not off_screen and (not leaf.minimized or leaf.min_anim) then
+            if i == leaf.active_tab and leaf.active_tab > 0 and not off_screen and (not leaf.minimized or leaf.min_anim) then
                 c.hidden = false
                 c.border_width = 0
                 if not c.fullscreen and not split_anim_active[s] then
@@ -868,7 +869,7 @@ local function arrange(p)
                     local ag   = client_actual_geo[c]
                     local last = client_last_target[c]
                     local skip = ag and last
-                        and (ag.width < tgt.width - 1 or ag.height < tgt.height - 1)
+                        and (ag.width < tgt.width - 1 and ag.height < tgt.height - 1)
                         and last.x == tgt.x and last.y == tgt.y
                         and last.width == tgt.width and last.height == tgt.height
                     if not skip then
@@ -1412,12 +1413,12 @@ splitwm.focus_prev_split = function()
         gears.timer.delayed_call(function() ensure_in_view(s, t) end)
     end
 end
-splitwm.next_tab         = function() with_tag(function(t) cycle_tab(t, 1) end) end
-splitwm.prev_tab         = function() with_tag(function(t) cycle_tab(t, -1) end) end
-splitwm.move_tab_next    = function() with_tag(function(t) move_tab_to_direction(t, "next") end) end
-splitwm.move_tab_prev    = function() with_tag(function(t) move_tab_to_direction(t, "prev") end) end
-splitwm.resize_grow      = function() with_tag(function(t) resize_focused(t,  RESIZE_STEP) end) end
-splitwm.resize_shrink    = function() with_tag(function(t) resize_focused(t, -RESIZE_STEP) end) end
+splitwm.next_tab         = function() with_tag(function(t) return cycle_tab(t, 1) end) end
+splitwm.prev_tab         = function() with_tag(function(t) return cycle_tab(t, -1) end) end
+splitwm.move_tab_next    = function() with_tag(function(t) return move_tab_to_direction(t, "next") end) end
+splitwm.move_tab_prev    = function() with_tag(function(t) return move_tab_to_direction(t, "prev") end) end
+splitwm.resize_grow      = function() with_tag(function(t) return resize_focused(t,  RESIZE_STEP) end) end
+splitwm.resize_shrink    = function() with_tag(function(t) return resize_focused(t, -RESIZE_STEP) end) end
 splitwm.close_split = function()
     local s = awful.screen.focused()
     local t = s and s.selected_tag
@@ -1509,6 +1510,8 @@ function splitwm.setup()
     color_btn_bg         = beautiful.splitwm_btn_bg
     color_transparent    = beautiful.splitwm_transparent
     color_handle         = beautiful.splitwm_handle_color
+    color_fg_hover       = beautiful.splitwm_fg_hover    or "#ffffff20"
+    color_close          = beautiful.splitwm_close_color or beautiful.splitwm_accent or "#ff6666ff"
 
     awesome.register_xproperty("splitwm_color", "string")
 
@@ -1567,6 +1570,7 @@ function splitwm.setup()
         color_transparent       = color_transparent,
         color_fg_hover          = color_fg_hover,
         color_handle            = color_handle,
+        color_close             = color_close,
     })
 
     client.connect_signal("manage", function(c)

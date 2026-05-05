@@ -255,7 +255,7 @@ local function get_drag_handle(s, i)
                         -- Left edge: drag left = leftmost child grows.
                         local new_left_w   = math.max(MIN_SPLIT_W, init_abs_e[1] - delta)
                         local canvas_delta = new_left_w - init_abs_e[1]
-                        st2.canvas_w       = canvas_w_init + canvas_delta
+                        st2.canvas_w       = math.max(MIN_SPLIT_W * N_e, canvas_w_init + canvas_delta)
                         local new_usable   = usable_init_e + canvas_delta
                         local new_abs = {}
                         for j = 1, N_e do new_abs[j] = init_abs_e[j] end
@@ -422,13 +422,16 @@ end
 function M.update_drag_handles(s, state, bounds, scroll_x)
     scroll_x = scroll_x or 0
 
-    for _, c in ipairs(s.clients) do
-        if c.fullscreen then
-            local pool = drag_handle_pool[s]
-            if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
-            local ppool = plus_btn_pool[s]
-            if ppool then for _, entry in ipairs(ppool) do entry.wb.visible = false end end
-            return
+    local t = s.selected_tag
+    if t then
+        for _, c in ipairs(t:clients()) do
+            if c.fullscreen then
+                local pool = drag_handle_pool[s]
+                if pool then for _, entry in ipairs(pool) do entry.wb.visible = false end end
+                local ppool = plus_btn_pool[s]
+                if ppool then for _, entry in ipairs(ppool) do entry.wb.visible = false end end
+                return
+            end
         end
     end
 

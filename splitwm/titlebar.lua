@@ -160,7 +160,7 @@ function M.setup(deps)
     _make_split_action_callbacks = deps.make_split_action_callbacks
     _splitwm                 = deps.splitwm
     _TITLEBAR_HEIGHT         = deps.TITLEBAR_HEIGHT
-    TAB_SPACING              = -math.floor((tab_cx(_TITLEBAR_HEIGHT) - TAB_EAR * TAB_CA) * 2)
+    TAB_SPACING              = -math.floor((tab_cx(math.max(_TITLEBAR_HEIGHT, beautiful.splitwm_gap or 0)) - TAB_EAR * TAB_CA) * 2)
     M.TAB_SPACING            = TAB_SPACING
     _BTN_SIZE                = deps.BTN_SIZE
     _BTN_SPACING             = deps.BTN_SPACING
@@ -492,7 +492,6 @@ local function tb_get_or_create_entry(s, leaf)
             bg = color_bg, fg = color_fg, border_width = 0,
         },
         tooltip_objs      = {},
-        titlebar_btn_list = {},
         tb_h              = nil,
     }
     cache[leaf.id] = entry
@@ -505,7 +504,7 @@ local function tb_compute_fingerprint(leaf, state, geo)
     local parts = {
         leaf.active_tab,
         state.focused_leaf_id == leaf.id and 1 or 0,
-        tostring(leaf.v_bound_above),
+        leaf.v_bound_above and "b" or "",
         leaf.minimized and "m" or "",
         leaf.min_anim  and "a" or "",
         (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id) and "S" or "",
@@ -527,7 +526,6 @@ local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
     if callback then w:buttons(gears.table.join(awful.button({}, 1, callback))) end
     w:connect_signal("mouse::enter", function() if not w._disabled then w.bg = color_bg end end)
     w:connect_signal("mouse::leave", function() if not w._disabled then w.bg = color_btn_bg end end)
-    table.insert(entry.titlebar_btn_list, w)
     return w
 end
 
@@ -597,7 +595,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         local sx  = ctx.state.scroll_x or 0
         local tx  = g.x - sx + (tab_idx - 1) * step
         local ty  = g.y - gap
-        if m.x < tx or m.x >= tx + step - TAB_SPACING
+        if m.x < tx or m.x >= tx + step
         or m.y < ty or m.y >= ty + ctx.tb_h then
             drag.pending = nil
             drag.pickup  = pickup_client(tc, ctx.t)
@@ -1159,7 +1157,6 @@ local function update_titlebars(s, t, state, geos, leaves)
         local fp = tb_compute_fingerprint(leaf, state, geo)
         if entry.fp == fp then return end
         entry.fp              = fp
-        entry.titlebar_btn_list = {}
 
         local is_focused    = state.focused_leaf_id == leaf.id
         local active_client = leaf.tabs[leaf.active_tab]
@@ -1306,11 +1303,13 @@ local function update_titlebars(s, t, state, geos, leaves)
     end
 
     -- Hide and clean up entries for dead leaves.
-    for leaf_id, entry in pairs(titlebar_cache[s]) do
-        if alive[leaf_id] then goto continue end
-        entry.wb.visible = false
+    local dead = {}
+    for leaf_id in pairs(titlebar_cache[s]) do
+        if not alive[leaf_id] then dead[#dead+1] = leaf_id end
+    end
+    for _, leaf_id in ipairs(dead) do
+        titlebar_cache[s][leaf_id].wb.visible = false
         titlebar_cache[s][leaf_id] = nil
-        ::continue::
     end
 end
 
