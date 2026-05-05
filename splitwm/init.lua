@@ -1395,12 +1395,14 @@ local function start_drag_hover_poll()
                 local cached = geo_cache[t]
                 local state  = tag_state[t]
                 if not cached or not state then goto continue end
+                local sx = state.scroll_x or 0
                 for lid, leaf in pairs(state.leaf_map) do
                     local g = cached.geos[lid]
-                    if g and mx >= g.x and mx < g.x + g.width
+                    local gx = g and g.x - sx
+                    if g and mx >= gx and mx < gx + g.width
                            and my >= g.y - gap and my < g.y - gap + tb_h then
                         local tab_idx = math.max(1, math.min(#leaf.tabs,
-                            math.floor((mx - g.x) / step) + 1))
+                            math.floor((mx - gx) / step) + 1))
                         if tab_idx ~= leaf.active_tab and leaf.tabs[tab_idx] then
                             leaf.active_tab = tab_idx
                             state.focused_leaf_id = lid
@@ -1572,9 +1574,11 @@ function splitwm.setup()
                     local gap = beautiful.splitwm_gap
                     local mx, my = m.x, m.y
                     local state = get_state(t)
+                    local sx    = state.scroll_x or 0
                     for lid, _ in pairs(state.leaf_map) do
                         local g = cached.geos[lid]
-                        if g and mx >= g.x and mx < g.x + g.width
+                        local gx = g and g.x - sx
+                        if g and mx >= gx and mx < gx + g.width
                                and my >= g.y - gap and my < g.y + g.height then
                             try_drop_picked_up(t, lid)
                             awful.layout.arrange(s)
@@ -1586,7 +1590,8 @@ function splitwm.setup()
                     for lid, _ in pairs(state.leaf_map) do
                         local g = cached.geos[lid]
                         if g then
-                            local dx = mx < g.x and (g.x - mx) or (mx >= g.x + g.width and (mx - g.x - g.width) or 0)
+                            local gx = g.x - sx
+                            local dx = mx < gx and (gx - mx) or (mx >= gx + g.width and (mx - gx - g.width) or 0)
                             local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
                             local dist = dx + dy
                             if dist < best_dist then best_dist = dist; best_lid = lid end
@@ -1594,8 +1599,9 @@ function splitwm.setup()
                     end
                     if best_lid then
                         local g    = cached.geos[best_lid]
-                        local dx_l = math.max(0, g.x - mx)
-                        local dx_r = math.max(0, mx - (g.x + g.width))
+                        local gx   = g.x - sx
+                        local dx_l = math.max(0, gx - mx)
+                        local dx_r = math.max(0, mx - (gx + g.width))
                         local dy_t = math.max(0, (g.y - gap) - my)
                         local dy_b = math.max(0, my - (g.y + g.height))
                         local direction, new_first

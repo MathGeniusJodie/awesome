@@ -549,7 +549,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     -- Returns true if (mx, my) is over the close button of this tab.
     local function in_close_btn(mx, my, g)
-        local cx1 = g.x + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + 2
+        local sx   = ctx.state.scroll_x or 0
+        local cx1  = g.x - sx + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + 2
         return tab_state == "active"
            and mx >= cx1 and mx < cx1 + _BTN_SIZE
            and my >= g.y - gap
@@ -592,7 +593,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
         if not g then return end
         local gap = beautiful.splitwm_gap
-        local tx  = g.x + (tab_idx - 1) * step
+        local sx  = ctx.state.scroll_x or 0
+        local tx  = g.x - sx + (tab_idx - 1) * step
         local ty  = g.y - gap
         if m.x < tx or m.x >= tx + step - TAB_SPACING
         or m.y < ty or m.y >= ty + ctx.tb_h then
@@ -619,6 +621,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local function settle_pickup(m)
         local mx, my = m.x, m.y
         local gap    = beautiful.splitwm_gap
+        local sx     = ctx.state.scroll_x or 0
         local cached = _geo_cache[ctx.t]
         -- Released over the close button of the originating tab: close the tab.
         local og = cached and cached.geos[leaf.id]
@@ -630,7 +633,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         if cached then
             for lid, _ in pairs(ctx.state.leaf_map) do
                 local g = cached.geos[lid]
-                if g and mx >= g.x and mx < g.x + g.width
+                local gx = g and g.x - sx
+                if g and mx >= gx and mx < gx + g.width
                        and my >= g.y - gap and my < g.y + g.height then
                     if lid ~= leaf.id then
                         _try_drop_picked_up(ctx.t, lid)
@@ -639,7 +643,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                         -- Same leaf, in tab bar: reorder tabs by drop position.
                         local reorder_step = tab_step(ctx.icon_size)
                         local target = math.max(1, math.min(#leaf.tabs,
-                            math.floor((mx - g.x) / reorder_step) + 1))
+                            math.floor((mx - gx) / reorder_step) + 1))
                         if target ~= tab_idx then
                             leaf.tabs[tab_idx], leaf.tabs[target] =
                                 leaf.tabs[target], leaf.tabs[tab_idx]
@@ -660,7 +664,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             for lid, _ in pairs(ctx.state.leaf_map) do
                 local g = cached.geos[lid]
                 if g then
-                    local dx = mx < g.x and (g.x - mx) or (mx >= g.x + g.width and (mx - g.x - g.width) or 0)
+                    local gx = g.x - sx
+                    local dx = mx < gx and (gx - mx) or (mx >= gx + g.width and (mx - gx - g.width) or 0)
                     local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
                     local dist = dx + dy
                     if dist < best_dist then best_dist = dist; best_lid = lid end
@@ -668,8 +673,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end
             if best_lid then
                 local g     = cached.geos[best_lid]
-                local dx_l  = math.max(0, g.x - mx)
-                local dx_r  = math.max(0, mx - (g.x + g.width))
+                local gx    = g.x - sx
+                local dx_l  = math.max(0, gx - mx)
+                local dx_r  = math.max(0, mx - (gx + g.width))
                 local dy_t  = math.max(0, (g.y - gap) - my)
                 local dy_b  = math.max(0, my - (g.y + g.height))
                 local direction, new_first
@@ -820,7 +826,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             end
             local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
             if not g then return end
-            local tab_x      = g.x + (tab_idx - 1) * step
+            local tab_x      = g.x - (ctx.state.scroll_x or 0) + (tab_idx - 1) * step
             local bar_bottom = g.y - beautiful.splitwm_gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
             show_tab_color_menu(tc, ctx.s, tab_x, bar_bottom,
