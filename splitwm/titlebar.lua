@@ -506,6 +506,7 @@ local function tb_compute_fingerprint(leaf, state, geo)
         leaf.active_tab,
         state.focused_leaf_id == leaf.id and 1 or 0,
         tostring(leaf.v_bound_above),
+        leaf.minimized and "m" or "",
         (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id) and "S" or "",
         geo and geo.width or 0,
         geo and geo.height or 0,
@@ -839,7 +840,7 @@ end
 local function tb_build_split_controls(leaf, entry, ctx)
     local gap      = beautiful.splitwm_gap
     local geo      = ctx.geo
-    local parent   = tree.find_parent(ctx.state.root, leaf)
+    local parent = tree.find_parent(ctx.state.root, leaf)
     local can_vsplit = geo and geo.width  >= 2 * _MIN_SPLIT_W + gap
     local can_hsplit = geo and geo.height >= 2 * _MIN_SPLIT_H + gap
 
@@ -868,6 +869,18 @@ local function tb_build_split_controls(leaf, entry, ctx)
     if not can_split then set_btn_disabled(split_btn, entry.wb) end
     if parent then on_hover_fg(close_split_btn, color_close, color_fg)
     else           set_btn_disabled(close_split_btn, entry.wb) end
+
+    -- Minimize / expand button (disabled when leaf has no parent)
+    local parent_dir   = parent and parent.direction
+    local is_minimized = leaf.minimized
+    local min_icon
+    if is_minimized then
+        min_icon = (parent_dir == tree.DIR_V) and icons.expand_v or icons.expand_h
+    else
+        min_icon = (parent_dir == tree.DIR_V) and icons.minimize_v or icons.minimize_h
+    end
+    local minimize_btn = make_btn(min_icon, parent and cb.minimize_toggle or nil, not parent)
+    if not parent then set_btn_disabled(minimize_btn, entry.wb) end
 
     local is_split_picked = (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id)
     local swap_btn = make_circle_icon_btn_widget(icons.swap, _BTN_SIZE)
@@ -899,7 +912,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
         awful.layout.arrange(ctx.s)
     end)))
 
-    return { split = split_btn, close = close_split_btn, swap = swap_btn }
+    return { minimize = minimize_btn, split = split_btn, close = close_split_btn, swap = swap_btn }
 end
 
 ---------------------------------------------------------------------------
@@ -970,7 +983,7 @@ local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
     local ctrl_cover  = {
         {
             {
-                { controls.swap, controls.split, controls.close,
+                { controls.minimize, controls.swap, controls.split, controls.close,
                   spacing = _BTN_SPACING, layout = wibox.layout.fixed.horizontal },
                 widget = wibox.container.margin,
             },
@@ -1202,7 +1215,28 @@ local function update_titlebars(s, t, state, geos, leaves)
             end)))
         end
 
-        if #leaf.tabs == 0 then
+        -- Minimized: show only the expand button, nothing else.
+        if leaf.minimized then
+            entry.wb:setup {
+                {
+                    {
+                        { controls.minimize,
+                          halign = "center", valign = "center", widget = wibox.container.place },
+                        top = ctx.top_pad, widget = wibox.container.margin,
+                    },
+                    bg            = ctx.bar_bg,
+                    forced_height = ctx.tb_h,
+                    widget        = wibox.container.background,
+                },
+                layout = wibox.layout.fixed.vertical,
+            }
+            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
+                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
+                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
+                if event_close_menu_if_open() then return end
+                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
+            end)))
+        elseif #leaf.tabs == 0 then
             local launcher_ws = {}
             for _, e in ipairs(_splitwm.launchers) do
                 launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, LAUNCHER_ICON_SIZE, function()

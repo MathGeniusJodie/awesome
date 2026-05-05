@@ -32,7 +32,7 @@ local TITLEBAR_HEIGHT = 30
 -- Button geometry — used to derive split minimum sizes.
 local BTN_SIZE     = 26
 local BTN_SPACING  = 5
-local N_SPLIT_BTNS = 4  -- swap + split (auto) + close + "+"
+local N_SPLIT_BTNS = 5  -- minimize + swap + split (auto) + close + "+"
 local MIN_SPLIT_W  = N_SPLIT_BTNS * BTN_SIZE + (N_SPLIT_BTNS - 1) * BTN_SPACING
 local MIN_SPLIT_H  = TITLEBAR_HEIGHT
 
@@ -690,9 +690,15 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
         end
     end
     return {
-        vsplit = function() do_split(tree.DIR_H) end,
-        hsplit = function() do_split(tree.DIR_V) end,
-        close  = function() close_leaf_with_anim(t, s, state, leaf_id) end,
+        vsplit          = function() do_split(tree.DIR_H) end,
+        hsplit          = function() do_split(tree.DIR_V) end,
+        close           = function() close_leaf_with_anim(t, s, state, leaf_id) end,
+        minimize_toggle = function()
+            local leaf = state.leaf_map[leaf_id]
+            if not leaf then return end
+            leaf.minimized = not leaf.minimized
+            awful.layout.arrange(s)
+        end,
     }
 end
 
@@ -839,7 +845,7 @@ local function arrange(p)
         local off_screen = vis_right <= wa.x or vis_left >= wa.x + wa.width
 
         for i, c in ipairs(leaf.tabs) do
-            if i == leaf.active_tab and not off_screen then
+            if i == leaf.active_tab and not off_screen and not leaf.minimized then
                 c.hidden = false
                 c.border_width = 0
                 if not c.fullscreen and not split_anim_active[s] then

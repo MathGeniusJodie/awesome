@@ -101,19 +101,43 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
         -- N-ary: N children, N-1 inner gaps.
         local N      = #node.children
         local usable = math.max(0, w - inner * (N - 1))
-        -- Normalize ratios on the fly (they may not sum to exactly 1).
-        local ratio_sum = 0
-        for _, r in ipairs(node.ratios) do ratio_sum = ratio_sum + r end
-        if ratio_sum <= 0 then ratio_sum = 1 end
-        -- Compute child widths; last child absorbs rounding remainder.
-        local child_ws = {}
-        local allocated = 0
-        for i = 1, N - 1 do
-            local cw = math.max(1, math.floor(usable * node.ratios[i] / ratio_sum))
-            child_ws[i] = cw
-            allocated   = allocated + cw
+        -- Reserve fixed space for minimized leaves; distribute rest by ratio.
+        local min_sz     = gap
+        local min_total  = 0
+        for i = 1, N do
+            if node.children[i].kind == "leaf" and node.children[i].minimized then
+                min_total = min_total + min_sz
+            end
         end
-        child_ws[N] = math.max(1, usable - allocated)
+        local usable_normal = math.max(0, usable - min_total)
+        local ratio_sum = 0
+        for i = 1, N do
+            if not (node.children[i].kind == "leaf" and node.children[i].minimized) then
+                ratio_sum = ratio_sum + node.ratios[i]
+            end
+        end
+        if ratio_sum <= 0 then ratio_sum = 1 end
+        -- Find last non-minimized child (absorbs rounding remainder).
+        local last_normal = nil
+        for i = 1, N do
+            if not (node.children[i].kind == "leaf" and node.children[i].minimized) then
+                last_normal = i
+            end
+        end
+        local child_ws = {}
+        local normal_allocated = 0
+        for i = 1, N do
+            if node.children[i].kind == "leaf" and node.children[i].minimized then
+                child_ws[i] = min_sz
+            elseif i ~= last_normal then
+                local cw = math.max(1, math.floor(usable_normal * node.ratios[i] / ratio_sum))
+                child_ws[i] = cw
+                normal_allocated = normal_allocated + cw
+            end
+        end
+        if last_normal then
+            child_ws[last_normal] = math.max(1, usable_normal - normal_allocated)
+        end
         -- Emit bounds entries and recurse.
         local cx = x
         for i = 1, N do
@@ -136,9 +160,20 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
             cx = cx + cw + inner
         end
     else
-        -- DIR_V: binary, unchanged.
+        -- DIR_V: binary; minimized child gets a fixed gap-sized slot.
         local usable = h - inner
-        local h1 = math.floor(usable * node.ratio)
+        local min_sz  = gap
+        local c1_min  = node.children[1].kind == "leaf" and node.children[1].minimized
+        local c2_min  = node.children[2].kind == "leaf" and node.children[2].minimized
+        local h1
+        if c1_min and not c2_min then
+            h1 = min_sz
+        elseif c2_min and not c1_min then
+            h1 = math.max(0, usable - min_sz)
+        else
+            h1 = math.floor(usable * node.ratio)
+        end
+        h1 = math.max(0, math.min(usable, h1))
         local bnd
         if bounds then
             bnd = { branch = node, dir = tree.DIR_V, pos = y + h1 + math.floor(inner / 2),

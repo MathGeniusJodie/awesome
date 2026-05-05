@@ -43,6 +43,50 @@ function icons.close(cr, w, h)
     cr:move_to(cx+s, cy-s); cr:line_to(cx-s, cy+s); cr:stroke()
 end
 
+function icons.minimize_h(cr, w, h)
+    -- Two inward horizontal arrows → ... ← (compress)
+    local cx, cy, s, a = w/2, h/2, 5, 3
+    cr:move_to(cx-s, cy); cr:line_to(cx-1, cy); cr:stroke()
+    cr:move_to(cx-1, cy); cr:line_to(cx-1-a, cy-a); cr:stroke()
+    cr:move_to(cx-1, cy); cr:line_to(cx-1-a, cy+a); cr:stroke()
+    cr:move_to(cx+s, cy); cr:line_to(cx+1, cy); cr:stroke()
+    cr:move_to(cx+1, cy); cr:line_to(cx+1+a, cy-a); cr:stroke()
+    cr:move_to(cx+1, cy); cr:line_to(cx+1+a, cy+a); cr:stroke()
+end
+
+function icons.expand_h(cr, w, h)
+    -- Two outward horizontal arrows ← ... → (expand)
+    local cx, cy, s, a = w/2, h/2, 5, 3
+    cr:move_to(cx-1, cy); cr:line_to(cx-s, cy); cr:stroke()
+    cr:move_to(cx-s, cy); cr:line_to(cx-s+a, cy-a); cr:stroke()
+    cr:move_to(cx-s, cy); cr:line_to(cx-s+a, cy+a); cr:stroke()
+    cr:move_to(cx+1, cy); cr:line_to(cx+s, cy); cr:stroke()
+    cr:move_to(cx+s, cy); cr:line_to(cx+s-a, cy-a); cr:stroke()
+    cr:move_to(cx+s, cy); cr:line_to(cx+s-a, cy+a); cr:stroke()
+end
+
+function icons.minimize_v(cr, w, h)
+    -- Two inward vertical arrows ↓ ... ↑ (compress)
+    local cx, cy, s, a = w/2, h/2, 5, 3
+    cr:move_to(cx, cy-s); cr:line_to(cx, cy-1); cr:stroke()
+    cr:move_to(cx, cy-1); cr:line_to(cx-a, cy-1-a); cr:stroke()
+    cr:move_to(cx, cy-1); cr:line_to(cx+a, cy-1-a); cr:stroke()
+    cr:move_to(cx, cy+s); cr:line_to(cx, cy+1); cr:stroke()
+    cr:move_to(cx, cy+1); cr:line_to(cx-a, cy+1+a); cr:stroke()
+    cr:move_to(cx, cy+1); cr:line_to(cx+a, cy+1+a); cr:stroke()
+end
+
+function icons.expand_v(cr, w, h)
+    -- Two outward vertical arrows ↑ ... ↓ (expand)
+    local cx, cy, s, a = w/2, h/2, 5, 3
+    cr:move_to(cx, cy-1); cr:line_to(cx, cy-s); cr:stroke()
+    cr:move_to(cx, cy-s); cr:line_to(cx-a, cy-s+a); cr:stroke()
+    cr:move_to(cx, cy-s); cr:line_to(cx+a, cy-s+a); cr:stroke()
+    cr:move_to(cx, cy+1); cr:line_to(cx, cy+s); cr:stroke()
+    cr:move_to(cx, cy+s); cr:line_to(cx-a, cy+s-a); cr:stroke()
+    cr:move_to(cx, cy+s); cr:line_to(cx+a, cy+s-a); cr:stroke()
+end
+
 function icons.swap(cr, w, h)
     local cx, cy, s, ay = w/2, h/2, 4, 3
     cr:move_to(cx - s, cy - ay); cr:line_to(cx + s, cy - ay); cr:stroke()
