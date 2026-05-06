@@ -62,6 +62,8 @@ local MENU_BW        = 2   -- border on left / right / bottom
 
 -- Left/right padding inside each tab widget (drives close-button x-offset).
 local TAB_PAD_H = 22
+-- Extra right-side padding inside the tab, to the right of the close button.
+local TAB_PAD_H_R_EXTRA = 2
 
 -- Spacing between the app icon and the close button inside a tab.
 -- Must match the `spacing` value in the tab content row widget.
@@ -101,7 +103,7 @@ local TAB_SPACING
 -- Width of one tab slot including its negative overlap with the next tab.
 -- _BTN_SIZE is injected by setup(), so this must be called after setup().
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_SPACING + TAB_GAP
+    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_PAD_H_R_EXTRA + TAB_SPACING + TAB_GAP
 end
 
 ---------------------------------------------------------------------------
@@ -574,7 +576,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
         fg           = tab_state == "active" and color_fg or color_transparent,
-        forced_width = _BTN_SIZE,
+        forced_width = _BTN_SIZE - 4,
         widget       = wibox.container.background,
     }
 
@@ -741,7 +743,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             {
                 icon_widget, close_btn, spacing = ICON_CLOSE_GAP, layout = wibox.layout.fixed.horizontal,
             },
-            left = TAB_PAD_H, right = TAB_PAD_H, top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD, widget = wibox.container.margin,
+            left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA, top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD, widget = wibox.container.margin,
         },
         layout = wibox.layout.stack,
     }

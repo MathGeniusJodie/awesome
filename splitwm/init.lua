@@ -29,7 +29,7 @@ local color_handle         -- drag handle pill color
 local color_close          -- close-button hover foreground
 
 -- Base height of the tab bar.
-local TITLEBAR_HEIGHT = 30
+local TITLEBAR_HEIGHT = 34
 
 -- Button geometry — used to derive split minimum sizes.
 local BTN_SIZE     = 26
