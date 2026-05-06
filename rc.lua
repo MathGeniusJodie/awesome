@@ -334,9 +334,6 @@ local globalkeys = gears.table.join(
     awful.key({ modkey, "Shift" }, "l", splitwm.resize_shrink,
         { description = "shrink split", group = "splitwm" }),
 
-    -- awful.key({}, "Escape", splitwm.cancel_pickup,
-     --   { description = "cancel tab move", group = "splitwm" }),
-
     ---------------------------------------------------------------------------
     -- Tag switching (standard)
     ---------------------------------------------------------------------------

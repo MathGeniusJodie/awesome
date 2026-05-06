@@ -1031,14 +1031,6 @@ splitwm.scroll_delta = function(s, delta_x)
     scroll_to(s, t, (state.scroll_x or 0) + delta_x)
 end
 
-function splitwm.cancel_pickup()
-    drag.pending = nil
-    if drag.pickup.tag ~= "idle" then
-        drag.pickup = pickup_idle()
-        awful.layout.arrange(awful.screen.focused())
-    end
-end
-
 ---------------------------------------------------------------------------
 -- Drag-over-tab hover switching
 ---------------------------------------------------------------------------
