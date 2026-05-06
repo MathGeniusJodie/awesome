@@ -208,6 +208,8 @@ M.pickup_split       = pickup_split
 -- Exported for init.lua hover-tab calculation; depends on _BTN_SIZE/TAB_SPACING set in setup().
 M.tab_step           = tab_step
 M.TAB_CONTENT_V_PAD  = TAB_CONTENT_V_PAD
+-- Exported for use in menu.lua — searches wider icon sizes than menubar_utils.lookup_icon.
+M.find_icon_file     = find_icon_file
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile

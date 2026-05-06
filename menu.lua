@@ -2,6 +2,7 @@ local awful         = require("awful")
 local gears         = require("gears")
 local menubar_utils = require("menubar.utils")
 local menu_gen      = require("menubar.menu_gen")
+local titlebar      = require("splitwm.titlebar")
 
 local menu = {}
 
@@ -73,9 +74,12 @@ function menu.setup(opts)
             if not launcher.icon and launcher.icon_names then
                 for _, name in ipairs(launcher.icon_names) do
                     local path = menubar_utils.lookup_icon(name)
-                    if path and path ~= false then
-                        launcher.icon = path
-                        break
+                    if path and path ~= false then launcher.icon = path; break end
+                end
+                if not launcher.icon then
+                    for _, name in ipairs(launcher.icon_names) do
+                        local path = titlebar.find_icon_file(name)
+                        if path then launcher.icon = path; break end
                     end
                 end
             end
@@ -91,6 +95,10 @@ function menu.setup(opts)
             for _, n in ipairs(names) do
                 local p = menubar_utils.lookup_icon(n)
                 if p and p ~= false then return p end
+            end
+            for _, n in ipairs(names) do
+                local p = titlebar.find_icon_file(n)
+                if p then return p end
             end
         end
         local quick_items = {
