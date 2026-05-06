@@ -74,6 +74,9 @@ local TAB_CONTENT_V_PAD = 1
 -- Gap between the last tab and the "+" new-tab button.
 local PLUS_BTN_GAP = 24
 
+-- Extra positive spacing added between tabs (on top of the shape overlap).
+local TAB_GAP = 8
+
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (which styles the content background).
 local EMPTY_SPLIT_RADIUS = 14
@@ -98,7 +101,7 @@ local TAB_SPACING
 -- Width of one tab slot including its negative overlap with the next tab.
 -- _BTN_SIZE is injected by setup(), so this must be called after setup().
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_SPACING
+    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_SPACING + TAB_GAP
 end
 
 ---------------------------------------------------------------------------
@@ -978,7 +981,7 @@ end
 ---------------------------------------------------------------------------
 
 local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
-    local tab_spacing = #behind > 1 and TAB_SPACING or 0
+    local tab_spacing = #behind > 1 and (TAB_SPACING + TAB_GAP) or 0
     local tabs        = { spacing = tab_spacing, layout = wibox.layout.fixed.horizontal, table.unpack(behind) }
     local ctrl_cover  = {
         {
@@ -1023,7 +1026,7 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
             {
                 {
                     {
-                        { spacing = TAB_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
+                        { spacing = TAB_SPACING + TAB_GAP, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
                         right = _MIN_SPLIT_W, widget = wibox.container.margin,
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
