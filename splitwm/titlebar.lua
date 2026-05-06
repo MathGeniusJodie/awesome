@@ -116,6 +116,59 @@ local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
 
 -- Cache class→icon_path so lookup_icon (disk I/O) only runs once per class.
 local class_icon_cache = {}
+-- StartupWMClass → icon_path, built lazily from .desktop files on first miss.
+local wmclass_icon_map = nil
+
+-- menubar_utils.lookup_icon only searches up to 128x128; search wider sizes too.
+local ICON_SIZES = { "256x256", "scalable", "128x128", "96x96", "64x64", "48x48", "32x32" }
+local ICON_EXTS  = { "png", "svg", "xpm" }
+local function find_icon_file(icon_name)
+    if not icon_name or icon_name == "" then return nil end
+    if icon_name:sub(1, 1) == "/" then
+        local f = io.open(icon_name, "r"); if f then f:close(); return icon_name end
+    end
+    local home = os.getenv("HOME")
+    local bases = {}
+    if home then bases[#bases+1] = home .. "/.local/share/icons/hicolor" end
+    for _, b in ipairs({ "/usr/local/share/icons/hicolor", "/usr/share/icons/hicolor" }) do
+        bases[#bases+1] = b
+    end
+    for _, base in ipairs(bases) do
+        for _, size in ipairs(ICON_SIZES) do
+            for _, ext in ipairs(ICON_EXTS) do
+                local p = base .. "/" .. size .. "/apps/" .. icon_name .. "." .. ext
+                local fh = io.open(p, "r"); if fh then fh:close(); return p end
+            end
+        end
+    end
+    for _, ext in ipairs(ICON_EXTS) do
+        local p = "/usr/share/pixmaps/" .. icon_name .. "." .. ext
+        local fh = io.open(p, "r"); if fh then fh:close(); return p end
+    end
+    return nil
+end
+
+local function build_wmclass_map()
+    wmclass_icon_map = {}
+    local dirs = { "/usr/share/applications", "/usr/local/share/applications" }
+    local home = os.getenv("HOME")
+    if home then dirs[#dirs+1] = home .. "/.local/share/applications" end
+    for _, dir in ipairs(dirs) do
+        local f = io.popen('find "' .. dir .. '" -name "*.desktop" 2>/dev/null')
+        if f then
+            for path in f:lines() do
+                local ok, prog = pcall(menubar_utils.parse_desktop_file, path)
+                if ok and prog and prog.StartupWMClass and prog.Icon
+                       and not wmclass_icon_map[prog.StartupWMClass] then
+                    local icon_path = find_icon_file(prog.Icon)
+                    if icon_path then wmclass_icon_map[prog.StartupWMClass] = icon_path end
+                end
+            end
+            f:close()
+        end
+    end
+end
+
 local function lookup_class_icon(tc)
     local key = (tc.class or "") .. "\0" .. (tc.instance or "")
     if class_icon_cache[key] ~= nil then return class_icon_cache[key] or nil end
@@ -129,6 +182,11 @@ local function lookup_class_icon(tc)
             if path and path ~= false then class_icon_cache[key] = path; return path end
         end
     end
+    -- Fall back to StartupWMClass map (built lazily from .desktop files).
+    if not wmclass_icon_map then build_wmclass_map() end
+    local path = (tc.class    and wmclass_icon_map[tc.class])
+              or (tc.instance and wmclass_icon_map[tc.instance])
+    if path then class_icon_cache[key] = path; return path end
     class_icon_cache[key] = false
     return nil
 end
