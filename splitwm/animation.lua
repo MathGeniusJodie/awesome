@@ -74,6 +74,43 @@ local function cancel_split_anim(s)
     M.split_anim_active[s] = nil
 end
 
+local function lerp_geo(g0, g1, p)
+    return {
+        x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
+        y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
+        width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
+        height = math.floor(g0.height + (g1.height - g0.height) * p),
+    }
+end
+
+-- Runs a fixed-duration ease-out-back animation. on_frame(p) is called each
+-- frame with eased progress in [0,1]. min_leaf.min_anim is cleared on completion.
+-- Caller must call cancel_split_anim(s) before this if needed.
+local function run_anim(s, on_frame, min_leaf)
+    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
+    local frame  = 0
+    local tim
+    tim = gears.timer {
+        timeout   = 1 / SPLIT_ANIM_FPS,
+        autostart = true,
+        call_now  = false,
+        callback  = function()
+            frame = frame + 1
+            on_frame(ease_out_back(math.min(frame / frames, 1.0)))
+            if frame >= frames then
+                tim:stop()
+                M.split_anim_active[s] = nil
+                if min_leaf then
+                    min_leaf.min_anim = nil
+                    for _, c in ipairs(min_leaf.tabs) do c.hidden = true end
+                end
+                _update_ui(s)
+            end
+        end,
+    }
+    M.split_anim_active[s] = { timer = tim, min_leaf = min_leaf }
+end
+
 function M.start_split_anim(s, t, old_geo, a_id, b_id, dir)
     cancel_split_anim(s)
     local cached = _geo_cache[t]
@@ -101,34 +138,10 @@ function M.start_split_anim(s, t, old_geo, a_id, b_id, dir)
     apply_leaf_geo(s, a_id, start_a)
     apply_leaf_geo(s, b_id, start_b)
 
-    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
-    local frame  = 0
-    local tim
-    tim = gears.timer {
-        timeout   = 1 / SPLIT_ANIM_FPS,
-        autostart = true,
-        call_now  = false,
-        callback  = function()
-            frame = frame + 1
-            local p = ease_out_back(math.min(frame / frames, 1.0))
-            local function lg(g0, g1)
-                return {
-                    x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
-                    y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
-                    width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
-                    height = math.floor(g0.height + (g1.height - g0.height) * p),
-                }
-            end
-            apply_leaf_geo(s, a_id, lg(start_a, geo_a))
-            apply_leaf_geo(s, b_id, lg(start_b, geo_b))
-            if frame >= frames then
-                tim:stop()
-                M.split_anim_active[s] = nil
-                _update_ui(s)
-            end
-        end,
-    }
-    M.split_anim_active[s] = { timer = tim }
+    run_anim(s, function(p)
+        apply_leaf_geo(s, a_id, lerp_geo(start_a, geo_a, p))
+        apply_leaf_geo(s, b_id, lerp_geo(start_b, geo_b, p))
+    end)
 end
 
 function M.start_close_anim(s, t, old_geos, leaf_ids)
@@ -144,37 +157,13 @@ function M.start_close_anim(s, t, old_geos, leaf_ids)
     for _, id in ipairs(leaf_ids) do
         if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
     end
-    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
-    local frame  = 0
-    local tim
-    tim = gears.timer {
-        timeout   = 1 / SPLIT_ANIM_FPS,
-        autostart = true,
-        call_now  = false,
-        callback  = function()
-            frame = frame + 1
-            local p = ease_out_back(math.min(frame / frames, 1.0))
-            local function lg(g0, g1)
-                return {
-                    x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
-                    y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
-                    width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
-                    height = math.floor(g0.height + (g1.height - g0.height) * p),
-                }
+    run_anim(s, function(p)
+        for _, id in ipairs(leaf_ids) do
+            if old_geos[id] and end_geos[id] then
+                apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
             end
-            for _, id in ipairs(leaf_ids) do
-                if old_geos[id] and end_geos[id] then
-                    apply_leaf_geo(s, id, lg(old_geos[id], end_geos[id]))
-                end
-            end
-            if frame >= frames then
-                tim:stop()
-                M.split_anim_active[s] = nil
-                _update_ui(s)
-            end
-        end,
-    }
-    M.split_anim_active[s] = { timer = tim }
+        end
+    end)
 end
 
 function M.start_minimize_anim(s, t, old_geos, leaf_ids, min_leaf)
@@ -196,41 +185,13 @@ function M.start_minimize_anim(s, t, old_geos, leaf_ids, min_leaf)
     for _, id in ipairs(leaf_ids) do
         if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
     end
-    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
-    local frame  = 0
-    local tim
-    tim = gears.timer {
-        timeout   = 1 / SPLIT_ANIM_FPS,
-        autostart = true,
-        call_now  = false,
-        callback  = function()
-            frame = frame + 1
-            local p = ease_out_back(math.min(frame / frames, 1.0))
-            local function lg(g0, g1)
-                return {
-                    x      = math.floor(g0.x      + (g1.x      - g0.x)      * p),
-                    y      = math.floor(g0.y      + (g1.y      - g0.y)      * p),
-                    width  = math.floor(g0.width  + (g1.width  - g0.width)  * p),
-                    height = math.floor(g0.height + (g1.height - g0.height) * p),
-                }
+    run_anim(s, function(p)
+        for _, id in ipairs(leaf_ids) do
+            if old_geos[id] and end_geos[id] then
+                apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
             end
-            for _, id in ipairs(leaf_ids) do
-                if old_geos[id] and end_geos[id] then
-                    apply_leaf_geo(s, id, lg(old_geos[id], end_geos[id]))
-                end
-            end
-            if frame >= frames then
-                tim:stop()
-                M.split_anim_active[s] = nil
-                if min_leaf then
-                    min_leaf.min_anim = nil
-                    for _, c in ipairs(min_leaf.tabs) do c.hidden = true end
-                end
-                _update_ui(s)
-            end
-        end,
-    }
-    M.split_anim_active[s] = { timer = tim, min_leaf = min_leaf }
+        end
+    end, min_leaf)
 end
 
 return M

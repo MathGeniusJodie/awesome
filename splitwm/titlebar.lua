@@ -659,33 +659,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         end
         -- Released in a gap (between splits or at screen edges): create a new split there.
         if cached then
-            local best_lid, best_dist = nil, math.huge
-            for lid, _ in pairs(ctx.state.leaf_map) do
-                local g = cached.geos[lid]
-                if g then
-                    local gx = g.x - sx
-                    local dx = mx < gx and (gx - mx) or (mx >= gx + g.width and (mx - gx - g.width) or 0)
-                    local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
-                    local dist = dx + dy
-                    if dist < best_dist then best_dist = dist; best_lid = lid end
-                end
-            end
-            if best_lid then
-                local g     = cached.geos[best_lid]
-                local gx    = g.x - sx
-                local dx_l  = math.max(0, gx - mx)
-                local dx_r  = math.max(0, mx - (gx + g.width))
-                local dy_t  = math.max(0, (g.y - gap) - my)
-                local dy_b  = math.max(0, my - (g.y + g.height))
-                local direction, new_first
-                if math.max(dx_l, dx_r) >= math.max(dy_t, dy_b) then
-                    direction = tree.DIR_H; new_first = dx_l > dx_r
-                else
-                    direction = tree.DIR_V; new_first = dy_t > dy_b
-                end
-                if _drop_into_new_split(ctx.t, best_lid, direction, new_first) then
-                    awful.layout.arrange(ctx.s)
-                end
+            local best_lid, direction, new_first =
+                tree.find_gap_drop_target(ctx.state.leaf_map, cached.geos, sx, mx, my, gap)
+            if best_lid and _drop_into_new_split(ctx.t, best_lid, direction, new_first) then
+                awful.layout.arrange(ctx.s)
             end
         end
         return false

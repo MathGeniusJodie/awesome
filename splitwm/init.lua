@@ -816,13 +816,12 @@ local function start_scroll_anim(s, tag)
             -- ease out quad
             p = 1 - (1 - p) * (1 - p)
             state.scroll_x = math.floor(start_x + (target_x - start_x) * p)
-            awful.layout.arrange(s)
             if frame >= frames then
                 state.scroll_x = target_x
                 tim:stop()
                 scroll_anim_active[s] = nil
-                awful.layout.arrange(s)
             end
+            awful.layout.arrange(s)
         end,
     }
     scroll_anim_active[s] = { timer = tim }
@@ -901,7 +900,7 @@ local function insert_column_at_gap(t, s, b)
 end
 splitwm.insert_column_at_gap = insert_column_at_gap
 
-local function insert_at_right_edge(t, s)
+local function insert_at_edge(t, s, left)
     local state   = get_state(t)
     local wa      = s.workarea
     local gap     = beautiful.splitwm_gap
@@ -913,24 +912,36 @@ local function insert_at_right_edge(t, s)
 
     local old_root = state.root
     if old_root.direction == tree.DIR_H then
-        -- Append to existing root horizontal branch.
-        local N = #old_root.children
+        local N          = #old_root.children
         local old_usable = old_cw - (N - 1) * gap
         local rs = 0
         for _, r in ipairs(old_root.ratios) do rs = rs + r end
         if rs <= 0 then rs = 1 end
         local abs_ws = {}
         for j = 1, N do abs_ws[j] = old_root.ratios[j] / rs * old_usable end
-        table.insert(abs_ws, new_w)
-        table.insert(old_root.children, new_leaf)
+        if left then
+            table.insert(abs_ws, 1, new_w)
+            table.insert(old_root.children, 1, new_leaf)
+        else
+            table.insert(abs_ws, new_w)
+            table.insert(old_root.children, new_leaf)
+        end
         state.canvas_w = old_cw + new_w + gap
         local new_usable = old_usable + new_w
         for j = 1, N + 1 do old_root.ratios[j] = abs_ws[j] / new_usable end
         while #old_root.ratios > N + 1 do table.remove(old_root.ratios) end
     else
-        local r      = old_cw / (old_cw + new_w)
-        state.root   = tree.make_branch(tree.DIR_H, r, old_root, new_leaf)
+        local r       = left and (new_w / (old_cw + new_w)) or (old_cw / (old_cw + new_w))
+        local child_a = left and new_leaf or old_root
+        local child_b = left and old_root or new_leaf
+        state.root    = tree.make_branch(tree.DIR_H, r, child_a, child_b)
         state.canvas_w = old_cw + new_w + gap
+    end
+
+    if left then
+        -- Shift scroll so existing content stays at the same screen position.
+        state.scroll_x      = (state.scroll_x or 0) + new_w + gap
+        state.scroll_target = state.scroll_x
     end
 
     state.focused_leaf_id = new_leaf.id
@@ -938,46 +949,8 @@ local function insert_at_right_edge(t, s)
     gears.timer.delayed_call(function() ensure_in_view(s, t) end)
 end
 
-local function insert_at_left_edge(t, s)
-    local state   = get_state(t)
-    local wa      = s.workarea
-    local gap     = beautiful.splitwm_gap
-    local new_w   = math.floor(wa.width / 2)
-    local old_cw  = state.canvas_w or wa.width
-
-    local new_leaf = tree.make_leaf()
-    state.leaf_map[new_leaf.id] = new_leaf
-
-    local old_root = state.root
-    if old_root.direction == tree.DIR_H then
-        -- Prepend to existing root horizontal branch.
-        local N = #old_root.children
-        local old_usable = old_cw - (N - 1) * gap
-        local rs = 0
-        for _, r in ipairs(old_root.ratios) do rs = rs + r end
-        if rs <= 0 then rs = 1 end
-        local abs_ws = {}
-        for j = 1, N do abs_ws[j] = old_root.ratios[j] / rs * old_usable end
-        table.insert(abs_ws, 1, new_w)
-        table.insert(old_root.children, 1, new_leaf)
-        state.canvas_w = old_cw + new_w + gap
-        local new_usable = old_usable + new_w
-        for j = 1, N + 1 do old_root.ratios[j] = abs_ws[j] / new_usable end
-        while #old_root.ratios > N + 1 do table.remove(old_root.ratios) end
-    else
-        local r      = new_w / (old_cw + new_w)
-        state.root   = tree.make_branch(tree.DIR_H, r, new_leaf, old_root)
-        state.canvas_w = old_cw + new_w + gap
-    end
-
-    -- Shift scroll so existing content stays at the same screen position.
-    state.scroll_x      = (state.scroll_x or 0) + new_w + gap
-    state.scroll_target = state.scroll_x
-
-    state.focused_leaf_id = new_leaf.id
-    awful.layout.arrange(s)
-    gears.timer.delayed_call(function() ensure_in_view(s, t) end)
-end
+local function insert_at_right_edge(t, s) insert_at_edge(t, s, false) end
+local function insert_at_left_edge(t, s)  insert_at_edge(t, s, true)  end
 
 ---------------------------------------------------------------------------
 -- Layout object
@@ -1292,33 +1265,10 @@ function splitwm.setup()
                         end
                     end
                     -- Dropped in a gap: create a new split at the nearest leaf.
-                    local best_lid, best_dist = nil, math.huge
-                    for lid, _ in pairs(state.leaf_map) do
-                        local g = cached.geos[lid]
-                        if g then
-                            local gx = g.x - sx
-                            local dx = mx < gx and (gx - mx) or (mx >= gx + g.width and (mx - gx - g.width) or 0)
-                            local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
-                            local dist = dx + dy
-                            if dist < best_dist then best_dist = dist; best_lid = lid end
-                        end
-                    end
-                    if best_lid then
-                        local g    = cached.geos[best_lid]
-                        local gx   = g.x - sx
-                        local dx_l = math.max(0, gx - mx)
-                        local dx_r = math.max(0, mx - (gx + g.width))
-                        local dy_t = math.max(0, (g.y - gap) - my)
-                        local dy_b = math.max(0, my - (g.y + g.height))
-                        local direction, new_first
-                        if math.max(dx_l, dx_r) >= math.max(dy_t, dy_b) then
-                            direction = tree.DIR_H; new_first = dx_l > dx_r
-                        else
-                            direction = tree.DIR_V; new_first = dy_t > dy_b
-                        end
-                        if drop_into_new_split(t, best_lid, direction, new_first) then
-                            awful.layout.arrange(s)
-                        end
+                    local best_lid, direction, new_first =
+                        tree.find_gap_drop_target(state.leaf_map, cached.geos, sx, mx, my, gap)
+                    if best_lid and drop_into_new_split(t, best_lid, direction, new_first) then
+                        awful.layout.arrange(s)
                     end
                 end
                 return false

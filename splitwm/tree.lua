@@ -189,4 +189,35 @@ function tree.compute_tree(node, x, y, w, h, gap, geos, bounds, tb_h)
     compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil, tb_h)
 end
 
+-- Given a leaf_map and canvas geos, find the nearest leaf to screen point (mx, my)
+-- (scroll_x converts canvas x to screen x; gap is the titlebar region above geo.y).
+-- Returns leaf_id, direction (DIR_H or DIR_V), new_leaf_first (bool), or nil if empty.
+function tree.find_gap_drop_target(leaf_map, geos, scroll_x, mx, my, gap)
+    local best_lid, best_dist = nil, math.huge
+    for lid in pairs(leaf_map) do
+        local g = geos[lid]
+        if g then
+            local gx = g.x - scroll_x
+            local dx = mx < gx and (gx - mx) or (mx >= gx + g.width and (mx - gx - g.width) or 0)
+            local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
+            local dist = dx + dy
+            if dist < best_dist then best_dist = dist; best_lid = lid end
+        end
+    end
+    if not best_lid then return nil end
+    local g   = geos[best_lid]
+    local gx  = g.x - scroll_x
+    local dx_l = math.max(0, gx - mx)
+    local dx_r = math.max(0, mx - (gx + g.width))
+    local dy_t = math.max(0, (g.y - gap) - my)
+    local dy_b = math.max(0, my - (g.y + g.height))
+    local direction, new_first
+    if math.max(dx_l, dx_r) >= math.max(dy_t, dy_b) then
+        direction = tree.DIR_H; new_first = dx_l > dx_r
+    else
+        direction = tree.DIR_V; new_first = dy_t > dy_b
+    end
+    return best_lid, direction, new_first
+end
+
 return tree
