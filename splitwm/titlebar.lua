@@ -625,9 +625,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- Returns true if (mx, my) is over the close button of this tab.
     local function in_close_btn(mx, my, g)
         local sx   = ctx.state.scroll_x or 0
-        local cx1  = g.x - sx + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + 2
+        local cx1  = g.x - sx + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + ICON_CLOSE_GAP
         return tab_state == "active"
-           and mx >= cx1 and mx < cx1 + _BTN_SIZE
+           and mx >= cx1 and mx < cx1 + _BTN_SIZE - 4
            and my >= g.y - gap
            and my <  g.y - gap + ctx.tb_h
     end
