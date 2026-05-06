@@ -104,7 +104,7 @@ local TAB_SPACING
 -- Width of one tab slot including its negative overlap with the next tab.
 -- _BTN_SIZE is injected by setup(), so this must be called after setup().
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_PAD_H_R_EXTRA + TAB_SPACING + TAB_GAP
+    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_PAD_H_R_EXTRA + TAB_SPACING + TAB_GAP -4
 end
 
 ---------------------------------------------------------------------------
@@ -1323,6 +1323,53 @@ local function update_titlebars(s, t, state, geos, leaves)
         end
 
         if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
+            local function build_h_min_tab_icon(tc, i)
+                local icon_sz = ctx.icon_size - 2
+                local tab_icon
+                if tc.icon then
+                    local ci = awful.widget.clienticon(tc)
+                    ci.forced_width  = icon_sz
+                    ci.forced_height = icon_sz
+                    tab_icon = ci
+                else
+                    local theme_icon = lookup_class_icon(tc)
+                    if theme_icon then
+                        tab_icon = wibox.widget {
+                            image = theme_icon, forced_width = icon_sz, forced_height = icon_sz,
+                            resize = true, widget = wibox.widget.imagebox,
+                        }
+                    else
+                        tab_icon = wibox.widget {
+                            text = string.sub(tc.class or tc.instance or "?", 1, 2),
+                            align = "center", valign = "center",
+                            forced_width = icon_sz, forced_height = icon_sz,
+                            widget = wibox.widget.textbox,
+                        }
+                    end
+                end
+                local tab_state    = get_tab_state(i, leaf, tc)
+                local client_color = colors.get_client_color(tc)
+                local tab_bg = (client_color and client_color.dark)
+                    or (tab_state == "active" and color_bg)
+                    or color_btn_bg
+                local pill_sz = icon_sz + 2
+                local r       = math.floor(pill_sz / 2)
+                return wibox.widget {
+                    { tab_icon, halign = "center", valign = "center", widget = wibox.container.place },
+                    bg           = tab_bg,
+                    shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, r) end,
+                    forced_width  = pill_sz,
+                    forced_height = pill_sz,
+                    widget        = wibox.container.background,
+                }
+            end
+
+            local pill_contents = {}
+            for i, tc in ipairs(leaf.tabs) do
+                pill_contents[#pill_contents + 1] = build_h_min_tab_icon(tc, i)
+            end
+
+            local vstack = { spacing = TAB_GAP, layout = wibox.layout.fixed.vertical, table.unpack(pill_contents) }
             entry.wb:setup {
                 {
                     {
@@ -1336,7 +1383,11 @@ local function update_titlebars(s, t, state, geos, leaves)
                 },
                 {
                     {
-                        bg     = "#000000",
+                        {
+                            { vstack, halign = "center", valign = "top", widget = wibox.container.place },
+                            left = 4, right = 4, top = 4, bottom = 4, widget = wibox.container.margin,
+                        },
+                        bg     = color_btn_bg,
                         shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.min(w, h) / 2) end,
                         widget = wibox.container.background,
                     },
