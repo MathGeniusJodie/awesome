@@ -193,14 +193,6 @@ function M.flush_caches()
 end
 
 ---------------------------------------------------------------------------
--- Drawing helpers
----------------------------------------------------------------------------
-
-local function draw_tab_border(cr, w, h)
-    tab_path(cr, w, h)
-end
-
----------------------------------------------------------------------------
 -- Vertical drag helper (used by the pill drag strip in the tab bar)
 ---------------------------------------------------------------------------
 
@@ -423,7 +415,7 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
                     ms.poll_ready = false; ms.poll:stop(); return
                 end
                 local m = mouse.coords()
-                local pressed = (m.buttons[1] or m.buttons[3]) and true or false
+                local pressed = m.buttons[1] or m.buttons[3]
                 if not ms.poll_ready then
                     if not pressed then ms.poll_ready = true end
                     return
@@ -445,18 +437,19 @@ end
 -- Closes the menu if open and returns true; returns false if already closed.
 -- Deduplicates within a single event: multiple handlers firing for the same
 -- click all check this, but only the first actually calls on_menu_close().
+local function mark_menu_closed()
+    menu_was_open_this_event = true
+    gears.timer.delayed_call(function() menu_was_open_this_event = false end)
+end
+
 local function event_close_menu_if_open()
-    if _splitwm._menu_just_toggled  then return false end
-    if menu_was_open_this_event     then return true  end
+    if _splitwm._menu_just_toggled then return false end
+    if menu_was_open_this_event    then return true  end
     if hide_tab_color_menu() then
-        menu_was_open_this_event = true
-        gears.timer.delayed_call(function() menu_was_open_this_event = false end)
-        return true
+        mark_menu_closed(); return true
     end
     if _splitwm.on_menu_close and _splitwm.on_menu_close() then
-        menu_was_open_this_event = true
-        gears.timer.delayed_call(function() menu_was_open_this_event = false end)
-        return true
+        mark_menu_closed(); return true
     end
     return false
 end
@@ -730,7 +723,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             cr:set_source(tab_bg_pat)
             cr:fill()
             if tab_state == "active" or tab_state == "picked" then
-                draw_tab_border(cr, w2, h)
+                tab_path(cr, w2, h)
                 cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
                 cr:set_line_width(2)
                 cr:stroke()
@@ -935,9 +928,9 @@ local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
         local r    = radius or beautiful.splitwm_border_radius
         cr:new_sub_path()
         cr:arc(x + wd - r, y + r,     r, -math.pi / 2, 0)
-        cr:arc(x + wd - r, y + h - r, r,  0,           math.pi / 2)
-        cr:arc(x + r,      y + h - r, r,  math.pi / 2, math.pi)
-        cr:arc(x + r,      y + r,     r,  math.pi,     3 * math.pi / 2)
+        cr:arc(x + wd - r, y + h - r, r,  0,            math.pi / 2)
+        cr:arc(x + r,      y + h - r, r,   math.pi / 2, math.pi)
+        cr:arc(x + r,      y + r,     r,   math.pi,     3 * math.pi / 2)
         cr:close_path()
         cr:stroke()
     end
@@ -1224,6 +1217,15 @@ local function update_titlebars(s, t, state, geos, leaves)
             end)))
         end
 
+        local function set_leaf_wb_buttons()
+            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
+                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
+                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
+                if event_close_menu_if_open() then return end
+                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
+            end)))
+        end
+
         if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
             entry.wb:setup {
                 {
@@ -1247,21 +1249,11 @@ local function update_titlebars(s, t, state, geos, leaves)
                 },
                 layout = wibox.layout.align.vertical,
             }
-            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
-                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
-                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
-                if event_close_menu_if_open() then return end
-                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
-            end)))
+            set_leaf_wb_buttons()
         elseif leaf.minimized and not leaf.min_anim then
             -- Vertical squeeze: show only the tab bar, no border or content overlay.
             entry.wb:setup(tb_build_bar_layer(tab_widgets, controls, drag_pill, ctx))
-            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
-                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
-                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
-                if event_close_menu_if_open() then return end
-                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
-            end)))
+            set_leaf_wb_buttons()
         elseif #leaf.tabs == 0 then
             local launcher_ws = {}
             for _, e in ipairs(_splitwm.launchers) do
@@ -1271,12 +1263,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 end)
             end
             tb_assemble_empty_leaf(entry, tab_widgets, controls, border_draw, drag_pill, launcher_ws, ctx)
-            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
-                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
-                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
-                if event_close_menu_if_open() then return end
-                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
-            end)))
+            set_leaf_wb_buttons()
         else
             entry.wb:buttons(gears.table.join())
             local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab, #leaf.tabs, entry)
