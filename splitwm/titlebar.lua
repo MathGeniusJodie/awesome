@@ -8,14 +8,15 @@
 -- Dependencies are injected once via M.setup(deps) from splitwm.setup().
 ---------------------------------------------------------------------------
 
-local awful     = require("awful")
-local gears     = require("gears")
-local wibox     = require("wibox")
-local beautiful = require("beautiful")
-local icons     = require("splitwm.icons")
-local tree      = require("splitwm.tree")
-local colors    = require("splitwm.colors")
-local underlay  = require("splitwm.underlay")
+local awful         = require("awful")
+local gears         = require("gears")
+local wibox         = require("wibox")
+local beautiful     = require("beautiful")
+local menubar_utils = require("menubar.utils")
+local icons         = require("splitwm.icons")
+local tree          = require("splitwm.tree")
+local colors        = require("splitwm.colors")
+local underlay      = require("splitwm.underlay")
 
 ---------------------------------------------------------------------------
 -- Shared pickup / pending-drag state
@@ -112,6 +113,25 @@ end
 
 local titlebar_cache = {}
 local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+
+-- Cache class→icon_path so lookup_icon (disk I/O) only runs once per class.
+local class_icon_cache = {}
+local function lookup_class_icon(tc)
+    local key = (tc.class or "") .. "\0" .. (tc.instance or "")
+    if class_icon_cache[key] ~= nil then return class_icon_cache[key] or nil end
+    local candidates = {
+        tc.instance, tc.class,
+        tc.instance and tc.instance:lower(), tc.class and tc.class:lower(),
+    }
+    for _, name in ipairs(candidates) do
+        if name then
+            local path = menubar_utils.lookup_icon(name)
+            if path and path ~= false then class_icon_cache[key] = path; return path end
+        end
+    end
+    class_icon_cache[key] = false
+    return nil
+end
 -- Per-event dedup flag: set true for the duration of the event that closed a menu,
 -- so multiple handlers firing in the same event batch don't each trigger on_menu_close.
 local menu_was_open_this_event = false
@@ -560,14 +580,25 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         tab_icon.forced_width  = ctx.icon_size
         tab_icon.forced_height = ctx.icon_size
     else
-        tab_icon = wibox.widget {
-            text          = string.sub(tc.class or tc.instance or "?", 1, 2),
-            align         = "center",
-            valign        = "center",
-            forced_width  = ctx.icon_size,
-            forced_height = ctx.icon_size,
-            widget        = wibox.widget.textbox,
-        }
+        local theme_icon = lookup_class_icon(tc)
+        if theme_icon then
+            tab_icon = wibox.widget {
+                image          = theme_icon,
+                forced_width   = ctx.icon_size,
+                forced_height  = ctx.icon_size,
+                resize         = true,
+                widget         = wibox.widget.imagebox,
+            }
+        else
+            tab_icon = wibox.widget {
+                text          = string.sub(tc.class or tc.instance or "?", 1, 2),
+                align         = "center",
+                valign        = "center",
+                forced_width  = ctx.icon_size,
+                forced_height = ctx.icon_size,
+                widget        = wibox.widget.textbox,
+            }
+        end
     end
 
     local icon_widget = wibox.widget {
