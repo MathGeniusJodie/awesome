@@ -80,185 +80,17 @@ local drag_hover_timer = nil  -- polling timer for switching tabs when dragging 
 
 local tag_state = setmetatable({}, { __mode = "k" })
 
----------------------------------------------------------------------------
--- State persistence
----------------------------------------------------------------------------
-
-local PERSIST_FILE = (os.getenv("HOME") or "") .. "/.cache/awesome/splitwm_state.lua"
-
 local geo_cache          = setmetatable({}, { __mode = "k" })  -- [tag] = { geos={}, bounds={} }
 local client_actual_geo  = {}   -- [client] = actual geometry after size-hint snapping
 local client_last_target = {}   -- [client] = last geometry we requested in arrange()
 local scroll_anim_active = {}   -- [screen] = {timer}
 local last_focused_leaf  = {}   -- [screen] = leaf_id; used to detect focus changes in update_ui
 
--- Per-tag restore data loaded from file at startup.
-local tag_restore_specs = {}
-
--- xid (integer X window ID) -> { key, path, tab_index }
-local xid_restore_map = {}
-
-local function tag_key(t)
-    local s = t.screen
-    return string.format("%d:%s", (s and s.index) or 0, t.name)
-end
-
--- Recursively serialise a tree node to a Lua-evaluable string.
-local function ser_node(node)
-    if node.kind == "leaf" then
-        local parts = { '"L"', tostring(node.active_tab) }
-        for _, c in ipairs(node.tabs) do
-            if c.valid then table.insert(parts, tostring(c.window)) end
-        end
-        return "{" .. table.concat(parts, ",") .. "}"
-    elseif node.direction == tree.DIR_H then
-        -- N-ary: ratios as a sub-table, then all children
-        local rparts = {}
-        for _, r in ipairs(node.ratios) do
-            table.insert(rparts, string.format("%.6f", r))
-        end
-        local parts = { '"B"', string.format("%q", node.direction),
-                        "{" .. table.concat(rparts, ",") .. "}" }
-        for _, child in ipairs(node.children) do
-            table.insert(parts, ser_node(child))
-        end
-        return "{" .. table.concat(parts, ",") .. "}"
-    else
-        -- DIR_V stays binary
-        return string.format('{"B",%q,%.6f,%s,%s}',
-            node.direction,
-            math.max(0.1, math.min(0.9, node.ratio)),
-            ser_node(node.children[1]),
-            ser_node(node.children[2]))
-    end
-end
-
--- Find the "0"/"1" path string from root to the leaf with the given id.
-local function path_to_leaf_id(node, target_id, path)
-    if node.kind == "leaf" then
-        return node.id == target_id and path or nil
-    end
-    for i, child in ipairs(node.children) do
-        local result = path_to_leaf_id(child, target_id, path .. tostring(i - 1))
-        if result then return result end
-    end
-    return nil
-end
-
-local function save_state()
-    local lines = { "return {" }
-    for t, state in pairs(tag_state) do
-        local fp = path_to_leaf_id(state.root, state.focused_leaf_id, "") or ""
-        table.insert(lines, string.format("[%q]={tree=%s,focused_path=%q},",
-            tag_key(t), ser_node(state.root), fp))
-    end
-    table.insert(lines, "}")
-    local f = io.open(PERSIST_FILE, "w")
-    if f then f:write(table.concat(lines, "\n")); f:close() end
-end
-
--- Walk a spec and record xid -> {key, path, tab_index} for every window.
-local function index_xids(spec, path, key)
-    if spec[1] == "L" then
-        for i = 3, #spec do
-            xid_restore_map[spec[i]] = { key = key, path = path, tab_index = i - 2 }
-        end
-    elseif spec[1] == "B" then
-        if spec[2] == tree.DIR_H and type(spec[3]) == "table" then
-            -- N-ary DIR_H: children start at spec[4]
-            for i = 4, #spec do
-                index_xids(spec[i], path .. tostring(i - 4), key)
-            end
-        else
-            -- Old binary format or DIR_V: children at spec[4] and spec[5]
-            if type(spec[4]) == "table" then index_xids(spec[4], path .. "0", key) end
-            if type(spec[5]) == "table" then index_xids(spec[5], path .. "1", key) end
-        end
-    end
-end
-
-local function load_restore_data()
-    local f = io.open(PERSIST_FILE, "r")
-    if not f then return end
-    local content = f:read("*a"); f:close()
-    local fn = load(content)
-    if not fn then return end
-    local ok, data = pcall(fn)
-    if not ok or type(data) ~= "table" then return end
-    for key, td in pairs(data) do
-        if type(td) == "table" and type(td.tree) == "table"
-                and type(td.focused_path) == "string" then
-            tag_restore_specs[key] = td
-            index_xids(td.tree, "", key)
-        end
-    end
-end
-
--- Reconstruct a live tree from a spec.
-local function restore_node(spec, path, path_to_leaf)
-    if type(spec) ~= "table" then return tree.make_leaf() end
-    if spec[1] == "L" then
-        local leaf = tree.make_leaf()
-        leaf._restore_active_tab = type(spec[2]) == "number" and spec[2] or 0
-        path_to_leaf[path] = leaf
-        return leaf
-    elseif spec[1] == "B" then
-        if spec[2] ~= tree.DIR_H and spec[2] ~= tree.DIR_V then return tree.make_leaf() end
-        if type(spec[3]) == "table" and spec[2] == tree.DIR_H then
-            -- N-ary DIR_H: spec[3] = ratios table, children at spec[4..]
-            local ratios   = {}
-            for _, r in ipairs(spec[3]) do
-                table.insert(ratios, type(r) == "number" and r or 0.5)
-            end
-            local children = {}
-            for i = 4, #spec do
-                if type(spec[i]) == "table" then
-                    table.insert(children, restore_node(spec[i], path .. tostring(i - 4), path_to_leaf))
-                end
-            end
-            if #children < 2 then return tree.make_leaf() end
-            while #ratios < #children do table.insert(ratios, 1 / #children) end
-            return { kind = "branch", direction = tree.DIR_H, children = children, ratios = ratios }
-        else
-            -- Binary format (old saves or DIR_V)
-            if type(spec[4]) ~= "table" or type(spec[5]) ~= "table" then return tree.make_leaf() end
-            local ratio = type(spec[3]) == "number" and math.max(0.1, math.min(0.9, spec[3])) or 0.5
-            local left  = restore_node(spec[4], path .. "0", path_to_leaf)
-            local right = restore_node(spec[5], path .. "1", path_to_leaf)
-            return tree.make_branch(spec[2], ratio, left, right)
-        end
-    else
-        return tree.make_leaf()
-    end
-end
-
 local function get_state(t)
     if not tag_state[t] then
-        local key  = tag_key(t)
-        local spec = tag_restore_specs[key]
-        if spec then
-            tag_restore_specs[key] = nil
-            local path_to_leaf = {}
-            local root   = restore_node(spec.tree, "", path_to_leaf)
-            local leaves = tree.collect_leaves(root)
-            local leaf_map = {}
-            for _, leaf in ipairs(leaves) do leaf_map[leaf.id] = leaf end
-            local focused = path_to_leaf[spec.focused_path]
-            local focused_id = (focused and focused.id) or (leaves[1] and leaves[1].id) or 0
-            tag_state[t] = {
-                root            = root,
-                focused_leaf_id = focused_id,
-                leaf_map        = leaf_map,
-                _restore_ptl    = path_to_leaf,
-                scroll_x        = 0,
-                scroll_target   = 0,
-                canvas_w        = nil,
-            }
-        else
-            local root = tree.make_leaf()
-            tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root },
-                             scroll_x = 0, scroll_target = 0, canvas_w = nil }
-        end
+        local root = tree.make_leaf()
+        tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root },
+                         scroll_x = 0, scroll_target = 0, canvas_w = nil }
     end
     return tag_state[t]
 end
@@ -1379,17 +1211,7 @@ function splitwm.setup()
         local state = get_state(t)
         local leaf = tree.find_leaf_for_client(state.root, c)
         if not leaf then
-            local info = xid_restore_map[c.window]
-            if info and info.key == tag_key(t) and state._restore_ptl then
-                local target = state._restore_ptl[info.path]
-                if target then
-                    table.insert(target.tabs, math.min(info.tab_index, #target.tabs + 1), c)
-                    if target.active_tab == 0 then target.active_tab = 1 end
-                    xid_restore_map[c.window] = nil
-                    leaf = target
-                end
-            end
-            if not leaf then pin_client(t, c); leaf = tree.find_leaf_for_client(state.root, c) end
+            pin_client(t, c); leaf = tree.find_leaf_for_client(state.root, c)
         end
         if leaf then colors.resolve_color_conflict(leaf, c) end
     end)
@@ -1504,25 +1326,9 @@ function splitwm.setup()
         end
     end)
 
-    awesome.connect_signal("exit", save_state)
-
     awesome.connect_signal("startup", function()
-        for t, state in pairs(tag_state) do
-            if state._restore_ptl then
-                for _, leaf in pairs(state._restore_ptl) do
-                    leaf.active_tab = #leaf.tabs > 0
-                        and math.max(1, math.min(leaf._restore_active_tab, #leaf.tabs))
-                        or 0
-                    leaf._restore_active_tab = nil
-                end
-                state._restore_ptl = nil
-            end
-        end
-        xid_restore_map = {}
         for s in screen do awful.layout.arrange(s) end
     end)
-
-    load_restore_data()
 end
 
 function splitwm.flush_caches()
