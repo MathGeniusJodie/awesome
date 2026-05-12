@@ -145,14 +145,21 @@ splitwm.launchers = {
         cmd        = filemanager,
     },
     {
-        label      = "O",
-        icon_names = {"obsidian", "md.obsidian.Obsidian"},
-        cmd        = "obsidian",
+        label          = "T",
+        icon           = "/home/jodie/.local/share/applications/templates-briefcase.svg",
+        cmd            = "thunar /home/jodie/Desktop/allfiles/templates",
     },
     {
-        label      = "AI",
-        icon_names = {"claude-desktop"},
-        cmd        = "claude-desktop",
+        label          = "O",
+        icon_names     = {"obsidian", "md.obsidian.Obsidian"},
+        cmd            = "obsidian",
+        hide_if_class  = {"obsidian", "Obsidian"},
+    },
+    {
+        label          = "AI",
+        icon_names     = {"claude-desktop"},
+        cmd            = "claude-desktop",
+        hide_if_class  = {"claude-desktop", "Claude"},
     },
 }
 

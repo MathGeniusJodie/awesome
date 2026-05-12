@@ -1402,12 +1402,24 @@ local function update_titlebars(s, t, state, geos, leaves)
             entry.wb:setup(tb_build_bar_layer(tab_widgets, controls, drag_pill, ctx))
             set_leaf_wb_buttons()
         elseif #leaf.tabs == 0 then
+            local running_classes = {}
+            for _, c in ipairs(client.get()) do
+                if c.class then running_classes[c.class:lower()] = true end
+            end
             local launcher_ws = {}
             for _, e in ipairs(_splitwm.launchers) do
+                if e.hide_if_class then
+                    local hidden = false
+                    for _, cls in ipairs(e.hide_if_class) do
+                        if running_classes[cls:lower()] then hidden = true; break end
+                    end
+                    if hidden then goto continue end
+                end
                 launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, LAUNCHER_ICON_SIZE, function()
                     ctx.state.focused_leaf_id = leaf.id
                     if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
                 end)
+                ::continue::
             end
             tb_assemble_empty_leaf(entry, tab_widgets, controls, border_draw, drag_pill, launcher_ws, ctx)
             set_leaf_wb_buttons()

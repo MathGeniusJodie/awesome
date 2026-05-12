@@ -1,22 +1,17 @@
 -- timebar.lua
--- Time-blindness aid: two bars across the top of each screen.
+-- Time-blindness aid: solid bar across the top of each screen.
 --
--- Bar 1: Day progress dots.
---   • 102 white dots = 102×10-min blocks from 6:30am to 11:30pm.
---   • Dots drain from the left one-by-one every 10 min (remaining time fills from right).
---   • Outside those hours: solid red pill bar.
---
--- Bar 2: 10-min block countdown.
---   • Full width at the start of every 10-min block.
---   • Shrinks to zero over those 10 min, then snaps back.
+-- Bar: Day progress.
+--   • Solid black rectangle, width proportional to remaining time in the day.
+--   • Day runs from 6:30am to 11:30pm.
+--   • Outside those hours: solid red bar.
 
 local wibox = require("wibox")
 local gears = require("gears")
 
 -- Layout constants.
-local BAR_HEIGHT  = 7   -- px height of each bar (corner radius = BAR_HEIGHT / 2)
-local BAR_SPACING = 2   -- px gap between the two bars
-local BAR_MARGIN  = 2   -- px gap between screen top edge and bar 1
+local BAR_HEIGHT  = 7   -- px height of the bar
+local BAR_MARGIN  = 0   -- px gap between screen top edge and bar
 
 local M = {}
 
@@ -27,7 +22,6 @@ local TOTAL_BLOCKS  = (DAY_END_MIN - DAY_START_MIN) / 10
 local function get_state()
     local t    = os.date("*t")
     local mins = t.hour * 60 + t.min
-    local secs = t.sec
 
     local in_day = mins >= DAY_START_MIN and mins < DAY_END_MIN
 
@@ -38,14 +32,11 @@ local function get_state()
         remaining = TOTAL_BLOCKS - math.floor((mins - DAY_START_MIN) / 10)
     end
 
-    local block_frac = ((mins % 10) * 60 + secs) / 600.0
-
-    return in_day, remaining, block_frac
+    return in_day, remaining
 end
 
 function M.setup(s)
     local sw  = s.geometry.width
-    local tau = math.pi * 2
 
     local canvas = wibox.widget.base.make_widget()
 
@@ -54,46 +45,21 @@ function M.setup(s)
     end
 
     function canvas:draw(_, cr, w, h)
-        local in_day, remaining, block_frac = get_state()
-        local r_full = BAR_HEIGHT / 2   -- corner radius when width allows full rounding
+        local in_day, remaining = get_state()
 
-        -- ── Bar 1: day progress ────────────────────────────────────────────
-        -- Pills laid out left-to-right; remaining pills fill from the right.
-        local usable = w
+        -- ── Day progress: solid rectangle, proportional to remaining time ───
         if not in_day then
             cr:set_source_rgb(0.9, 0.15, 0.15)
-            gears.shape.rounded_rect(cr, usable, BAR_HEIGHT, r_full)
+            cr:rectangle(0, 0, w, BAR_HEIGHT)
             cr:fill()
         elseif remaining > 0 then
             cr:set_source_rgb(0, 0, 0)
-            local gap    = 2
-            local pill_w = (usable - (TOTAL_BLOCKS - 1) * gap) / TOTAL_BLOCKS
-            local r      = math.min(r_full, pill_w * 0.5)
-            -- Remaining pills aligned to left edge.
-            for i = 0, remaining - 1 do
-                local x = i * (pill_w + gap)
-                cr:save()
-                cr:translate(x, 0)
-                gears.shape.rounded_rect(cr, pill_w, BAR_HEIGHT, r)
-                cr:fill()
-                cr:restore()
-            end
-        end
-
-        -- ── Bar 2: 10-min block countdown ──────────────────────────────────
-        -- Fills from left, shrinks rightward over 10 min.
-        local bar_w = w * (1.0 - block_frac)
-        if bar_w > 0.5 then
-            cr:set_source_rgb(1, 1, 1)
-            cr:save()
-            cr:translate(0, BAR_HEIGHT + BAR_SPACING)
-            gears.shape.rounded_rect(cr, bar_w, BAR_HEIGHT, math.min(r_full, bar_w * 0.5))
+            cr:rectangle(0, 0, w * (remaining / TOTAL_BLOCKS), BAR_HEIGHT)
             cr:fill()
-            cr:restore()
         end
     end
 
-    local bar_total_h = BAR_HEIGHT * 2 + BAR_SPACING
+    local bar_total_h = BAR_HEIGHT
 
     local timebox = wibox {
         x                 = s.geometry.x,

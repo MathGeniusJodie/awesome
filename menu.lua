@@ -19,6 +19,50 @@ function menu.setup(opts)
         theme = { width = 200, height = 24, border_width = 8, bg_normal = "#000000", bg_focus = "#000000", border_color = "#000000" },
     }
 
+    -- Stored after menu_gen resolves icons; used to rebuild menu on each open
+    local category_items = nil
+    local bottom_items   = nil
+    local launcher_icon_fn  = nil
+    local lookup_fn         = nil
+
+    local function is_running(classes)
+        for _, c in ipairs(client.get()) do
+            if c.class then
+                for _, cls in ipairs(classes) do
+                    if c.class:lower() == cls:lower() then return true end
+                end
+            end
+        end
+        return false
+    end
+
+    local function build_menu()
+        if not category_items then return end
+        local quick_items = {
+            { "Terminal",     function() splitwm._append_next_client = true; awful.spawn(terminal)    end, launcher_icon_fn(terminal)    },
+            { "Browser",      function() splitwm._append_next_client = true; awful.spawn(browser)     end, launcher_icon_fn(browser)     },
+            { "File Manager", function() splitwm._append_next_client = true; awful.spawn(filemanager) end, launcher_icon_fn(filemanager) },
+            { "Templates",    function() splitwm._append_next_client = true; awful.spawn("thunar /home/jodie/Desktop/allfiles/templates") end, "/home/jodie/.local/share/applications/templates-briefcase.svg" },
+        }
+        if not is_running({"obsidian", "Obsidian"}) then
+            table.insert(quick_items, { "Obsidian", function() splitwm._append_next_client = true; awful.spawn("obsidian") end, lookup_fn({"obsidian", "md.obsidian.Obsidian"}) })
+        end
+        if not is_running({"claude-desktop", "Claude"}) then
+            table.insert(quick_items, { "Claude", function() splitwm._append_next_client = true; awful.spawn("claude-desktop") end, lookup_fn({"claude-desktop"}) })
+        end
+        table.insert(quick_items, { "─────────────" })
+
+        local items = {}
+        for _, qi in ipairs(quick_items)   do table.insert(items, qi) end
+        for _, ci in ipairs(category_items) do table.insert(items, ci) end
+        for _, bi in ipairs(bottom_items)   do table.insert(items, bi) end
+
+        app_menu = awful.menu {
+            items = items,
+            theme = { width = 200, height = 24, border_width = 8, menu_bg_normal = "#000000", border_color = "#000000" },
+        }
+    end
+
     menu_gen.generate(function(entries)
         -- Group entries by category
         local categories = {}
@@ -38,14 +82,12 @@ function menu.setup(opts)
         end
         table.sort(cat_names)
 
-        -- Build menu items with category submenus
-        local menu_items = {}
+        -- Build category submenus
+        category_items = {}
         for _, cat in ipairs(cat_names) do
-            -- Sort apps within each category
             table.sort(categories[cat], function(a, b)
                 return (a[1] or "") < (b[1] or "")
             end)
-            -- Look up category icon
             local cat_icon_names = {
                 Utility     = "applications-utilities",
                 Development = "applications-development",
@@ -60,16 +102,15 @@ function menu.setup(opts)
             }
             local cat_icon = menubar_utils.lookup_icon(cat_icon_names[cat] or "applications-other")
             if cat_icon == false then cat_icon = nil end
-            table.insert(menu_items, { cat, categories[cat], cat_icon })
+            table.insert(category_items, { cat, categories[cat], cat_icon })
         end
 
-        -- Add extras at the bottom
-        table.insert(menu_items, { "─────────────" })
-        table.insert(menu_items, { "Run...", function()
-            awful.screen.focused().mypromptbox:run()
-        end })
+        bottom_items = {
+            { "─────────────" },
+            { "Run...", function() awful.screen.focused().mypromptbox:run() end },
+        }
 
-        -- NOW the icon theme is ready — resolve launcher icons
+        -- Resolve launcher icons now that the icon theme is ready
         for _, launcher in ipairs(splitwm.launchers) do
             if not launcher.icon and launcher.icon_names then
                 for _, name in ipairs(launcher.icon_names) do
@@ -85,13 +126,12 @@ function menu.setup(opts)
             end
         end
 
-        -- Prepend quick-launch items at the top (icons now resolved above)
-        local function launcher_icon(cmd)
+        launcher_icon_fn = function(cmd)
             for _, l in ipairs(splitwm.launchers) do
                 if l.cmd == cmd then return l.icon end
             end
         end
-        local function lookup(names)
+        lookup_fn = function(names)
             for _, n in ipairs(names) do
                 local p = menubar_utils.lookup_icon(n)
                 if p and p ~= false then return p end
@@ -101,23 +141,8 @@ function menu.setup(opts)
                 if p then return p end
             end
         end
-        local quick_items = {
-            { "Terminal",     function() splitwm._append_next_client = true; awful.spawn(terminal)    end, launcher_icon(terminal)    },
-            { "Browser",      function() splitwm._append_next_client = true; awful.spawn(browser)     end, launcher_icon(browser)     },
-            { "File Manager", function() splitwm._append_next_client = true; awful.spawn(filemanager) end, launcher_icon(filemanager) },
-            { "Obsidian",     function() splitwm._append_next_client = true; awful.spawn("obsidian")  end, lookup({"obsidian", "md.obsidian.Obsidian"}) },
-            { "Claude",       function() splitwm._append_next_client = true; awful.spawn("claude-desktop") end, lookup({"claude-desktop"}) },
-            { "─────────────" },
-        }
-        for i = #quick_items, 1, -1 do
-            table.insert(menu_items, 1, quick_items[i])
-        end
 
-        -- Replace the placeholder menu
-        app_menu = awful.menu {
-            items = menu_items,
-            theme = { width = 200, height = 24, border_width = 8, menu_bg_normal = "#000000", border_color = "#000000" },
-        }
+        build_menu()
 
         -- Flush render caches so overlays and titlebars rebuild with the new icons
         splitwm.flush_caches()
@@ -176,6 +201,7 @@ function menu.setup(opts)
     splitwm.on_menu_request = function()
         splitwm._menu_just_toggled = true
         gears.timer.delayed_call(function() splitwm._menu_just_toggled = false end)
+        build_menu()
         app_menu:toggle()
         poll_ready = false
         if menu_poll_timer.started then menu_poll_timer:stop() end
