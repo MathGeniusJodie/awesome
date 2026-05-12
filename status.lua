@@ -919,14 +919,15 @@ function status.setup_screen(s)
     }
 
     -- Lock and power buttons side-by-side at bottom-right corner.
-    local lock_w  = 26
-    local btn_gap = 2
-    local total_w = lock_w * 2 + btn_gap
+    local lock_w     = 26
+    local btn_gap    = 2
+    local total_w    = lock_w * 2 + btn_gap
+    local edge_margin = 2
     -- Shrink the status wibox so it doesn't extend under the lock/power buttons.
-    s.mywibox.width = s.geometry.width - sg - total_w
+    s.mywibox.width = s.geometry.width - sg - total_w - edge_margin
     s.mylock_wibox = wibox({
-        x       = s.geometry.x + s.geometry.width - total_w,
-        y       = s.geometry.y + s.geometry.height - lock_w,
+        x       = s.geometry.x + s.geometry.width - total_w - edge_margin,
+        y       = s.geometry.y + s.geometry.height - lock_w - edge_margin,
         width   = total_w,
         height  = lock_w,
         bg      = "#00000000",
