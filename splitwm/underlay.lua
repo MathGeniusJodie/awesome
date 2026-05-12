@@ -349,8 +349,14 @@ local function get_drag_handle(s, i)
         awful.button({"Shift"}, 4, function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
         awful.button({"Shift"}, 5, function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end)
     ))
-    wb:connect_signal("mouse::enter", function() if handle_state ~= "dragging" then wb.bg = color_handle end end)
-    wb:connect_signal("mouse::leave", function() if handle_state ~= "dragging" then wb.bg = color_transparent end end)
+    wb:connect_signal("mouse::enter", function()
+        if handle_state ~= "dragging" then wb.bg = color_handle end
+        if ref.plus_entry then ref.plus_entry.set_handle_hover(true) end
+    end)
+    wb:connect_signal("mouse::leave", function()
+        if handle_state ~= "dragging" then wb.bg = color_transparent end
+        if ref.plus_entry then ref.plus_entry.set_handle_hover(false) end
+    end)
 
     local entry = { wb = wb, ref = ref }
     drag_handle_pool[s][i] = entry
@@ -371,13 +377,14 @@ local function get_plus_btn(s, i)
     local wb = M.make_wb_proxy(M.get_or_create_underlay(s).handle_layer, s)
     wb.visible = false
 
-    local btn_state = "idle"
+    local btn_state     = "idle"
+    local handle_hovered = false
 
     local draw_w = wibox.widget.base.make_widget()
     function draw_w:draw(_, cr, w, h)
-        local col = btn_state == "hover" and color_fg or color_handle
-        cr:set_source(gears.color(col))
-        cr:set_line_width(2)
+        if not handle_hovered and btn_state ~= "hover" then return end
+        cr:set_source(gears.color(color_fg))
+        cr:set_line_width(3)
         local cx, cy = w / 2, h / 2
         local arm = math.floor(math.min(w, h) * 0.3)
         cr:move_to(cx - arm, cy); cr:line_to(cx + arm, cy); cr:stroke()
@@ -388,7 +395,6 @@ local function get_plus_btn(s, i)
     wb:setup {
         draw_w,
         bg     = color_transparent,
-        shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.floor(h / 2)) end,
         widget = wibox.container.background,
     }
 
@@ -414,7 +420,14 @@ local function get_plus_btn(s, i)
         awful.button({"Shift"}, 5, function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end)
     ))
 
-    local entry = { wb = wb, ref = ref }
+    local entry = {
+        wb  = wb,
+        ref = ref,
+        set_handle_hover = function(v)
+            handle_hovered = v
+            draw_w:emit_signal("widget::redraw_needed")
+        end,
+    }
     plus_btn_pool[s][i] = entry
     return entry
 end
@@ -464,6 +477,7 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
                 local pe   = get_plus_btn(s, pi)
                 local pwb  = pe.wb
                 pe.ref.b   = b
+                entry.ref.plus_entry = pe
                 pwb.x      = vis_pos - math.floor(PLUS_BTN_SIZE / 2)
                 pwb.y      = b.start + math.floor((b.span - PLUS_BTN_SIZE) / 2)
                 pwb.width  = PLUS_BTN_SIZE
@@ -513,6 +527,7 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
             pe.wb.width  = PLUS_BTN_SIZE
             pe.wb.height = PLUS_BTN_SIZE
             pe.wb.visible = true
+            entry.ref.plus_entry = pe
         end
     end
     add_edge_handle(wa.x + math.floor(gap / 2),                  "left",  function() if _insert_at_left_edge  then _insert_at_left_edge(s)  end end)
