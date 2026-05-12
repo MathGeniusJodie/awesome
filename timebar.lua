@@ -73,8 +73,32 @@ function M.setup(s)
         type              = "dock",
         input_passthrough = true,
     }
-    timebox:struts({ top = BAR_MARGIN + bar_total_h })
     timebox:set_widget(canvas)
+
+    local full_struts = { top = BAR_MARGIN + bar_total_h }
+
+    local function update_visibility()
+        local fs = false
+        for _, c in ipairs(client.get()) do
+            if c.screen == s and c.fullscreen then fs = true; break end
+        end
+        if fs then
+            timebox.visible = false
+            timebox:struts({})
+        else
+            timebox.visible = true
+            timebox:struts(full_struts)
+        end
+    end
+
+    update_visibility()
+
+    client.connect_signal("property::fullscreen", function(c)
+        if c.screen == s then update_visibility() end
+    end)
+    client.connect_signal("unmanage", function(c)
+        if c.screen == s then gears.timer.delayed_call(update_visibility) end
+    end)
 
     gears.timer {
         timeout   = 1,
