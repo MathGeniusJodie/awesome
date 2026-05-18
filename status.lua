@@ -349,6 +349,7 @@ end
 local CAL_CELL = 24
 local CAL_GAP  = 2
 local CAL_PAD  = 10
+local CAL_WEEK_CELL = 24
 
 -- Returns widget, cal_w, cal_h so the caller can size the wibox precisely.
 local function build_calendar_widget(year, month, today_day, on_prev, on_next)
@@ -359,6 +360,7 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
     local cell = CAL_CELL
     local gap  = CAL_GAP
     local pad  = CAL_PAD
+    local week_cell = CAL_WEEK_CELL
 
     local first_wday    = os.date("*t", os.time({year=year, month=month, day=1})).wday - 1
     local days_in_month = os.date("*t", os.time({year=year, month=month+1, day=0})).day
@@ -370,13 +372,8 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
     -- rows: margin(hdr)+gap + dow_row + (1+MAX_WEEKS)*gap + MAX_WEEKS*cell
     -- margin(hdr) height = 4 + cell + 4 = cell+8
     local rows_h = (cell + 8) + cell + MAX_WEEKS * cell + (1 + MAX_WEEKS) * gap
-    local cal_w  = 7 * cell + 6 * gap + 2 * pad
+    local cal_w  = week_cell + 7 * cell + 7 * gap + 2 * pad
     local cal_h  = pad + rows_h + pad
-
-    -- Last day of previous month (for overflow cells)
-    local prev_y, prev_m = year, month - 1
-    if prev_m < 1 then prev_m = 12; prev_y = prev_y - 1 end
-    local prev_days = os.date("*t", os.time({year=prev_y, month=prev_m+1, day=0})).day
 
     -- Blend a color with alpha (#rrggbbaa) onto a background (#rrggbb[aa])
     -- so the result is safe to use in Pango markup (which needs plain #rrggbb).
@@ -437,6 +434,14 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
     -- Day-of-week labels
     local dow_row = wibox.layout.fixed.horizontal()
     dow_row.spacing = gap
+    dow_row:add(wibox.widget {
+        markup        = string.format('<span color="%s"><b>Wk</b></span>', color_dow),
+        align         = "center",
+        font          = "monospace 11px",
+        forced_width  = week_cell,
+        forced_height = cell,
+        widget        = wibox.widget.textbox,
+    })
     for _, d in ipairs({"Su","Mo","Tu","We","Th","Fr","Sa"}) do
         dow_row:add(wibox.widget {
             markup        = string.format('<span color="%s"><b>%s</b></span>', color_fg, d),
@@ -448,6 +453,19 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
         })
     end
     rows:add(dow_row)
+
+    local function week_number_cell(row_start_time)
+        -- ISO week number for the Monday in this Sunday-start display row.
+        local week_num = os.date("%V", row_start_time + 24 * 60 * 60)
+        return wibox.widget {
+            markup        = string.format('<span color="%s">%s</span>', color_dow, week_num),
+            align         = "center",
+            font          = "monospace 11px",
+            forced_width  = week_cell,
+            forced_height = cell,
+            widget        = wibox.widget.textbox,
+        }
+    end
 
     -- Helper: a muted overflow cell
     local function overflow_cell(day_num)
@@ -464,29 +482,21 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
         }
     end
 
-    -- Collect week rows into a table so we can prepend a top-overflow row.
-    local week_row_widgets = {}
-    local col     = first_wday
-    local cur_row = wibox.layout.fixed.horizontal()
-    cur_row.spacing = gap
+    local function day_cell(date)
+        if date.month ~= month then
+            return overflow_cell(date.day)
+        end
 
-    -- Leading overflow days from previous month
-    for i = first_wday - 1, 0, -1 do
-        cur_row:add(overflow_cell(prev_days - i))
-    end
-
-    -- Current month days
-    for day = 1, days_in_month do
-        local is_today = (day == today_day)
+        local is_today = (date.day == today_day)
         local label = wibox.widget {
             markup = is_today
-                and string.format('<span color="%s"><b>%d</b></span>', color_bg, day)
-                or  string.format('<span color="%s">%d</span>', color_fg, day),
+                and string.format('<span color="%s"><b>%d</b></span>', color_bg, date.day)
+                or  string.format('<span color="%s">%d</span>', color_fg, date.day),
             align  = "center",
             font   = "monospace 11px",
             widget = wibox.widget.textbox,
         }
-        local cell_w = wibox.widget {
+        return wibox.widget {
             wibox.container.place(label),
             bg            = is_today and color_today or nil,
             shape         = is_today and gears.shape.circle or nil,
@@ -494,54 +504,23 @@ local function build_calendar_widget(year, month, today_day, on_prev, on_next)
             forced_height = cell,
             widget        = wibox.container.background,
         }
-        cur_row:add(cell_w)
-        col = col + 1
-        if col >= 7 then
-            table.insert(week_row_widgets, cur_row)
-            cur_row         = wibox.layout.fixed.horizontal()
-            cur_row.spacing = gap
-            col = 0
-        end
     end
 
-    -- Complete the last partial row with next-month overflow
-    local next_day = 1
-    if col > 0 then
-        while col < 7 do
-            cur_row:add(overflow_cell(next_day))
-            next_day = next_day + 1
-            col      = col + 1
+    local natural_week_rows = math.ceil((first_wday + days_in_month) / 7)
+    local grid_start_offset = first_wday + ((natural_week_rows == 4) and 7 or 0)
+
+    for week = 0, MAX_WEEKS - 1 do
+        local row_start_day = 1 - grid_start_offset + week * 7
+        local row_start_time = os.time({year=year, month=month, day=row_start_day})
+        local row = wibox.layout.fixed.horizontal()
+        row.spacing = gap
+        row:add(week_number_cell(row_start_time))
+
+        for col = 0, 6 do
+            local date = os.date("*t", os.time({year=year, month=month, day=row_start_day + col}))
+            row:add(day_cell(date))
         end
-        table.insert(week_row_widgets, cur_row)
-    end
 
-    local week_rows = #week_row_widgets  -- 4, 5, or 6
-
-    -- Extra overflow rows at the bottom.
-    -- For 4-week months we only add one here (the other goes at the top below).
-    local bottom_target = (week_rows == 4) and (MAX_WEEKS - 1) or MAX_WEEKS
-    for _ = week_rows + 1, bottom_target do
-        local extra = wibox.layout.fixed.horizontal()
-        extra.spacing = gap
-        for _ = 1, 7 do
-            extra:add(overflow_cell(next_day))
-            next_day = next_day + 1
-        end
-        table.insert(week_row_widgets, extra)
-    end
-
-    -- For 4-week months: prepend one extra overflow row at the top.
-    -- It shows the 7 prev-month days immediately before the leading overflow cells.
-    if week_rows == 4 then
-        local top_row = wibox.layout.fixed.horizontal()
-        top_row.spacing = gap
-        for i = 6, 0, -1 do
-            top_row:add(overflow_cell(prev_days - first_wday - i))
-        end
-        table.insert(week_row_widgets, 1, top_row)
-    end
-
-    for _, row in ipairs(week_row_widgets) do
         rows:add(row)
     end
 
