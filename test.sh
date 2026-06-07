@@ -42,6 +42,8 @@ AWESOME_PID=$!
 echo ""
 echo "=== Keybindings ==="
 echo "  Mod4+Enter      Open terminal"
+echo "  Mod4+-          Lower DPI"
+echo "  Mod4+=          Raise DPI"
 echo "  Mod4+v           Split horizontal"
 echo "  Mod4+h           Split vertical"
 echo "  Mod4+q           Close split"

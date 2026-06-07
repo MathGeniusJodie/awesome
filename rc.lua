@@ -122,6 +122,57 @@ local modkey   = "Mod4"
 local browser = os.getenv("BROWSER") or "xdg-open https://"
 local filemanager = os.getenv("FILEMANAGER") or "thunar"
 
+local DPI_STEP = 12
+local DPI_MIN  = 72
+local DPI_MAX  = 240
+
+local function change_dpi(delta)
+    local script = string.format([[
+use_xfce=0
+current=
+if command -v xfconf-query >/dev/null 2>&1; then
+    use_xfce=1
+    current=$(xfconf-query -c xsettings -p /Xft/DPI 2>/dev/null)
+    if [ -n "$current" ] && [ "$current" -gt 1000 ] 2>/dev/null; then
+        current=$((current / 1024))
+    fi
+fi
+if ! [ "$current" -gt 0 ] 2>/dev/null; then
+    current=$(xrdb -query 2>/dev/null | awk '/^Xft\.dpi:/ { print int($2); exit }')
+fi
+if ! [ "$current" -gt 0 ] 2>/dev/null; then
+    current=96
+fi
+
+dpi=$((current + (%d)))
+if [ "$dpi" -lt %d ]; then dpi=%d; fi
+if [ "$dpi" -gt %d ]; then dpi=%d; fi
+
+if [ "$use_xfce" -eq 1 ]; then
+    if xfconf-query -c xsettings -p /Xft/DPI >/dev/null 2>&1; then
+        xfconf-query -c xsettings -p /Xft/DPI -s "$dpi"
+    else
+        xfconf-query -c xsettings -p /Xft/DPI -n -t int -s "$dpi"
+    fi
+    xrdb -query 2>/dev/null | awk '$1 != "Xft.dpi:" { print }' | xrdb -load 2>/dev/null || true
+else
+    printf 'Xft.dpi: %%s\n' "$dpi" | xrdb -merge
+fi
+
+printf '%%s' "$dpi"
+]], delta, DPI_MIN, DPI_MIN, DPI_MAX, DPI_MAX)
+
+    awful.spawn.easy_async_with_shell(script, function(stdout)
+        local dpi = stdout:match("(%d+)")
+        if dpi then
+            naughty.notify {
+                title = "DPI",
+                text  = dpi,
+            }
+        end
+    end)
+end
+
 ---------------------------------------------------------------------------
 -- App launchers shown in splits (icon with text fallback)
 -- icon_name = XDG name, resolved after icon theme loads
@@ -291,6 +342,12 @@ local globalkeys = gears.table.join(
     awful.key({ modkey }, "space",
         function() awful.spawn("rofi -show combi") end,
         { description = "rofi combi launcher", group = "launcher" }),
+
+    awful.key({ modkey }, "minus", function() change_dpi(-DPI_STEP) end,
+        { description = "lower dpi", group = "display" }),
+
+    awful.key({ modkey }, "equal", function() change_dpi(DPI_STEP) end,
+        { description = "raise dpi", group = "display" }),
 
     ---------------------------------------------------------------------------
     -- SPLITWM: Split management
