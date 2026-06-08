@@ -120,12 +120,6 @@ local function tab_slot_x(tab_idx, active_tab, icon_size)
     return x
 end
 
-local function tab_slots_end_x(n_tabs, active_tab, icon_size)
-    local x = n_tabs * tab_step(icon_size)
-    if active_tab and active_tab < n_tabs then x = x + ACTIVE_TAB_AFTER_GAP end
-    return x
-end
-
 local function tab_content_bounds(tab_idx, active_tab, icon_size)
     local x1 = tab_slot_x(tab_idx, active_tab, icon_size) + TAB_PAD_H
     local x2 = x1 + icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4
@@ -145,14 +139,6 @@ local function tab_index_at(x, active_tab, n_tabs, icon_size)
     return nil
 end
 
-local function tab_index_at_topmost(x, active_tab, n_tabs, icon_size)
-    if n_tabs <= 0 then return nil end
-    for i = n_tabs, 1, -1 do
-        if tab_content_hit(x, i, active_tab, icon_size) then return i end
-    end
-    return nil
-end
-
 ---------------------------------------------------------------------------
 -- Titlebar cache and color-menu state
 ---------------------------------------------------------------------------
@@ -160,7 +146,6 @@ end
 local titlebar_cache = {}
 local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
 local local_tab_click_active = false
-local remote_tab_click_active = false
 
 -- Per-event dedup flag: set true for the duration of the event that closed a menu,
 -- so multiple handlers firing in the same event batch don't each trigger on_menu_close.
@@ -626,7 +611,7 @@ local function make_tab_icon(tc, icon_size)
     }
 end
 
-local function tb_build_remote_tab_widget(tc, entry, ctx)
+local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
     local client_color = colors.get_client_color(tc)
     local tab_bg = (client_color and client_color.dark) or color_btn_bg
     local tab_bg_pat = gears.color(tab_bg)
@@ -652,10 +637,20 @@ local function tb_build_remote_tab_widget(tc, entry, ctx)
         forced_width = _BTN_SIZE - 4,
         widget       = wibox.container.background,
     }
+    local content_row = wibox.widget {
+        icon_widget, close_placeholder, spacing = ICON_CLOSE_GAP,
+        layout = wibox.layout.fixed.horizontal,
+    }
+    if on_click then
+        content_row:buttons(gears.table.join(awful.button({}, 1, on_click)))
+    end
+
     local content = wibox.widget {
         {
-            icon_widget, close_placeholder, spacing = ICON_CLOSE_GAP,
-            layout = wibox.layout.fixed.horizontal,
+            content_row,
+            forced_width  = ctx.icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4,
+            forced_height = ctx.icon_size,
+            widget        = wibox.container.background,
         },
         left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
         top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
@@ -1348,18 +1343,42 @@ local function update_titlebars(s, t, state, geos, leaves)
         })
 
         local remote_widgets = {}
-        local remote_items = {}
+        local pending_remote_click = nil
+        local function queue_remote_click(remote_idx, remote_client)
+            if local_tab_click_active then return end
+            if not remote_client.valid then return end
+            if pending_remote_click then
+                if remote_idx > pending_remote_click.idx then
+                    pending_remote_click.idx = remote_idx
+                    pending_remote_click.client = remote_client
+                end
+                return
+            end
+            pending_remote_click = { idx = remote_idx, client = remote_client }
+            gears.timer.delayed_call(function()
+                local item = pending_remote_click
+                pending_remote_click = nil
+                if not (item and item.client and item.client.valid) then return end
+                if _splitwm.move_client_to_leaf_id then
+                    _splitwm.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
+                end
+            end)
+        end
+
         for _, other_leaf in ipairs(leaves) do
             if other_leaf.id ~= leaf.id then
                 for _, tc in ipairs(other_leaf.tabs) do
-                    remote_items[#remote_items + 1] = { client = tc }
-                    remote_widgets[#remote_widgets + 1] = tb_build_remote_tab_widget(tc, entry, ctx)
+                    local remote_client = tc
+                    local remote_idx = #remote_widgets + 1
+                    remote_widgets[remote_idx] =
+                        tb_build_remote_tab_widget(remote_client, entry, ctx, function()
+                            queue_remote_click(remote_idx, remote_client)
+                        end)
                 end
             end
         end
         if #remote_widgets > 0 then
             local top_spacing = TAB_SPACING + TAB_GAP
-            local plus_left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0
             local remote_left = REMOTE_TAB_GROUP_GAP + math.max(0, -(TAB_SPACING + TAB_GAP))
             local remote_row = wibox.widget {
                 spacing = top_spacing,
@@ -1369,26 +1388,6 @@ local function update_titlebars(s, t, state, geos, leaves)
             remote_row.opacity = 0.5
             remote_row:connect_signal("mouse::enter", function() remote_row.opacity = 1.0 end)
             remote_row:connect_signal("mouse::leave", function() remote_row.opacity = 0.5 end)
-            local function handle_remote_click()
-                if local_tab_click_active then return end
-                if remote_tab_click_active then return end
-                local m = mouse.coords()
-                local row_x = geo.x - (state.scroll_x or 0)
-                    + tab_slots_end_x(#leaf.tabs, leaf.active_tab, ctx.icon_size)
-                    + plus_left + _BTN_SIZE + top_spacing + remote_left
-                local idx = tab_index_at_topmost(m.x - row_x, nil, #remote_items, ctx.icon_size)
-                local item = idx and remote_items[idx]
-                if not item then return end
-                remote_tab_click_active = true
-                gears.timer.delayed_call(function() remote_tab_click_active = false end)
-                if _splitwm.move_client_to_leaf_id then
-                    _splitwm.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
-                end
-            end
-            remote_row:buttons(gears.table.join(awful.button({}, 1, handle_remote_click)))
-            for _, w in ipairs(remote_widgets) do
-                w:buttons(gears.table.join(awful.button({}, 1, handle_remote_click)))
-            end
             table.insert(tab_widgets, wibox.widget {
                 remote_row,
                 left = remote_left,
