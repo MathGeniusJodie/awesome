@@ -1207,6 +1207,8 @@ function splitwm.setup()
         tb               = tb,
         geo_cache        = geo_cache,
         update_ui        = update_ui,
+        on_split_anim_done = function(s) smush_after_layout(s) end,
+        on_close_anim_done = function(s) smush_after_layout(s) end,
     })
 
     underlay.setup({

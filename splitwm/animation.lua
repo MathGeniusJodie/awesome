@@ -20,6 +20,8 @@ local _client_geo
 local _tb
 local _geo_cache
 local _update_ui
+local _on_split_anim_done
+local _on_close_anim_done
 
 function M.init(deps)
     _get_active_state = deps.get_active_state
@@ -28,6 +30,8 @@ function M.init(deps)
     _tb               = deps.tb
     _geo_cache        = deps.geo_cache
     _update_ui        = deps.update_ui
+    _on_split_anim_done = deps.on_split_anim_done
+    _on_close_anim_done = deps.on_close_anim_done
 end
 
 function M.is_active(s) return M.split_anim_active[s] end
@@ -86,7 +90,7 @@ end
 -- Runs a fixed-duration ease-out-back animation. on_frame(p) is called each
 -- frame with eased progress in [0,1]. min_leaf.min_anim is cleared on completion.
 -- Caller must call cancel_split_anim(s) before this if needed.
-local function run_anim(s, on_frame, min_leaf)
+local function run_anim(s, on_frame, min_leaf, on_done)
     local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
     local frame  = 0
     local tim
@@ -105,6 +109,7 @@ local function run_anim(s, on_frame, min_leaf)
                     for _, c in ipairs(min_leaf.tabs) do c.hidden = true end
                 end
                 _update_ui(s)
+                if on_done then on_done() end
             end
         end,
     }
@@ -141,6 +146,8 @@ function M.start_split_anim(s, t, old_geo, a_id, b_id, dir)
     run_anim(s, function(p)
         apply_leaf_geo(s, a_id, lerp_geo(start_a, geo_a, p))
         apply_leaf_geo(s, b_id, lerp_geo(start_b, geo_b, p))
+    end, nil, function()
+        if _on_split_anim_done then _on_split_anim_done(s, a_id, b_id) end
     end)
 end
 
@@ -163,6 +170,8 @@ function M.start_close_anim(s, t, old_geos, leaf_ids)
                 apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
             end
         end
+    end, nil, function()
+        if _on_close_anim_done then _on_close_anim_done(s, leaf_ids) end
     end)
 end
 
