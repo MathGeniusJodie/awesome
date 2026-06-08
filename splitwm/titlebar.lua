@@ -716,15 +716,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- Activate focus on tc (no-op if client is no longer valid).
     local function focus_tc()
         if not tc.valid then return end
-        if _splitwm.activate_client_in_leaf then
-            _splitwm.activate_client_in_leaf(ctx.t, leaf.id, tc, { screen = ctx.s })
-            return
-        end
-        if _splitwm.focus_client_after_arrange then
-            _splitwm.focus_client_after_arrange(tc, leaf.id)
-        else
-            tc:emit_signal("request::activate", "mouse_click", { raise = true })
-        end
+        _splitwm.activate_client_in_leaf(ctx.t, leaf.id, tc, { screen = ctx.s })
     end
 
     -- Phase 1: while button held, promote pending → pickup once cursor leaves the tab bounds.
@@ -784,8 +776,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                             return false
                         end
                         drag.pickup = pickup_idle()
-                        if not (_splitwm.swap_client_to_tab_index
-                                and _splitwm.swap_client_to_tab_index(ctx.t, leaf.id, tc, target, { screen = ctx.s })) then
+                        if not _splitwm.swap_client_to_tab_index(ctx.t, leaf.id, tc, target, { screen = ctx.s }) then
                             awful.layout.arrange(ctx.s)
                             focus_tc()
                         end
@@ -1365,9 +1356,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 local item = pending_remote_click
                 pending_remote_click = nil
                 if not (item and item.client and item.client.valid) then return end
-                if _splitwm.move_client_to_leaf_id then
-                    _splitwm.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
-                end
+                _splitwm.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
             end)
         end
 
