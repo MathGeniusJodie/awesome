@@ -162,10 +162,8 @@ local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
 local local_tab_click_active = false
 local remote_tab_click_active = false
 
--- Cache class→icon_path so lookup_icon (disk I/O) only runs once per class.
+-- Cache class→icon_path. Rendering reads this only; manage/class events fill it.
 local class_icon_cache = {}
--- StartupWMClass → icon_path, built lazily from .desktop files on first miss.
-local wmclass_icon_map = nil
 
 -- menubar_utils.lookup_icon only searches up to 128x128; search wider sizes too.
 local ICON_SIZES = { "256x256", "scalable", "128x128", "96x96", "64x64", "48x48", "32x32" }
@@ -196,47 +194,33 @@ local function find_icon_file(icon_name)
     return nil
 end
 
-local function build_wmclass_map()
-    wmclass_icon_map = {}
-    local dirs = { "/usr/share/applications", "/usr/local/share/applications" }
-    local home = os.getenv("HOME")
-    if home then dirs[#dirs+1] = home .. "/.local/share/applications" end
-    for _, dir in ipairs(dirs) do
-        local f = io.popen('find "' .. dir .. '" -name "*.desktop" 2>/dev/null')
-        if f then
-            for path in f:lines() do
-                local ok, prog = pcall(menubar_utils.parse_desktop_file, path)
-                if ok and prog and prog.StartupWMClass and prog.Icon
-                       and not wmclass_icon_map[prog.StartupWMClass] then
-                    local icon_path = find_icon_file(prog.Icon)
-                    if icon_path then wmclass_icon_map[prog.StartupWMClass] = icon_path end
-                end
-            end
-            f:close()
-        end
-    end
+local function class_icon_key(c)
+    return (c.class or "") .. "\0" .. (c.instance or "")
 end
 
-local function lookup_class_icon(tc)
-    local key = (tc.class or "") .. "\0" .. (tc.instance or "")
-    if class_icon_cache[key] ~= nil then return class_icon_cache[key] or nil end
+local function resolve_class_icon(c)
     local candidates = {
-        tc.instance, tc.class,
-        tc.instance and tc.instance:lower(), tc.class and tc.class:lower(),
+        c.instance, c.class,
+        c.instance and c.instance:lower(), c.class and c.class:lower(),
     }
     for _, name in ipairs(candidates) do
         if name then
             local path = menubar_utils.lookup_icon(name)
-            if path and path ~= false then class_icon_cache[key] = path; return path end
+            if path and path ~= false then return path end
         end
     end
-    -- Fall back to StartupWMClass map (built lazily from .desktop files).
-    if not wmclass_icon_map then build_wmclass_map() end
-    local path = (tc.class    and wmclass_icon_map[tc.class])
-              or (tc.instance and wmclass_icon_map[tc.instance])
-    if path then class_icon_cache[key] = path; return path end
-    class_icon_cache[key] = false
-    return nil
+end
+
+local function cache_class_icon(c)
+    local key = class_icon_key(c)
+    if class_icon_cache[key] == nil then
+        class_icon_cache[key] = resolve_class_icon(c) or false
+    end
+    return class_icon_cache[key] or nil
+end
+
+local function lookup_class_icon(c)
+    return class_icon_cache[class_icon_key(c)] or nil
 end
 -- Per-event dedup flag: set true for the duration of the event that closed a menu,
 -- so multiple handlers firing in the same event batch don't each trigger on_menu_close.
@@ -259,6 +243,7 @@ M.tab_index_at       = tab_index_at
 M.TAB_CONTENT_V_PAD  = TAB_CONTENT_V_PAD
 -- Exported for use in menu.lua — searches wider icon sizes than menubar_utils.lookup_icon.
 M.find_icon_file     = find_icon_file
+M.prepare_client_icon = cache_class_icon
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile

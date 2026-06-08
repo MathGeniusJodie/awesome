@@ -1550,6 +1550,7 @@ function splitwm.setup()
     })
 
     client.connect_signal("manage", function(c)
+        tb.prepare_client_icon(c)
         local t = c.first_tag
         if not t then return end
         local state = get_state(t)
@@ -1571,6 +1572,13 @@ function splitwm.setup()
     client.connect_signal("property::geometry", function(c)
         client_actual_geo[c] = c:geometry()
     end)
+
+    local function refresh_client_icon(c)
+        tb.prepare_client_icon(c)
+        if c.screen then awful.layout.arrange(c.screen) end
+    end
+    client.connect_signal("property::class", refresh_client_icon)
+    client.connect_signal("property::instance", refresh_client_icon)
 
     client.connect_signal("focus", function(c)
         if smush_focus_client == c then return end
