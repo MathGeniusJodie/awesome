@@ -61,7 +61,7 @@ local function apply_leaf_geo(s, leaf_id, geo)
         tc.wb.width  = math.max(1, geo.width)
         tc.wb.height = math.max(1, geo.height + gap)
     end
-    local leaf = state.leaf_map[leaf_id]
+    local leaf = tree.find_leaf_by_id(state.root, leaf_id)
     if leaf then
         local c = leaf.tabs[leaf.active_tab]
         if c and c.valid and not c.fullscreen then

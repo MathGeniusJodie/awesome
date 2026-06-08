@@ -76,6 +76,18 @@ function tree.find_leaf_for_client(node, c)
     end
 end
 
+function tree.find_leaf_by_id(node, id)
+    if not node then return nil end
+    if node.kind == "leaf" then
+        return node.id == id and node or nil
+    end
+    for _, child in ipairs(node.children) do
+        local found = tree.find_leaf_by_id(child, id)
+        if found then return found end
+    end
+    return nil
+end
+
 function tree.find_parent(root, target)
     if root.kind == "leaf" then return nil, nil end
     for i, child in ipairs(root.children) do
@@ -189,12 +201,13 @@ function tree.compute_tree(node, x, y, w, h, gap, geos, bounds, tb_h)
     compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil, tb_h)
 end
 
--- Given a leaf_map and canvas geos, find the nearest leaf to screen point (mx, my)
+-- Given leaves and canvas geos, find the nearest leaf to screen point (mx, my)
 -- (scroll_x converts canvas x to screen x; gap is the titlebar region above geo.y).
 -- Returns leaf_id, direction (DIR_H or DIR_V), new_leaf_first (bool), or nil if empty.
-function tree.find_gap_drop_target(leaf_map, geos, scroll_x, mx, my, gap)
+function tree.find_gap_drop_target(leaves, geos, scroll_x, mx, my, gap)
     local best_lid, best_dist = nil, math.huge
-    for lid in pairs(leaf_map) do
+    for _, leaf in ipairs(leaves) do
+        local lid = leaf.id
         local g = geos[lid]
         if g then
             local gx = g.x - scroll_x

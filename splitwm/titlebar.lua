@@ -867,7 +867,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             return false
         end
         if cached then
-            for lid, _ in pairs(ctx.state.leaf_map) do
+            local leaves = tree.collect_leaves(ctx.state.root)
+            for _, drop_leaf in ipairs(leaves) do
+                local lid = drop_leaf.id
                 local g = cached.geos[lid]
                 local gx = g and g.x - sx
                 if g and mx >= gx and mx < gx + g.width
@@ -896,8 +898,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         end
         -- Released in a gap (between splits or at screen edges): create a new split there.
         if cached then
+            local leaves = tree.collect_leaves(ctx.state.root)
             local best_lid, direction, new_first =
-                tree.find_gap_drop_target(ctx.state.leaf_map, cached.geos, sx, mx, my, gap)
+                tree.find_gap_drop_target(leaves, cached.geos, sx, mx, my, gap)
             if best_lid and _drop_into_new_split(ctx.t, best_lid, direction, new_first) then
                 awful.layout.arrange(ctx.s)
             end

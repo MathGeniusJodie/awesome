@@ -220,7 +220,7 @@ local last_focused_leaf  = {}   -- [screen] = leaf_id; used to detect focus chan
 local function get_state(t)
     if not tag_state[t] then
         local root = tree.make_leaf()
-        tag_state[t] = { root = root, focused_leaf_id = root.id, leaf_map = { [root.id] = root },
+        tag_state[t] = { root = root, focused_leaf_id = root.id,
                          scroll_x = 0, scroll_target = 0, canvas_w = nil }
     end
     return tag_state[t]
@@ -234,7 +234,11 @@ local function get_tag_state(c)
 end
 
 local function get_focused_leaf(state)
-    return state.leaf_map[state.focused_leaf_id]
+    return tree.find_leaf_by_id(state.root, state.focused_leaf_id)
+end
+
+local function get_leaf(state, leaf_id)
+    return state and tree.find_leaf_by_id(state.root, leaf_id) or nil
 end
 
 -- Returns (leaf, state, tag) for a client, or (nil, nil, nil) if any step fails.
@@ -245,7 +249,7 @@ local function get_leaf_from_client(c)
 end
 
 local function focus_leaf_after_arrange(state, leaf_id)
-    local leaf = state and state.leaf_map[leaf_id]
+    local leaf = get_leaf(state, leaf_id)
     local c = leaf and leaf.tabs[leaf.active_tab]
     if c and c.valid then splitwm.focus_client_after_arrange(c, leaf_id) end
 end
@@ -287,11 +291,11 @@ local function smush_after_layout(s, leaf_id)
     gears.timer.delayed_call(function()
         local state = tag_state[t]
         if not state then return end
-        local focused_leaf = state.leaf_map[state.focused_leaf_id]
+        local focused_leaf = get_focused_leaf(state)
         local restore_client = focused_leaf and focused_leaf.tabs[focused_leaf.active_tab]
         local restore_leaf_id = focused_leaf and focused_leaf.id
         if leaf_id then
-            smush_leaf_if_narrow(t, state, state.leaf_map[leaf_id],
+            smush_leaf_if_narrow(t, state, get_leaf(state, leaf_id),
                 restore_client, restore_leaf_id)
         else
             for _, leaf in ipairs(tree.collect_leaves(state.root)) do
@@ -404,7 +408,7 @@ end
 local function activate_client_in_leaf(t, leaf_id, c, opts)
     if not (t and c and c.valid) then return false end
     local state = get_state(t)
-    local leaf = state.leaf_map[leaf_id]
+    local leaf = get_leaf(state, leaf_id)
     if not leaf then return false end
 
     local tab_idx = tab_index_for_client(leaf, c)
@@ -420,7 +424,7 @@ end
 local function move_client_to_leaf_id(t, leaf_id, c, opts)
     if not (t and c and c.valid) then return false end
     local state = get_state(t)
-    local target_leaf = state.leaf_map[leaf_id]
+    local target_leaf = get_leaf(state, leaf_id)
     if not target_leaf then return false end
 
     local src_tag = c.first_tag
@@ -453,7 +457,7 @@ local function swap_client_to_tab_index(t, leaf_id, c, target_idx, opts)
     target_idx = math.floor(tonumber(target_idx) or 0)
 
     local state = get_state(t)
-    local leaf = state.leaf_map[leaf_id]
+    local leaf = get_leaf(state, leaf_id)
     if not leaf or target_idx < 1 or target_idx > #leaf.tabs then return false end
 
     local current_idx = tab_index_for_client(leaf, c)
@@ -470,8 +474,8 @@ local function swap_client_to_tab_index(t, leaf_id, c, target_idx, opts)
 end
 
 local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
-    local leaf_a = state.leaf_map[leaf_a_id]
-    local leaf_b = state.leaf_map[leaf_b_id]
+    local leaf_a = get_leaf(state, leaf_a_id)
+    local leaf_b = get_leaf(state, leaf_b_id)
     if not leaf_a or not leaf_b then return end
     leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
     leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
@@ -482,7 +486,7 @@ end
 -- Called when pickup tag=="split" is active: swaps tabs if different leaf, then arranges.
 local function handle_split_pickup(state, leaf_id, s)
     if drag.pickup.split_id ~= leaf_id then
-        if state.leaf_map[drag.pickup.split_id] then
+        if get_leaf(state, drag.pickup.split_id) then
             -- Same tag: simple in-place swap
             swap_split_tabs(state, drag.pickup.split_id, leaf_id)
             state.focused_leaf_id = leaf_id
@@ -490,15 +494,15 @@ local function handle_split_pickup(state, leaf_id, s)
             -- Different tag: find source state and swap clients across tags
             local src_state, src_t
             for t, ts in pairs(tag_state) do
-                if ts.leaf_map[drag.pickup.split_id] then
+                if get_leaf(ts, drag.pickup.split_id) then
                     src_state = ts
                     src_t = t
                     break
                 end
             end
             if src_state then
-                local src_leaf = src_state.leaf_map[drag.pickup.split_id]
-                local dst_leaf = state.leaf_map[leaf_id]
+                local src_leaf = get_leaf(src_state, drag.pickup.split_id)
+                local dst_leaf = get_leaf(state, leaf_id)
                 local dst_t    = s.selected_tag
                 if src_leaf and dst_leaf and src_t and dst_t then
                     local src_clients  = src_leaf.tabs
@@ -526,7 +530,7 @@ local function try_drop_picked_up(t, leaf_id)
     if drag.pickup.tag ~= "client" then return false end
     if not drag.pickup.client.valid then drag.pickup = pickup_idle(); return false end
     local state = get_state(t)
-    local target = state.leaf_map[leaf_id]
+    local target = get_leaf(state, leaf_id)
     if not target then drag.pickup = pickup_idle(); return false end
 
     local c       = drag.pickup.client
@@ -556,7 +560,7 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     if drag.pickup.tag ~= "client" then return false end
     if not drag.pickup.client.valid then drag.pickup = pickup_idle(); return false end
     local state = get_state(t)
-    local target_leaf = state.leaf_map[leaf_id]
+    local target_leaf = get_leaf(state, leaf_id)
     if not target_leaf then drag.pickup = pickup_idle(); return false end
 
     -- Capture old geometry before tree mutation for animation.
@@ -578,10 +582,6 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     local child_new = tree.make_leaf()
     table.insert(child_new.tabs, c)
     child_new.active_tab = 1
-
-    state.leaf_map[leaf_id]           = nil
-    state.leaf_map[child_existing.id] = child_existing
-    state.leaf_map[child_new.id]      = child_new
 
     local child_a = new_leaf_first and child_new or child_existing
     local child_b = new_leaf_first and child_existing or child_new
@@ -651,10 +651,6 @@ local function split_leaf(t, direction)
     child_a.active_tab = leaf.active_tab
     local child_b = tree.make_leaf()
 
-    state.leaf_map[leaf.id]    = nil
-    state.leaf_map[child_a.id] = child_a
-    state.leaf_map[child_b.id] = child_b
-
     if direction == tree.DIR_H then
         local parent, idx = tree.find_parent(state.root, leaf)
         if parent and parent.direction == tree.DIR_H then
@@ -683,7 +679,7 @@ end
 
 local function close_leaf(t, leaf_id)
     local state = get_state(t)
-    local leaf = state.leaf_map[leaf_id]
+    local leaf = get_leaf(state, leaf_id)
     if not leaf then return false end
     if drag.pickup.tag == "split" and drag.pickup.split_id == leaf_id then drag.pickup = pickup_idle() end
     if drag.pickup.tag == "client" and drag.pickup.client.valid
@@ -703,8 +699,6 @@ local function close_leaf(t, leaf_id)
         colors.resolve_color_conflict(dest, tc)
     end
     if dest.active_tab == 0 and #dest.tabs > 0 then dest.active_tab = 1 end
-
-    state.leaf_map[leaf_id] = nil
 
     if parent.direction == tree.DIR_H and #parent.children > 2 then
         -- N-ary: remove this child and redistribute its ratio share.
@@ -752,7 +746,7 @@ local function close_leaf(t, leaf_id)
 end
 
 local function close_leaf_with_anim(t, s, state, leaf_id)
-    local leaf = state.leaf_map[leaf_id]
+    local leaf = get_leaf(state, leaf_id)
     local parent, pidx
     if leaf then parent, pidx = tree.find_parent(state.root, leaf) end
     local old_geos, sibling_ids
@@ -841,7 +835,7 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
         hsplit          = function() do_split(tree.DIR_V) end,
         close           = function() close_leaf_with_anim(t, s, state, leaf_id) end,
         minimize_toggle = function()
-            local leaf = state.leaf_map[leaf_id]
+            local leaf = get_leaf(state, leaf_id)
             if not leaf then return end
             local is_minimizing = not leaf.minimized
             local cached = geo_cache[t]
@@ -1183,7 +1177,6 @@ local function insert_column_at_gap(t, s, b)
     for j = 1, N do abs_ws[j] = branch.ratios[j] / rs * old_usable end
 
     local new_leaf  = tree.make_leaf()
-    state.leaf_map[new_leaf.id] = new_leaf
 
     local default_w, new_usable
     if branch == state.root then
@@ -1218,7 +1211,6 @@ local function insert_at_edge(t, s, left)
     local old_cw  = state.canvas_w or wa.width
 
     local new_leaf = tree.make_leaf()
-    state.leaf_map[new_leaf.id] = new_leaf
 
     local old_root = state.root
     if old_root.direction == tree.DIR_H then
@@ -1403,7 +1395,8 @@ local function start_drag_hover_poll()
                 local state  = tag_state[t]
                 if not cached or not state then goto continue end
                 local sx = state.scroll_x or 0
-                for lid, leaf in pairs(state.leaf_map) do
+                for _, leaf in ipairs(tree.collect_leaves(state.root)) do
+                    local lid = leaf.id
                     local g = cached.geos[lid]
                     local gx = g and g.x - sx
                     if g and mx >= gx and mx < gx + g.width
@@ -1553,7 +1546,7 @@ function splitwm.setup()
         local guarded_focus_leaf = false
         if focus_guard and focus_guard.client == c and focus_guard.leaf_id then
             local _, guarded_state = get_tag_state(c)
-            local guarded_leaf = guarded_state and guarded_state.leaf_map[focus_guard.leaf_id]
+            local guarded_leaf = get_leaf(guarded_state, focus_guard.leaf_id)
             if guarded_leaf then
                 leaf = guarded_leaf
                 state = guarded_state
@@ -1638,7 +1631,9 @@ function splitwm.setup()
                     local mx, my = m.x, m.y
                     local state = get_state(t)
                     local sx    = state.scroll_x or 0
-                    for lid, _ in pairs(state.leaf_map) do
+                    local leaves = tree.collect_leaves(state.root)
+                    for _, leaf in ipairs(leaves) do
+                        local lid = leaf.id
                         local g = cached.geos[lid]
                         local gx = g and g.x - sx
                         if g and mx >= gx and mx < gx + g.width
@@ -1650,7 +1645,7 @@ function splitwm.setup()
                     end
                     -- Dropped in a gap: create a new split at the nearest leaf.
                     local best_lid, direction, new_first =
-                        tree.find_gap_drop_target(state.leaf_map, cached.geos, sx, mx, my, gap)
+                        tree.find_gap_drop_target(leaves, cached.geos, sx, mx, my, gap)
                     if best_lid and drop_into_new_split(t, best_lid, direction, new_first) then
                         awful.layout.arrange(s)
                     end
