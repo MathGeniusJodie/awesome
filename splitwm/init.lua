@@ -44,6 +44,29 @@ local SPLIT_RATIO = 0.618
 -- Ratio delta applied per grow/shrink keypress.
 local RESIZE_STEP = 0.05
 
+-- Send Ctrl+0 plus one or two Ctrl+- presses to active clients in narrow splits.
+local DEFAULT_SMUSH_WIDTH_THRESHOLD = 900
+local DEFAULT_TINY_SMUSH_WIDTH_THRESHOLD = 650
+local smush_helper = gears.filesystem.get_configuration_dir() .. "splitwm/smushkeys"
+local smush_state = setmetatable({}, { __mode = "k" })
+
+local function send_smush_shortcuts(c, mode)
+    if not c or not c.valid or not gears.filesystem.file_executable(smush_helper) then return end
+    c:emit_signal("request::activate", "splitwm_smush", { raise = true })
+    gears.timer.delayed_call(function()
+        if not c.valid then return end
+        local cmd
+        if mode == "reset" then
+            cmd = { smush_helper, "reset" }
+        elseif mode == "tiny" then
+            cmd = { smush_helper, "tiny" }
+        else
+            cmd = smush_helper
+        end
+        awful.spawn(cmd, false)
+    end)
+end
+
 -- Effective titlebar height: grows to match gap so the bar never disappears into it.
 local function effective_tb_h(gap) return math.max(TITLEBAR_HEIGHT, gap) end
 
@@ -111,6 +134,53 @@ local function get_leaf_from_client(c)
     local t, state = get_tag_state(c)
     if not state then return nil, nil, nil end
     return tree.find_leaf_for_client(state.root, c), state, t
+end
+
+local function smush_leaf_if_narrow(t, state, leaf)
+    if not leaf or leaf.active_tab <= 0 then return end
+    local cached = geo_cache[t]
+    local geo = cached and cached.geos[leaf.id]
+    if not geo then return end
+
+    local c = leaf.tabs[leaf.active_tab]
+    if not c or not c.valid or c.hidden or c.minimized or c.fullscreen then return end
+
+    local threshold = beautiful.splitwm_smush_width_threshold or DEFAULT_SMUSH_WIDTH_THRESHOLD
+    local tiny_threshold = beautiful.splitwm_tiny_smush_width_threshold
+        or DEFAULT_TINY_SMUSH_WIDTH_THRESHOLD
+    if geo.width >= threshold then
+        if smush_state[c] and smush_state[c].mode ~= "wide" then
+            smush_state[c] = { mode = "wide" }
+            send_smush_shortcuts(c, "reset")
+        end
+        return
+    end
+
+    local mode = geo.width < tiny_threshold and "tiny" or "narrow"
+    local bucket = math.floor(geo.width / 25)
+    local state_key = tostring(leaf.id) .. ":" .. tostring(bucket)
+    if smush_state[c]
+            and smush_state[c].mode == mode
+            and smush_state[c].key == state_key then return end
+    smush_state[c] = { mode = mode, key = state_key }
+    send_smush_shortcuts(c, mode)
+end
+
+local function smush_after_layout(s, leaf_id)
+    if type(s) == "number" then s = screen[s] end
+    local t = s and s.selected_tag
+    if not t then return end
+    gears.timer.delayed_call(function()
+        local state = tag_state[t]
+        if not state then return end
+        if leaf_id then
+            smush_leaf_if_narrow(t, state, state.leaf_map[leaf_id])
+        else
+            for _, leaf in ipairs(tree.collect_leaves(state.root)) do
+                smush_leaf_if_narrow(t, state, leaf)
+            end
+        end
+    end)
 end
 
 
@@ -232,6 +302,7 @@ local function try_drop_picked_up(t, leaf_id)
     state.focused_leaf_id = leaf_id
     drag.pickup = pickup_idle()
     colors.resolve_color_conflict(target, c)
+    smush_after_layout(t.screen, leaf_id)
 
     if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
     return true
@@ -304,6 +375,7 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     colors.resolve_color_conflict(child_new, c)
     state.focused_leaf_id = child_new.id
     drag.pickup = pickup_idle()
+    smush_after_layout(t.screen, child_new.id)
 
     -- Queue split animation: existing leaf animates from old_geo, new leaf slides in from edge.
     if old_geo then
@@ -625,6 +697,7 @@ local function move_tab_to_direction(t, dir)
     table.insert(dst_leaf.tabs, c)
     dst_leaf.active_tab = #dst_leaf.tabs
     colors.resolve_color_conflict(dst_leaf, c)
+    state.focused_leaf_id = dst_leaf.id
     return true
 end
 
@@ -1011,10 +1084,34 @@ splitwm.focus_prev_split = function()
 end
 splitwm.next_tab         = function() with_tag(function(t) return cycle_tab(t, 1) end) end
 splitwm.prev_tab         = function() with_tag(function(t) return cycle_tab(t, -1) end) end
-splitwm.move_tab_next    = function() with_tag(function(t) return move_tab_to_direction(t, "next") end) end
-splitwm.move_tab_prev    = function() with_tag(function(t) return move_tab_to_direction(t, "prev") end) end
-splitwm.resize_grow      = function() with_tag(function(t) return resize_focused(t,  RESIZE_STEP) end) end
-splitwm.resize_shrink    = function() with_tag(function(t) return resize_focused(t, -RESIZE_STEP) end) end
+splitwm.move_tab_next    = function()
+    with_tag(function(t)
+        local ok = move_tab_to_direction(t, "next")
+        if ok ~= false then smush_after_layout(t.screen, get_state(t).focused_leaf_id) end
+        return ok
+    end)
+end
+splitwm.move_tab_prev    = function()
+    with_tag(function(t)
+        local ok = move_tab_to_direction(t, "prev")
+        if ok ~= false then smush_after_layout(t.screen, get_state(t).focused_leaf_id) end
+        return ok
+    end)
+end
+splitwm.resize_grow      = function()
+    with_tag(function(t)
+        local ok = resize_focused(t,  RESIZE_STEP)
+        if ok ~= false then smush_after_layout(t.screen) end
+        return ok
+    end)
+end
+splitwm.resize_shrink    = function()
+    with_tag(function(t)
+        local ok = resize_focused(t, -RESIZE_STEP)
+        if ok ~= false then smush_after_layout(t.screen) end
+        return ok
+    end)
+end
 splitwm.close_split = function()
     local s = awful.screen.focused()
     local t = s and s.selected_tag
@@ -1144,6 +1241,7 @@ function splitwm.setup()
         end,
         get_state        = get_state,
         get_active_state = get_active_state,
+        on_resize_finished = function(s) smush_after_layout(s) end,
     })
 
     tb.setup({

@@ -74,6 +74,8 @@ beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_border_radius    = 2
 beautiful.splitwm_empty_radius     = 14
 beautiful.splitwm_btn_font         = "monospace bold 14px"
+beautiful.splitwm_smush_width_threshold = 1200
+beautiful.splitwm_tiny_smush_width_threshold = 600
 
 ---------------------------------------------------------------------------
 -- Load splitwm

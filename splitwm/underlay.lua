@@ -23,6 +23,7 @@ local color_bg, color_fg, color_transparent, color_handle
 local SCROLL_STEP
 local _do_scroll, _insert_column_at_gap, _insert_at_right_edge, _insert_at_left_edge
 local _get_state, _get_active_state
+local _on_resize_finished
 
 function M.setup(deps)
     BTN_SIZE          = deps.BTN_SIZE
@@ -39,6 +40,7 @@ function M.setup(deps)
     _insert_at_left_edge   = deps.insert_at_left_edge
     _get_state        = deps.get_state
     _get_active_state = deps.get_active_state
+    _on_resize_finished = deps.on_resize_finished
 end
 
 ---------------------------------------------------------------------------
@@ -219,7 +221,9 @@ local function get_drag_handle(s, i)
                 mousegrabber.run(function(mouse_m)
                     if not mouse_m.buttons[1] then
                         handle_state = "idle"; wb.bg = color_transparent
-                        awful.layout.arrange(s); return false
+                        awful.layout.arrange(s)
+                        if _on_resize_finished then _on_resize_finished(s) end
+                        return false
                     end
                     local _, st2 = _get_active_state(s)
                     if not st2 then return false end
