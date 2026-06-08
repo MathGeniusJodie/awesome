@@ -242,6 +242,14 @@ local function get_leaf(state, leaf_id)
     return state and tree.find_leaf_by_id(state.root, leaf_id) or nil
 end
 
+function splitwm.focus_leaf(t, leaf_id)
+    local state = t and get_state(t)
+    local leaf = get_leaf(state, leaf_id)
+    if not leaf then return false end
+    state.focused_leaf_id = leaf.id
+    return true
+end
+
 -- Returns (leaf, state, tag) for a client, or (nil, nil, nil) if any step fails.
 local function get_leaf_from_client(c)
     local t, state = get_tag_state(c)

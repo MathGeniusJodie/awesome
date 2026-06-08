@@ -1047,7 +1047,7 @@ local function tb_build_split_controls(leaf, entry, ctx)
             drag.pickup = pickup_idle()
         else
             drag.pickup = pickup_split(leaf.id)
-            ctx.state.focused_leaf_id = leaf.id
+            _splitwm.focus_leaf(ctx.t, leaf.id)
         end
         awful.layout.arrange(ctx.s)
     end)))
@@ -1336,7 +1336,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         table.insert(tab_widgets, wibox.widget {
             tb_make_btn(entry, ctx.widget_bc, icons.plus, _BTN_SIZE, function()
                 pcall(function() mousegrabber.stop() end)
-                ctx.state.focused_leaf_id = leaf.id
+                _splitwm.focus_leaf(ctx.t, leaf.id)
                 if _splitwm.on_menu_request then _splitwm.on_menu_request() end
             end),
             left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0, bottom = BTN_V_RAISE, widget = wibox.container.margin,
@@ -1434,7 +1434,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
                 if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
                 if event_close_menu_if_open() then return end
-                ctx.state.focused_leaf_id = leaf.id; awful.layout.arrange(ctx.s)
+                _splitwm.focus_leaf(ctx.t, leaf.id); awful.layout.arrange(ctx.s)
             end)))
         end
 
