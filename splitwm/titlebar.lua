@@ -75,7 +75,10 @@ local ICON_CLOSE_GAP = 0
 local TAB_CONTENT_V_PAD = 1
 
 -- Gap between the last tab and the "+" new-tab button.
-local PLUS_BTN_GAP = 50
+local PLUS_BTN_GAP = 54
+
+-- Gap between the "+" button and the dimmed tabs from other splits.
+local REMOTE_TAB_GROUP_GAP = -5
 
 -- Extra positive spacing added between tabs (on top of the shape overlap).
 local TAB_GAP = -24
@@ -117,6 +120,12 @@ local function tab_slot_x(tab_idx, active_tab, icon_size)
     return x
 end
 
+local function tab_slots_end_x(n_tabs, active_tab, icon_size)
+    local x = n_tabs * tab_step(icon_size)
+    if active_tab and active_tab < n_tabs then x = x + ACTIVE_TAB_AFTER_GAP end
+    return x
+end
+
 local function tab_content_bounds(tab_idx, active_tab, icon_size)
     local x1 = tab_slot_x(tab_idx, active_tab, icon_size) + TAB_PAD_H
     local x2 = x1 + icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4
@@ -136,12 +145,21 @@ local function tab_index_at(x, active_tab, n_tabs, icon_size)
     return nil
 end
 
+local function tab_index_at_topmost(x, active_tab, n_tabs, icon_size)
+    if n_tabs <= 0 then return nil end
+    for i = n_tabs, 1, -1 do
+        if tab_content_hit(x, i, active_tab, icon_size) then return i end
+    end
+    return nil
+end
+
 ---------------------------------------------------------------------------
 -- Titlebar cache and color-menu state
 ---------------------------------------------------------------------------
 
 local titlebar_cache = {}
 local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+local remote_tab_click_active = false
 
 -- Cache class→icon_path so lookup_icon (disk I/O) only runs once per class.
 local class_icon_cache = {}
@@ -625,7 +643,44 @@ local function tb_compute_fingerprint(leaf, state, geo)
         local col = colors.get_client_color(tc)
         if col then parts[#parts+1] = col.name end
     end
+    for _, other in ipairs(tree.collect_leaves(state.root)) do
+        if other.id ~= leaf.id then
+            parts[#parts+1] = "R" .. tostring(other.id)
+            parts[#parts+1] = tostring(other.active_tab)
+            for _, tc in ipairs(other.tabs) do
+                parts[#parts+1] = tostring(tc.window)
+                local col = colors.get_client_color(tc)
+                if col then parts[#parts+1] = col.name end
+            end
+        end
+    end
     return table.concat(parts, "\0")
+end
+
+local function move_remote_tab_to_leaf(ctx, source_leaf, target_leaf, tc)
+    if not tc.valid or source_leaf == target_leaf then return end
+    local src_idx
+    for i, c in ipairs(source_leaf.tabs) do
+        if c == tc then src_idx = i; break end
+    end
+    if not src_idx then return end
+
+    table.remove(source_leaf.tabs, src_idx)
+    if src_idx < source_leaf.active_tab then
+        source_leaf.active_tab = source_leaf.active_tab - 1
+    elseif src_idx == source_leaf.active_tab then
+        source_leaf.active_tab = math.min(math.max(1, src_idx - 1), #source_leaf.tabs)
+    end
+    if #source_leaf.tabs == 0 then source_leaf.active_tab = 0 end
+    colors.recheck_preferred(source_leaf, tc)
+
+    local insert_pos = target_leaf.active_tab > 0 and target_leaf.active_tab + 1 or #target_leaf.tabs + 1
+    table.insert(target_leaf.tabs, insert_pos, tc)
+    target_leaf.active_tab = insert_pos
+    ctx.state.focused_leaf_id = target_leaf.id
+    colors.resolve_color_conflict(target_leaf, tc)
+    tc:emit_signal("request::activate", "remote_tab_click", { raise = true })
+    awful.layout.arrange(ctx.s)
 end
 
 local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
@@ -643,6 +698,83 @@ local function get_tab_state(tab_idx, leaf, tc)
     elseif tab_idx == leaf.active_tab then return "active"
     else return "inactive"
     end
+end
+
+local function make_tab_icon(tc, icon_size)
+    if tc.icon then
+        local tab_icon = awful.widget.clienticon(tc)
+        tab_icon.forced_width  = icon_size
+        tab_icon.forced_height = icon_size
+        return tab_icon
+    end
+
+    local theme_icon = lookup_class_icon(tc)
+    if theme_icon then
+        return wibox.widget {
+            image          = theme_icon,
+            forced_width   = icon_size,
+            forced_height  = icon_size,
+            resize         = true,
+            widget         = wibox.widget.imagebox,
+        }
+    end
+
+    return wibox.widget {
+        text          = string.sub(tc.class or tc.instance or "?", 1, 2),
+        align         = "center",
+        valign        = "center",
+        forced_width  = icon_size,
+        forced_height = icon_size,
+        widget        = wibox.widget.textbox,
+    }
+end
+
+local function tb_build_remote_tab_widget(tc, entry, ctx)
+    local client_color = colors.get_client_color(tc)
+    local tab_bg = (client_color and client_color.dark) or color_btn_bg
+    local tab_bg_pat = gears.color(tab_bg)
+
+    local tab_draw = wibox.widget.base.make_widget()
+    function tab_draw:draw(_, cr, w2, h2)
+        local h = h2 - 1
+        cr:translate(0, 1)
+        tab_path(cr, w2, h)
+        cr:close_path()
+        cr:set_source(tab_bg_pat)
+        cr:fill()
+    end
+    function tab_draw:fit(_, _, _) return 0, 0 end
+
+    local icon_widget = wibox.widget {
+        make_tab_icon(tc, ctx.icon_size),
+        halign = "center",
+        valign = "center",
+        widget = wibox.container.place,
+    }
+    local close_placeholder = wibox.widget {
+        forced_width = _BTN_SIZE - 4,
+        widget       = wibox.container.background,
+    }
+    local content = wibox.widget {
+        {
+            icon_widget, close_placeholder, spacing = ICON_CLOSE_GAP,
+            layout = wibox.layout.fixed.horizontal,
+        },
+        left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
+        top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
+        widget = wibox.container.margin,
+    }
+    local tab_widget = wibox.widget {
+        tab_draw,
+        content,
+        layout = wibox.layout.stack,
+    }
+    tab_widget:connect_signal("mouse::enter", function()
+        entry.tooltip.text = (tc.valid and tc.name) or "?"
+    end)
+    entry.tooltip:add_to_object(tab_widget)
+    table.insert(entry.tooltip_objs, tab_widget)
+    return tab_widget
 end
 
 ---------------------------------------------------------------------------
@@ -1328,7 +1460,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             table.insert(tab_widgets, tb_build_tab_widget(leaf, tc, i, entry, ctx))
         end
 
-        -- "+" button lives at the end; tb_split_tab_layers always puts it in the above layer.
+        -- "+" and remote tabs live after local tabs; tb_split_tab_layers keeps them above.
         table.insert(tab_widgets, wibox.widget {
             tb_make_btn(entry, ctx.widget_bc, icons.plus, _BTN_SIZE, function()
                 pcall(function() mousegrabber.stop() end)
@@ -1337,6 +1469,52 @@ local function update_titlebars(s, t, state, geos, leaves)
             end),
             left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0, bottom = BTN_V_RAISE, widget = wibox.container.margin,
         })
+
+        local remote_widgets = {}
+        local remote_items = {}
+        for _, other_leaf in ipairs(leaves) do
+            if other_leaf.id ~= leaf.id then
+                for _, tc in ipairs(other_leaf.tabs) do
+                    remote_items[#remote_items + 1] = { source_leaf = other_leaf, client = tc }
+                    remote_widgets[#remote_widgets + 1] = tb_build_remote_tab_widget(tc, entry, ctx)
+                end
+            end
+        end
+        if #remote_widgets > 0 then
+            local top_spacing = TAB_SPACING + TAB_GAP
+            local plus_left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0
+            local remote_left = REMOTE_TAB_GROUP_GAP + math.max(0, -(TAB_SPACING + TAB_GAP))
+            local remote_row = wibox.widget {
+                spacing = top_spacing,
+                layout  = wibox.layout.fixed.horizontal,
+                table.unpack(remote_widgets),
+            }
+            remote_row.opacity = 0.5
+            remote_row:connect_signal("mouse::enter", function() remote_row.opacity = 1.0 end)
+            remote_row:connect_signal("mouse::leave", function() remote_row.opacity = 0.5 end)
+            local function handle_remote_click()
+                if remote_tab_click_active then return end
+                local m = mouse.coords()
+                local row_x = geo.x - (state.scroll_x or 0)
+                    + tab_slots_end_x(#leaf.tabs, leaf.active_tab, ctx.icon_size)
+                    + plus_left + _BTN_SIZE + top_spacing + remote_left
+                local idx = tab_index_at_topmost(m.x - row_x, nil, #remote_items, ctx.icon_size)
+                local item = idx and remote_items[idx]
+                if not item then return end
+                remote_tab_click_active = true
+                gears.timer.delayed_call(function() remote_tab_click_active = false end)
+                move_remote_tab_to_leaf(ctx, item.source_leaf, leaf, item.client)
+            end
+            remote_row:buttons(gears.table.join(awful.button({}, 1, handle_remote_click)))
+            for _, w in ipairs(remote_widgets) do
+                w:buttons(gears.table.join(awful.button({}, 1, handle_remote_click)))
+            end
+            table.insert(tab_widgets, wibox.widget {
+                remote_row,
+                left = remote_left,
+                widget = wibox.container.margin,
+            })
+        end
 
         local controls    = tb_build_split_controls(leaf, entry, ctx)
 
