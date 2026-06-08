@@ -49,22 +49,89 @@ local DEFAULT_SMUSH_WIDTH_THRESHOLD = 900
 local DEFAULT_TINY_SMUSH_WIDTH_THRESHOLD = 650
 local smush_helper = gears.filesystem.get_configuration_dir() .. "splitwm/smushkeys"
 local smush_state = setmetatable({}, { __mode = "k" })
+local smush_queue = {}
+local smush_queue_running = false
+local smush_restore_client = nil
+local smush_restore_leaf_id = nil
+local smush_focus_active = false
 
-local function send_smush_shortcuts(c, mode)
-    if not c or not c.valid or not gears.filesystem.file_executable(smush_helper) then return end
-    c:emit_signal("request::activate", "splitwm_smush", { raise = true })
-    gears.timer.delayed_call(function()
-        if not c.valid then return end
-        local cmd
-        if mode == "reset" then
-            cmd = { smush_helper, "reset" }
-        elseif mode == "tiny" then
-            cmd = { smush_helper, "tiny" }
-        else
-            cmd = smush_helper
+local function smush_command(mode)
+    if mode == "reset" then
+        return { smush_helper, "reset" }
+    elseif mode == "tiny" then
+        return { smush_helper, "tiny" }
+    end
+    return smush_helper
+end
+
+local process_smush_queue
+
+local function restore_focus_after_smush()
+    local restore = smush_restore_client
+    local restore_leaf_id = smush_restore_leaf_id
+    smush_restore_client = nil
+    smush_restore_leaf_id = nil
+    smush_focus_active = false
+    smush_queue_running = false
+    if not (restore and restore.valid) then return end
+    if splitwm.focus_client_after_arrange then
+        splitwm.focus_client_after_arrange(restore, restore_leaf_id)
+    else
+        client.focus = restore
+        restore:raise()
+    end
+end
+
+process_smush_queue = function()
+    local item = table.remove(smush_queue, 1)
+    if not item then
+        restore_focus_after_smush()
+        return
+    end
+
+    local c = item.client
+    if not (c and c.valid) then
+        gears.timer.delayed_call(process_smush_queue)
+        return
+    end
+
+    local restore = smush_restore_client
+    local restore_leaf_id = smush_restore_leaf_id
+    if restore and restore.valid and restore ~= c and splitwm.guard_focus then
+        splitwm.guard_focus(restore, 0.8, restore_leaf_id)
+    end
+
+    smush_focus_active = true
+    client.focus = c
+    c:raise()
+    gears.timer.start_new(0.035, function()
+        local function next_item()
+            gears.timer.start_new(0.02, function()
+                process_smush_queue()
+                return false
+            end)
         end
-        awful.spawn(cmd, false)
+        if c.valid then
+            local pid = awful.spawn.easy_async(smush_command(item.mode), function() next_item() end)
+            if not pid then next_item() end
+        else
+            next_item()
+        end
+        return false
     end)
+end
+
+local function send_smush_shortcuts(c, mode, restore_client, restore_leaf_id)
+    if not c or not c.valid or not gears.filesystem.file_executable(smush_helper) then return end
+    if restore_client and restore_client.valid then
+        smush_restore_client = restore_client
+        smush_restore_leaf_id = restore_leaf_id
+    end
+    table.insert(smush_queue, { client = c, mode = mode })
+    if not smush_queue_running then
+        smush_queue_running = true
+        gears.timer.delayed_call(process_smush_queue)
+    end
 end
 
 -- Effective titlebar height: grows to match gap so the bar never disappears into it.
@@ -96,6 +163,53 @@ local pickup_client = tb.pickup_client
 local pickup_split  = tb.pickup_split
 
 local drag_hover_timer = nil  -- polling timer for switching tabs when dragging over the tab bar
+local focus_guard      = nil  -- transient guard for explicit focus requests
+local focus_request_seq = 0
+
+function splitwm.guard_focus(c, timeout, leaf_id)
+    if not c or not c.valid then return end
+    local guard = { client = c, leaf_id = leaf_id }
+    focus_guard = guard
+    gears.timer.start_new(timeout or 0.35, function()
+        if focus_guard == guard then focus_guard = nil end
+        return false
+    end)
+end
+
+local function force_focus_now(c, leaf_id)
+    if not c or not c.valid then return end
+    splitwm.guard_focus(c, nil, leaf_id)
+    if smush_queue_running then
+        smush_restore_client = c
+        smush_restore_leaf_id = leaf_id
+        return
+    end
+    client.focus = c
+    c:raise()
+end
+
+function splitwm.focus_client_after_arrange(c, leaf_id)
+    if not c or not c.valid then return end
+    focus_request_seq = focus_request_seq + 1
+    local seq = focus_request_seq
+    splitwm.guard_focus(c, nil, leaf_id)
+    gears.timer.delayed_call(function()
+        if seq ~= focus_request_seq then return end
+        force_focus_now(c, leaf_id)
+        gears.timer.start_new(0.05, function()
+            if seq == focus_request_seq and c.valid and client.focus ~= c then
+                force_focus_now(c, leaf_id)
+            end
+            return false
+        end)
+        gears.timer.start_new(0.16, function()
+            if seq == focus_request_seq and c.valid and client.focus ~= c then
+                force_focus_now(c, leaf_id)
+            end
+            return false
+        end)
+    end)
+end
 
 ---------------------------------------------------------------------------
 -- Per-tag state
@@ -136,7 +250,13 @@ local function get_leaf_from_client(c)
     return tree.find_leaf_for_client(state.root, c), state, t
 end
 
-local function smush_leaf_if_narrow(t, state, leaf)
+local function focus_leaf_after_arrange(state, leaf_id)
+    local leaf = state and state.leaf_map[leaf_id]
+    local c = leaf and leaf.tabs[leaf.active_tab]
+    if c and c.valid then splitwm.focus_client_after_arrange(c, leaf_id) end
+end
+
+local function smush_leaf_if_narrow(t, state, leaf, restore_client, restore_leaf_id)
     if not leaf or leaf.active_tab <= 0 then return end
     local cached = geo_cache[t]
     local geo = cached and cached.geos[leaf.id]
@@ -151,7 +271,7 @@ local function smush_leaf_if_narrow(t, state, leaf)
     if geo.width >= threshold then
         if smush_state[c] and smush_state[c].mode ~= "wide" then
             smush_state[c] = { mode = "wide" }
-            send_smush_shortcuts(c, "reset")
+            send_smush_shortcuts(c, "reset", restore_client, restore_leaf_id)
         end
         return
     end
@@ -163,7 +283,7 @@ local function smush_leaf_if_narrow(t, state, leaf)
             and smush_state[c].mode == mode
             and smush_state[c].key == state_key then return end
     smush_state[c] = { mode = mode, key = state_key }
-    send_smush_shortcuts(c, mode)
+    send_smush_shortcuts(c, mode, restore_client, restore_leaf_id)
 end
 
 local function smush_after_layout(s, leaf_id)
@@ -173,11 +293,15 @@ local function smush_after_layout(s, leaf_id)
     gears.timer.delayed_call(function()
         local state = tag_state[t]
         if not state then return end
+        local focused_leaf = state.leaf_map[state.focused_leaf_id]
+        local restore_client = focused_leaf and focused_leaf.tabs[focused_leaf.active_tab]
+        local restore_leaf_id = focused_leaf and focused_leaf.id
         if leaf_id then
-            smush_leaf_if_narrow(t, state, state.leaf_map[leaf_id])
+            smush_leaf_if_narrow(t, state, state.leaf_map[leaf_id],
+                restore_client, restore_leaf_id)
         else
             for _, leaf in ipairs(tree.collect_leaves(state.root)) do
-                smush_leaf_if_narrow(t, state, leaf)
+                smush_leaf_if_narrow(t, state, leaf, restore_client, restore_leaf_id)
             end
         end
     end)
@@ -204,22 +328,47 @@ local function pin_client(t, c)
     leaf.active_tab = insert_pos
 end
 
-local function unpin_client(root, c)
-    local leaf = tree.find_leaf_for_client(root, c)
-    if not leaf then return end
-    for i, tc in ipairs(leaf.tabs) do
-        if tc == c then
+local function remove_client_from_leaf(leaf, c)
+    local removed = false
+    local i = 1
+    while i <= #leaf.tabs do
+        if leaf.tabs[i] == c then
             table.remove(leaf.tabs, i)
+            removed = true
             if i < leaf.active_tab then
                 leaf.active_tab = leaf.active_tab - 1
             elseif i == leaf.active_tab then
                 leaf.active_tab = math.min(math.max(1, i - 1), #leaf.tabs)
             end
-            -- i > active_tab: no index change needed
-            colors.recheck_preferred(leaf, c)
-            return
+        else
+            i = i + 1
         end
     end
+    if #leaf.tabs == 0 then
+        leaf.active_tab = 0
+    else
+        leaf.active_tab = math.min(math.max(1, leaf.active_tab), #leaf.tabs)
+    end
+    return removed
+end
+
+local function unpin_client(root, c)
+    for _, leaf in ipairs(tree.collect_leaves(root)) do
+        if remove_client_from_leaf(leaf, c) then
+            colors.recheck_preferred(leaf, c)
+        end
+    end
+end
+
+local function remove_client_from_other_leaves(state, c, keep_leaf)
+    local removed = false
+    for _, leaf in ipairs(tree.collect_leaves(state.root)) do
+        if leaf ~= keep_leaf and remove_client_from_leaf(leaf, c) then
+            removed = true
+            colors.recheck_preferred(leaf, c)
+        end
+    end
+    return removed
 end
 
 local function move_client_to_leaf(root, c, target_leaf)
@@ -278,6 +427,7 @@ local function handle_split_pickup(state, leaf_id, s)
             end
         end
     end
+    focus_leaf_after_arrange(state, leaf_id)
     drag.pickup = pickup_idle()
     awful.layout.arrange(s)
 end
@@ -302,6 +452,7 @@ local function try_drop_picked_up(t, leaf_id)
     state.focused_leaf_id = leaf_id
     drag.pickup = pickup_idle()
     colors.resolve_color_conflict(target, c)
+    splitwm.focus_client_after_arrange(c, leaf_id)
     smush_after_layout(t.screen, leaf_id)
 
     if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
@@ -375,6 +526,7 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     colors.resolve_color_conflict(child_new, c)
     state.focused_leaf_id = child_new.id
     drag.pickup = pickup_idle()
+    splitwm.focus_client_after_arrange(c, child_new.id)
     smush_after_layout(t.screen, child_new.id)
 
     -- Queue split animation: existing leaf animates from old_geo, new leaf slides in from edge.
@@ -546,6 +698,7 @@ local function close_leaf_with_anim(t, s, state, leaf_id)
     end
 
     awful.layout.arrange(s)
+    focus_leaf_after_arrange(state, state.focused_leaf_id)
 
     -- Recompute scroll_x: keep current value but clamp to the valid range and
     -- ensure the focused split is within the viewport.  Do this after arrange so
@@ -588,6 +741,7 @@ local function make_split_action_callbacks(state, leaf_id, t, s)
         local old_geo = geo_cache[t] and geo_cache[t].geos[leaf_id]
         local a_id, b_id = split_leaf(t, dir)
         awful.layout.arrange(s)
+        focus_leaf_after_arrange(state, a_id)
         if old_geo and a_id then
             anim.split_anim_pending[s] = { old_geo = old_geo, a_id = a_id, b_id = b_id, dir = dir }
         end
@@ -667,7 +821,7 @@ local function cycle_tab(t, offset)
     if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
     local c = leaf.tabs[leaf.active_tab]
-    if c and c.valid then client.focus = c; c:raise() end
+    if c and c.valid then splitwm.focus_client_after_arrange(c, leaf.id) end
     return true
 end
 
@@ -691,13 +845,13 @@ local function move_tab_to_direction(t, dir)
     if not dst_leaf then return false end
 
     local c = src_leaf.tabs[src_leaf.active_tab]
-    table.remove(src_leaf.tabs, src_leaf.active_tab)
-    src_leaf.active_tab = math.min(math.max(1, src_leaf.active_tab), math.max(1, #src_leaf.tabs))
-    if #src_leaf.tabs == 0 then src_leaf.active_tab = 0 end
+    if not c then return false end
+    unpin_client(state.root, c)
     table.insert(dst_leaf.tabs, c)
     dst_leaf.active_tab = #dst_leaf.tabs
     colors.resolve_color_conflict(dst_leaf, c)
     state.focused_leaf_id = dst_leaf.id
+    splitwm.focus_client_after_arrange(c, dst_leaf.id)
     return true
 end
 
@@ -706,6 +860,7 @@ local function focus_direction(t, dir)
     local leaf = adjacent_leaf(state, state.focused_leaf_id, dir)
     if not leaf then return false end
     state.focused_leaf_id = leaf.id
+    focus_leaf_after_arrange(state, leaf.id)
     return true
 end
 
@@ -1059,6 +1214,7 @@ local function do_split_with_anim(dir)
     local a_id, b_id = split_leaf(t, dir)
     if not a_id then return end
     awful.layout.arrange(s)
+    focus_leaf_after_arrange(state, a_id)
     if old_geo then
         anim.split_anim_pending[s] = { old_geo = old_geo, a_id = a_id, b_id = b_id, dir = dir }
     end
@@ -1170,6 +1326,7 @@ local function start_drag_hover_poll()
                             leaf.active_tab = tab_idx
                             state.focused_leaf_id = lid
                             awful.layout.arrange(s)
+                            splitwm.focus_client_after_arrange(leaf.tabs[tab_idx], lid)
                         end
                         goto done
                     end
@@ -1291,12 +1448,59 @@ function splitwm.setup()
     end)
 
     client.connect_signal("focus", function(c)
-        local leaf, state = get_leaf_from_client(c)
+        if smush_focus_active then return end
+        if focus_guard and focus_guard.client ~= c then
+            local target = focus_guard.client
+            local target_leaf_id = focus_guard.leaf_id
+            if target and target.valid then
+                gears.timer.delayed_call(function()
+                    if focus_guard and focus_guard.client == target and target.valid
+                            and client.focus ~= target then
+                        force_focus_now(target, target_leaf_id)
+                    end
+                end)
+            end
+            return
+        end
+        local leaf, state
+        local guarded_focus_leaf = false
+        if focus_guard and focus_guard.client == c and focus_guard.leaf_id then
+            local _, guarded_state = get_tag_state(c)
+            local guarded_leaf = guarded_state and guarded_state.leaf_map[focus_guard.leaf_id]
+            if guarded_leaf then
+                leaf = guarded_leaf
+                state = guarded_state
+                guarded_focus_leaf = true
+            end
+        end
+        if not leaf then leaf, state = get_leaf_from_client(c) end
         if not leaf then return end
+        local tab_idx
+        for i, tc in ipairs(leaf.tabs) do
+            if tc == c then tab_idx = i; break end
+        end
+        if guarded_focus_leaf and not tab_idx then
+            leaf, state = get_leaf_from_client(c)
+            guarded_focus_leaf = false
+            if not leaf then return end
+            for i, tc in ipairs(leaf.tabs) do
+                if tc == c then tab_idx = i; break end
+            end
+        end
+        local needs_arrange = false
+        if guarded_focus_leaf and tab_idx
+                and remove_client_from_other_leaves(state, c, leaf) then
+            needs_arrange = true
+        end
+        if tab_idx and leaf.active_tab ~= tab_idx then
+            leaf.active_tab = tab_idx
+            needs_arrange = true
+        end
         if leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
-            awful.layout.arrange(c.screen)
+            needs_arrange = true
         end
+        if needs_arrange then awful.layout.arrange(c.screen) end
         local t = c.first_tag
         if t then gears.timer.delayed_call(function() ensure_in_view(c.screen, t) end) end
     end)

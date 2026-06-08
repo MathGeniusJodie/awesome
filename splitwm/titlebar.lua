@@ -658,30 +658,52 @@ local function tb_compute_fingerprint(leaf, state, geo)
     return table.concat(parts, "\0")
 end
 
+local function remove_client_from_leaf_tabs(leaf, tc)
+    local removed = false
+    local i = 1
+    while i <= #leaf.tabs do
+        if leaf.tabs[i] == tc then
+            table.remove(leaf.tabs, i)
+            removed = true
+            if i < leaf.active_tab then
+                leaf.active_tab = leaf.active_tab - 1
+            elseif i == leaf.active_tab then
+                leaf.active_tab = math.min(math.max(1, i - 1), #leaf.tabs)
+            end
+        else
+            i = i + 1
+        end
+    end
+    if #leaf.tabs == 0 then
+        leaf.active_tab = 0
+    else
+        leaf.active_tab = math.min(math.max(1, leaf.active_tab), #leaf.tabs)
+    end
+    return removed
+end
+
 local function move_remote_tab_to_leaf(ctx, source_leaf, target_leaf, tc)
     if not tc.valid or source_leaf == target_leaf then return end
-    local src_idx
-    for i, c in ipairs(source_leaf.tabs) do
-        if c == tc then src_idx = i; break end
+    local removed = false
+    for _, leaf in ipairs(tree.collect_leaves(ctx.state.root)) do
+        if remove_client_from_leaf_tabs(leaf, tc) then
+            removed = true
+            colors.recheck_preferred(leaf, tc)
+        end
     end
-    if not src_idx then return end
-
-    table.remove(source_leaf.tabs, src_idx)
-    if src_idx < source_leaf.active_tab then
-        source_leaf.active_tab = source_leaf.active_tab - 1
-    elseif src_idx == source_leaf.active_tab then
-        source_leaf.active_tab = math.min(math.max(1, src_idx - 1), #source_leaf.tabs)
-    end
-    if #source_leaf.tabs == 0 then source_leaf.active_tab = 0 end
-    colors.recheck_preferred(source_leaf, tc)
+    if not removed then return end
 
     local insert_pos = target_leaf.active_tab > 0 and target_leaf.active_tab + 1 or #target_leaf.tabs + 1
     table.insert(target_leaf.tabs, insert_pos, tc)
     target_leaf.active_tab = insert_pos
     ctx.state.focused_leaf_id = target_leaf.id
     colors.resolve_color_conflict(target_leaf, tc)
-    tc:emit_signal("request::activate", "remote_tab_click", { raise = true })
     awful.layout.arrange(ctx.s)
+    if _splitwm.focus_client_after_arrange then
+        _splitwm.focus_client_after_arrange(tc, target_leaf.id)
+    else
+        tc:emit_signal("request::activate", "remote_tab_click", { raise = true })
+    end
 end
 
 local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
@@ -843,7 +865,12 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     -- Activate focus on tc (no-op if client is no longer valid).
     local function focus_tc()
-        if tc.valid then tc:emit_signal("request::activate", "mouse_click", {raise = true}) end
+        if not tc.valid then return end
+        if _splitwm.focus_client_after_arrange then
+            _splitwm.focus_client_after_arrange(tc, leaf.id)
+        else
+            tc:emit_signal("request::activate", "mouse_click", { raise = true })
+        end
     end
 
     -- Phase 1: while button held, promote pending → pickup once cursor leaves the tab bounds.
@@ -868,8 +895,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         if g and in_close_btn(mx, my, g) then tc:kill(); return false end
         leaf.active_tab = tab_idx
         ctx.state.focused_leaf_id = leaf.id
-        focus_tc()
         awful.layout.arrange(ctx.s)
+        focus_tc()
         return false
     end
 
@@ -910,8 +937,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                         leaf.active_tab = target
                         ctx.state.focused_leaf_id = leaf.id
                         drag.pickup = pickup_idle()
-                        focus_tc()
                         awful.layout.arrange(ctx.s)
+                        focus_tc()
                     end
                     return false
                 end
@@ -1023,8 +1050,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         and g and in_tab_content(mc.x, mc.y, g) then
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
-            focus_tc()
             awful.layout.arrange(ctx.s)
+            focus_tc()
         end
     end)
     tab_widget:connect_signal("mouse::leave", function()
@@ -1078,8 +1105,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
             drag.pickup = pickup_idle()
-            focus_tc()
             awful.layout.arrange(ctx.s)
+            focus_tc()
         end),
         awful.button({}, 3, function()
             if not tc.valid then return end
