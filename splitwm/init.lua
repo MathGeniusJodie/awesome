@@ -463,14 +463,6 @@ local function remove_client_from_other_leaves(state, c, keep_leaf)
     return removed
 end
 
-local function move_client_to_leaf(root, c, target_leaf)
-    unpin_client(root, c)
-    for _, tc in ipairs(target_leaf.tabs) do if tc == c then return end end
-    local insert_pos = target_leaf.active_tab + 1
-    table.insert(target_leaf.tabs, insert_pos, c)
-    target_leaf.active_tab = insert_pos
-end
-
 local function activate_client_in_leaf(t, leaf_id, c, opts)
     if not (t and c and c.valid) then return false end
     local state = get_state(t)
@@ -556,16 +548,13 @@ end
 local function try_drop_picked_up(t, leaf_id)
     if drag.pickup.tag ~= "client" then return false end
     if not drag.pickup.client.valid then drag.pickup = pickup_idle(); return false end
-    local state = get_state(t)
-    local target = get_leaf(state, leaf_id)
-    if not target then drag.pickup = pickup_idle(); return false end
 
     local c = drag.pickup.client
-
-    move_client_to_leaf(state.root, c, target)
-    state.focused_leaf_id = leaf_id
+    if not move_client_to_leaf_id(t, leaf_id, c, { arrange = false, focus = false }) then
+        drag.pickup = pickup_idle()
+        return false
+    end
     drag.pickup = pickup_idle()
-    colors.resolve_color_conflict(target, c)
     splitwm.focus_client_after_arrange(c, leaf_id)
     smush_after_layout(t.screen, leaf_id)
     return true
