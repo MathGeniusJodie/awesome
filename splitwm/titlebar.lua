@@ -534,7 +534,27 @@ end
 
 -- Fingerprint check to prevent unneeded heavy redraws.
 -- Tab names are excluded: tooltip text is set dynamically on mouse::enter.
-local function tb_compute_fingerprint(leaf, state, geo)
+local function append_tab_fingerprint(parts, tc, include_pickup)
+    parts[#parts+1] = tostring(tc.window)
+    parts[#parts+1] = tc.class or ""
+    parts[#parts+1] = tc.instance or ""
+    if include_pickup and drag.pickup.tag == "client" and drag.pickup.client == tc then
+        parts[#parts+1] = "P"
+    end
+    local col = colors.get_client_color(tc)
+    if col then parts[#parts+1] = col.name end
+end
+
+local function tb_compute_all_tabs_fingerprint(leaves)
+    local parts = {}
+    for _, leaf in ipairs(leaves) do
+        parts[#parts+1] = tostring(leaf.id)
+        for _, tc in ipairs(leaf.tabs) do append_tab_fingerprint(parts, tc, false) end
+    end
+    return table.concat(parts, "\0")
+end
+
+local function tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
     local parts = {
         leaf.active_tab,
         state.focused_leaf_id == leaf.id and 1 or 0,
@@ -544,24 +564,9 @@ local function tb_compute_fingerprint(leaf, state, geo)
         (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id) and "S" or "",
         geo and geo.width or 0,
         geo and geo.height or 0,
+        all_tabs_fp,
     }
-    for _, tc in ipairs(leaf.tabs) do
-        parts[#parts+1] = tostring(tc.window)
-        if drag.pickup.tag == "client" and drag.pickup.client == tc then parts[#parts+1] = "P" end
-        local col = colors.get_client_color(tc)
-        if col then parts[#parts+1] = col.name end
-    end
-    for _, other in ipairs(tree.collect_leaves(state.root)) do
-        if other.id ~= leaf.id then
-            parts[#parts+1] = "R" .. tostring(other.id)
-            parts[#parts+1] = tostring(other.active_tab)
-            for _, tc in ipairs(other.tabs) do
-                parts[#parts+1] = tostring(tc.window)
-                local col = colors.get_client_color(tc)
-                if col then parts[#parts+1] = col.name end
-            end
-        end
-    end
+    for _, tc in ipairs(leaf.tabs) do append_tab_fingerprint(parts, tc, true) end
     return table.concat(parts, "\0")
 end
 
@@ -1254,6 +1259,7 @@ local function update_titlebars(s, t, state, geos, leaves)
     local tb_h = math.max(_TITLEBAR_HEIGHT, gap)
     local bw   = beautiful.splitwm_focus_border_width
     local alive = {}
+    local all_tabs_fp = tb_compute_all_tabs_fingerprint(leaves)
 
     local function update_leaf(leaf)
         local geo = geos[leaf.id]
@@ -1293,7 +1299,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             end
         end
 
-        local fp = tb_compute_fingerprint(leaf, state, geo)
+        local fp = tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
         if entry.fp == fp then return end
         entry.fp              = fp
 
