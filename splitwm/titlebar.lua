@@ -75,10 +75,14 @@ local ICON_CLOSE_GAP = 0
 local TAB_CONTENT_V_PAD = 1
 
 -- Gap between the last tab and the "+" new-tab button.
-local PLUS_BTN_GAP = 24
+local PLUS_BTN_GAP = 50
 
 -- Extra positive spacing added between tabs (on top of the shape overlap).
-local TAB_GAP = 8
+local TAB_GAP = -24
+
+-- The active tab is drawn above its neighbors; leave a little extra room after
+-- it so its right ear does not cover the next tab's icon.
+local ACTIVE_TAB_AFTER_GAP = 26
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (which styles the content background).
@@ -105,6 +109,31 @@ local TAB_SPACING
 -- _BTN_SIZE is injected by setup(), so this must be called after setup().
 local function tab_step(icon_size)
     return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_PAD_H_R_EXTRA + TAB_SPACING + TAB_GAP -4
+end
+
+local function tab_slot_x(tab_idx, active_tab, icon_size)
+    local x = (tab_idx - 1) * tab_step(icon_size)
+    if active_tab and tab_idx > active_tab then x = x + ACTIVE_TAB_AFTER_GAP end
+    return x
+end
+
+local function tab_content_bounds(tab_idx, active_tab, icon_size)
+    local x1 = tab_slot_x(tab_idx, active_tab, icon_size) + TAB_PAD_H
+    local x2 = x1 + icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4
+    return x1, x2
+end
+
+local function tab_content_hit(x, tab_idx, active_tab, icon_size)
+    local x1, x2 = tab_content_bounds(tab_idx, active_tab, icon_size)
+    return x >= x1 and x < x2
+end
+
+local function tab_index_at(x, active_tab, n_tabs, icon_size)
+    if n_tabs <= 0 then return nil end
+    for i = 1, n_tabs do
+        if tab_content_hit(x, i, active_tab, icon_size) then return i end
+    end
+    return nil
 end
 
 ---------------------------------------------------------------------------
@@ -207,6 +236,7 @@ M.pickup_client      = pickup_client
 M.pickup_split       = pickup_split
 -- Exported for init.lua hover-tab calculation; depends on _BTN_SIZE/TAB_SPACING set in setup().
 M.tab_step           = tab_step
+M.tab_index_at       = tab_index_at
 M.TAB_CONTENT_V_PAD  = TAB_CONTENT_V_PAD
 -- Exported for use in menu.lua — searches wider icon sizes than menubar_utils.lookup_icon.
 M.find_icon_file     = find_icon_file
@@ -621,15 +651,22 @@ end
 
 local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_state = get_tab_state(tab_idx, leaf, tc)
-    local step      = tab_step(ctx.icon_size)
     local gap       = beautiful.splitwm_gap
 
     -- Returns true if (mx, my) is over the close button of this tab.
     local function in_close_btn(mx, my, g)
         local sx   = ctx.state.scroll_x or 0
-        local cx1  = g.x - sx + (tab_idx - 1) * step + TAB_PAD_H + ctx.icon_size + ICON_CLOSE_GAP
+        local cx1  = g.x - sx + tab_slot_x(tab_idx, leaf.active_tab, ctx.icon_size)
+            + TAB_PAD_H + ctx.icon_size + ICON_CLOSE_GAP
         return tab_state == "active"
            and mx >= cx1 and mx < cx1 + _BTN_SIZE - 4
+           and my >= g.y - gap
+           and my <  g.y - gap + ctx.tb_h
+    end
+
+    local function in_tab_content(mx, my, g)
+        local sx = ctx.state.scroll_x or 0
+        return tab_content_hit(mx - (g.x - sx), tab_idx, leaf.active_tab, ctx.icon_size)
            and my >= g.y - gap
            and my <  g.y - gap + ctx.tb_h
     end
@@ -681,10 +718,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
         if not g then return end
         local gap = beautiful.splitwm_gap
-        local sx  = ctx.state.scroll_x or 0
-        local tx  = g.x - sx + (tab_idx - 1) * step
         local ty  = g.y - gap
-        if m.x < tx or m.x >= tx + step
+        if not in_tab_content(m.x, m.y, g)
         or m.y < ty or m.y >= ty + ctx.tb_h then
             drag.pending = nil
             drag.pickup  = pickup_client(tc, ctx.t)
@@ -729,9 +764,12 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                         awful.layout.arrange(ctx.s)
                     elseif my < g.y then
                         -- Same leaf, in tab bar: reorder tabs by drop position.
-                        local reorder_step = tab_step(ctx.icon_size)
-                        local target = math.max(1, math.min(#leaf.tabs,
-                            math.floor((mx - gx) / reorder_step) + 1))
+                        local target = tab_index_at(mx - gx, leaf.active_tab, #leaf.tabs, ctx.icon_size)
+                        if not target then
+                            drag.pickup = pickup_idle()
+                            awful.layout.arrange(ctx.s)
+                            return false
+                        end
                         if target ~= tab_idx then
                             leaf.tabs[tab_idx], leaf.tabs[target] =
                                 leaf.tabs[target], leaf.tabs[tab_idx]
@@ -841,12 +879,15 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     tab_widget:connect_signal("mouse::enter", function()
         entry.tooltip.text = (tc.valid and tc.name) or "?"
+        local mc = mouse.coords()
+        local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
         -- If the mouse button is held and we're not dragging a tab, switch to this tab.
         if mouse.coords().buttons[1]
         and drag.pickup.tag == "idle"
         and drag.pending == nil
         and tab_idx ~= leaf.active_tab
-        and tc.valid then
+        and tc.valid
+        and g and in_tab_content(mc.x, mc.y, g) then
             leaf.active_tab = tab_idx
             ctx.state.focused_leaf_id = leaf.id
             focus_tc()
@@ -865,6 +906,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     tab_widget:buttons(gears.table.join(
         awful.button({}, 1, function()
+            local mc = mouse.coords()
+            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+            if not (g and in_tab_content(mc.x, mc.y, g)) then return end
             if drag.pickup.tag == "split" and drag.pickup.split_id ~= leaf.id then
                 _handle_split_pickup(ctx.state, leaf.id, ctx.s); return
             end
@@ -887,6 +931,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             if is_pending then drag.pending = nil end
             local mc = mouse.coords()
             local g  = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+            if not (g and in_tab_content(mc.x, mc.y, g)) then
+                drag.pickup = pickup_idle()
+                return
+            end
             if g and in_close_btn(mc.x, mc.y, g) then
                 drag.pickup = pickup_idle()
                 tc:kill()
@@ -900,19 +948,21 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         end),
         awful.button({}, 3, function()
             if not tc.valid then return end
+            local mc = mouse.coords()
+            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+            if not (g and in_tab_content(mc.x, mc.y, g)) then return end
             if _splitwm.on_menu_close then _splitwm.on_menu_close() end
             if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
                 hide_tab_color_menu(); return
             end
-            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-            if not g then return end
-            local tab_x      = g.x - (ctx.state.scroll_x or 0) + (tab_idx - 1) * step
+            local tab_x      = g.x - (ctx.state.scroll_x or 0)
+                + select(1, tab_content_bounds(tab_idx, leaf.active_tab, ctx.icon_size))
             local bar_bottom = g.y - beautiful.splitwm_gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
             show_tab_color_menu(tc, ctx.s, tab_x, bar_bottom,
                 cc and cc.dark or color_bg,
                 cc and cc.light or color_fg,
-                step - TAB_SPACING)
+                ctx.icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4)
         end)
     ))
 
@@ -1053,14 +1103,23 @@ local function tb_split_tab_layers(tab_widgets, active_tab, n_tabs, entry)
         function sp:draw() end
         pool[#pool + 1] = sp
     end
+    if not entry._active_tab_margin then
+        entry._active_tab_margin = wibox.container.margin()
+        entry._active_tab_margin.right = ACTIVE_TAB_AFTER_GAP
+    end
 
     local behind, above = {}, {}
     for i, tw in ipairs(tab_widgets) do
         local sp = pool[i]
-        sp._ref = tw
+        local render_tw = tw
+        if i == active_tab and active_tab < n_tabs then
+            entry._active_tab_margin:set_widget(tw)
+            render_tw = entry._active_tab_margin
+        end
+        sp._ref = render_tw
         if i == active_tab or i > n_tabs then
             table.insert(behind, sp)
-            table.insert(above,  tw)
+            table.insert(above,  render_tw)
         else
             table.insert(behind, tw)
             table.insert(above,  sp)

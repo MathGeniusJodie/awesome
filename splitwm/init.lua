@@ -1153,7 +1153,6 @@ local function start_drag_hover_poll()
             local gap      = beautiful.splitwm_gap
             local tb_h     = effective_tb_h(gap)
             local icon_sz  = tb_h - 2 * tb.TAB_CONTENT_V_PAD
-            local step     = tb.tab_step(icon_sz)
             for s in screen do
                 local t = s.selected_tag
                 if not t then goto continue end
@@ -1166,9 +1165,8 @@ local function start_drag_hover_poll()
                     local gx = g and g.x - sx
                     if g and mx >= gx and mx < gx + g.width
                            and my >= g.y - gap and my < g.y - gap + tb_h then
-                        local tab_idx = math.max(1, math.min(#leaf.tabs,
-                            math.floor((mx - gx) / step) + 1))
-                        if tab_idx ~= leaf.active_tab and leaf.tabs[tab_idx] then
+                        local tab_idx = tb.tab_index_at(mx - gx, leaf.active_tab, #leaf.tabs, icon_sz)
+                        if tab_idx and tab_idx ~= leaf.active_tab and leaf.tabs[tab_idx] then
                             leaf.active_tab = tab_idx
                             state.focused_leaf_id = lid
                             awful.layout.arrange(s)
