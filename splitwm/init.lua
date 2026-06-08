@@ -13,6 +13,7 @@ local beautiful = require("beautiful")
 local tree      = require("splitwm.tree")
 local colors    = require("splitwm.colors")
 local tb        = require("splitwm.titlebar")
+local client_icons = require("splitwm.client_icons")
 local underlay  = require("splitwm.underlay")
 local anim      = require("splitwm.animation")
 
@@ -1494,7 +1495,7 @@ function splitwm.setup()
     })
 
     client.connect_signal("manage", function(c)
-        tb.prepare_client_icon(c)
+        client_icons.prepare_client_icon(c)
         local t = c.first_tag
         if not t then return end
         local state = get_state(t)
@@ -1518,7 +1519,7 @@ function splitwm.setup()
     end)
 
     local function refresh_client_icon(c)
-        tb.prepare_client_icon(c)
+        client_icons.prepare_client_icon(c)
         if c.screen then awful.layout.arrange(c.screen) end
     end
     client.connect_signal("property::class", refresh_client_icon)

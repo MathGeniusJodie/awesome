@@ -2,7 +2,7 @@ local awful         = require("awful")
 local gears         = require("gears")
 local menubar_utils = require("menubar.utils")
 local menu_gen      = require("menubar.menu_gen")
-local titlebar      = require("splitwm.titlebar")
+local client_icons  = require("splitwm.client_icons")
 
 local menu = {}
 
@@ -122,7 +122,7 @@ function menu.setup(opts)
                 end
                 if not launcher.icon then
                     for _, name in ipairs(launcher.icon_names) do
-                        local path = titlebar.find_icon_file(name)
+                        local path = client_icons.find_icon_file(name)
                         if path then launcher.icon = path; break end
                     end
                 end
@@ -140,7 +140,7 @@ function menu.setup(opts)
                 if p and p ~= false then return p end
             end
             for _, n in ipairs(names) do
-                local p = titlebar.find_icon_file(n)
+                local p = client_icons.find_icon_file(n)
                 if p then return p end
             end
         end

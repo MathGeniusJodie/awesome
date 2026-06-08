@@ -12,8 +12,8 @@ local awful         = require("awful")
 local gears         = require("gears")
 local wibox         = require("wibox")
 local beautiful     = require("beautiful")
-local menubar_utils = require("menubar.utils")
 local icons         = require("splitwm.icons")
+local client_icons  = require("splitwm.client_icons")
 local tree          = require("splitwm.tree")
 local colors        = require("splitwm.colors")
 local underlay      = require("splitwm.underlay")
@@ -162,66 +162,6 @@ local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
 local local_tab_click_active = false
 local remote_tab_click_active = false
 
--- Cache class→icon_path. Rendering reads this only; manage/class events fill it.
-local class_icon_cache = {}
-
--- menubar_utils.lookup_icon only searches up to 128x128; search wider sizes too.
-local ICON_SIZES = { "256x256", "scalable", "128x128", "96x96", "64x64", "48x48", "32x32" }
-local ICON_EXTS  = { "png", "svg", "xpm" }
-local function find_icon_file(icon_name)
-    if not icon_name or icon_name == "" then return nil end
-    if icon_name:sub(1, 1) == "/" then
-        local f = io.open(icon_name, "r"); if f then f:close(); return icon_name end
-    end
-    local home = os.getenv("HOME")
-    local bases = {}
-    if home then bases[#bases+1] = home .. "/.local/share/icons/hicolor" end
-    for _, b in ipairs({ "/usr/local/share/icons/hicolor", "/usr/share/icons/hicolor" }) do
-        bases[#bases+1] = b
-    end
-    for _, base in ipairs(bases) do
-        for _, size in ipairs(ICON_SIZES) do
-            for _, ext in ipairs(ICON_EXTS) do
-                local p = base .. "/" .. size .. "/apps/" .. icon_name .. "." .. ext
-                local fh = io.open(p, "r"); if fh then fh:close(); return p end
-            end
-        end
-    end
-    for _, ext in ipairs(ICON_EXTS) do
-        local p = "/usr/share/pixmaps/" .. icon_name .. "." .. ext
-        local fh = io.open(p, "r"); if fh then fh:close(); return p end
-    end
-    return nil
-end
-
-local function class_icon_key(c)
-    return (c.class or "") .. "\0" .. (c.instance or "")
-end
-
-local function resolve_class_icon(c)
-    local candidates = {
-        c.instance, c.class,
-        c.instance and c.instance:lower(), c.class and c.class:lower(),
-    }
-    for _, name in ipairs(candidates) do
-        if name then
-            local path = menubar_utils.lookup_icon(name)
-            if path and path ~= false then return path end
-        end
-    end
-end
-
-local function cache_class_icon(c)
-    local key = class_icon_key(c)
-    if class_icon_cache[key] == nil then
-        class_icon_cache[key] = resolve_class_icon(c) or false
-    end
-    return class_icon_cache[key] or nil
-end
-
-local function lookup_class_icon(c)
-    return class_icon_cache[class_icon_key(c)] or nil
-end
 -- Per-event dedup flag: set true for the duration of the event that closed a menu,
 -- so multiple handlers firing in the same event batch don't each trigger on_menu_close.
 local menu_was_open_this_event = false
@@ -241,9 +181,6 @@ M.pickup_split       = pickup_split
 M.tab_step           = tab_step
 M.tab_index_at       = tab_index_at
 M.TAB_CONTENT_V_PAD  = TAB_CONTENT_V_PAD
--- Exported for use in menu.lua — searches wider icon sizes than menubar_utils.lookup_icon.
-M.find_icon_file     = find_icon_file
-M.prepare_client_icon = cache_class_icon
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile
@@ -668,7 +605,7 @@ local function make_tab_icon(tc, icon_size)
         return tab_icon
     end
 
-    local theme_icon = lookup_class_icon(tc)
+    local theme_icon = client_icons.lookup_class_icon(tc)
     if theme_icon then
         return wibox.widget {
             image          = theme_icon,
@@ -763,35 +700,11 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
            and my <  g.y - gap + ctx.tb_h
     end
 
-    local tab_icon
-    if tc.icon then
-        tab_icon = awful.widget.clienticon(tc)
-        tab_icon.forced_width  = ctx.icon_size
-        tab_icon.forced_height = ctx.icon_size
-    else
-        local theme_icon = lookup_class_icon(tc)
-        if theme_icon then
-            tab_icon = wibox.widget {
-                image          = theme_icon,
-                forced_width   = ctx.icon_size,
-                forced_height  = ctx.icon_size,
-                resize         = true,
-                widget         = wibox.widget.imagebox,
-            }
-        else
-            tab_icon = wibox.widget {
-                text          = string.sub(tc.class or tc.instance or "?", 1, 2),
-                align         = "center",
-                valign        = "center",
-                forced_width  = ctx.icon_size,
-                forced_height = ctx.icon_size,
-                widget        = wibox.widget.textbox,
-            }
-        end
-    end
-
     local icon_widget = wibox.widget {
-        tab_icon, halign = "center", valign = "center", widget = wibox.container.place,
+        make_tab_icon(tc, ctx.icon_size),
+        halign = "center",
+        valign = "center",
+        widget = wibox.container.place,
     }
     local close_btn = wibox.widget {
         { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
@@ -1529,28 +1442,6 @@ local function update_titlebars(s, t, state, geos, leaves)
         if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
             local function build_h_min_tab_icon(tc, i)
                 local icon_sz = ctx.icon_size - 2
-                local tab_icon
-                if tc.icon then
-                    local ci = awful.widget.clienticon(tc)
-                    ci.forced_width  = icon_sz
-                    ci.forced_height = icon_sz
-                    tab_icon = ci
-                else
-                    local theme_icon = lookup_class_icon(tc)
-                    if theme_icon then
-                        tab_icon = wibox.widget {
-                            image = theme_icon, forced_width = icon_sz, forced_height = icon_sz,
-                            resize = true, widget = wibox.widget.imagebox,
-                        }
-                    else
-                        tab_icon = wibox.widget {
-                            text = string.sub(tc.class or tc.instance or "?", 1, 2),
-                            align = "center", valign = "center",
-                            forced_width = icon_sz, forced_height = icon_sz,
-                            widget = wibox.widget.textbox,
-                        }
-                    end
-                end
                 local tab_state    = get_tab_state(i, leaf, tc)
                 local client_color = colors.get_client_color(tc)
                 local tab_bg = (client_color and client_color.dark)
@@ -1559,7 +1450,7 @@ local function update_titlebars(s, t, state, geos, leaves)
                 local pill_sz = icon_sz + 2
                 local r       = math.floor(pill_sz / 2)
                 return wibox.widget {
-                    { tab_icon, halign = "center", valign = "center", widget = wibox.container.place },
+                    { make_tab_icon(tc, icon_sz), halign = "center", valign = "center", widget = wibox.container.place },
                     bg           = tab_bg,
                     shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, r) end,
                     forced_width  = pill_sz,
