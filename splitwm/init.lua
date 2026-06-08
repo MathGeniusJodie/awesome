@@ -314,6 +314,14 @@ local function tab_index_for_client(leaf, c)
     return nil
 end
 
+local function clamp_tab_index(idx, n)
+    if n <= 0 then return 0 end
+    idx = math.floor(tonumber(idx) or 0)
+    if idx < 1 then return 1 end
+    if idx > n then return n end
+    return idx
+end
+
 local function arrange_tab_operation(t, c, opts)
     if opts and opts.arrange == false then return end
     local s = (opts and opts.screen) or (t and t.screen) or (c and c.screen)
@@ -356,17 +364,13 @@ local function remove_client_from_leaf(leaf, c)
             if i < leaf.active_tab then
                 leaf.active_tab = leaf.active_tab - 1
             elseif i == leaf.active_tab then
-                leaf.active_tab = math.min(math.max(1, i - 1), #leaf.tabs)
+                leaf.active_tab = clamp_tab_index(i - 1, #leaf.tabs)
             end
         else
             i = i + 1
         end
     end
-    if #leaf.tabs == 0 then
-        leaf.active_tab = 0
-    else
-        leaf.active_tab = math.min(math.max(1, leaf.active_tab), #leaf.tabs)
-    end
+    leaf.active_tab = clamp_tab_index(leaf.active_tab, #leaf.tabs)
     return removed
 end
 
@@ -471,8 +475,8 @@ local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
     if not leaf_a or not leaf_b then return end
     leaf_a.tabs, leaf_b.tabs = leaf_b.tabs, leaf_a.tabs
     leaf_a.active_tab, leaf_b.active_tab = leaf_b.active_tab, leaf_a.active_tab
-    leaf_a.active_tab = math.min(leaf_a.active_tab, #leaf_a.tabs)
-    leaf_b.active_tab = math.min(leaf_b.active_tab, #leaf_b.tabs)
+    leaf_a.active_tab = clamp_tab_index(leaf_a.active_tab, #leaf_a.tabs)
+    leaf_b.active_tab = clamp_tab_index(leaf_b.active_tab, #leaf_b.tabs)
 end
 
 -- Called when pickup tag=="split" is active: swaps tabs if different leaf, then arranges.
@@ -502,9 +506,9 @@ local function handle_split_pickup(state, leaf_id, s)
                     local src_active   = src_leaf.active_tab
                     local dst_active   = dst_leaf.active_tab
                     src_leaf.tabs      = dst_clients
-                    src_leaf.active_tab = math.min(math.max(dst_active, #dst_clients > 0 and 1 or 0), #dst_clients)
+                    src_leaf.active_tab = clamp_tab_index(dst_active, #dst_clients)
                     dst_leaf.tabs      = src_clients
-                    dst_leaf.active_tab = math.min(math.max(src_active, #src_clients > 0 and 1 or 0), #src_clients)
+                    dst_leaf.active_tab = clamp_tab_index(src_active, #src_clients)
                     for _, c in ipairs(src_leaf.tabs) do if c.valid then c:move_to_tag(src_t) end end
                     for _, c in ipairs(dst_leaf.tabs) do if c.valid then c:move_to_tag(dst_t) end end
                     state.focused_leaf_id = leaf_id
@@ -988,13 +992,6 @@ local function arrange(p)
     local tb_h = effective_tb_h(gap)
 
     for _, leaf in ipairs(tree.collect_leaves(root)) do
-        local new_tabs = {}
-        for _, tc in ipairs(leaf.tabs) do
-            if tc.valid then table.insert(new_tabs, tc) end
-        end
-        leaf.tabs = new_tabs
-        leaf.active_tab = math.min(leaf.active_tab, #leaf.tabs)
-
         local geo = geos[leaf.id]
         if not geo then goto continue end
 
