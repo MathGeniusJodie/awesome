@@ -472,13 +472,6 @@ local function move_client_to_leaf_id(t, leaf_id, c, opts)
     local target_leaf = get_leaf(state, leaf_id)
     if not target_leaf then return false end
 
-    local src_tag = c.first_tag
-    if src_tag and src_tag ~= t then
-        local src_state = tag_state[src_tag]
-        if src_state then unpin_client(src_state.root, c) end
-        c:move_to_tag(t)
-    end
-
     if tab_index_for_client(target_leaf, c) then
         remove_client_from_other_leaves(state, c, target_leaf)
         return activate_client_in_leaf(t, target_leaf.id, c, opts)
@@ -530,41 +523,9 @@ end
 
 -- Called when pickup tag=="split" is active: swaps tabs if different leaf, then arranges.
 local function handle_split_pickup(state, leaf_id, s)
-    if drag.pickup.split_id ~= leaf_id then
-        if get_leaf(state, drag.pickup.split_id) then
-            -- Same tag: simple in-place swap
-            swap_split_tabs(state, drag.pickup.split_id, leaf_id)
-            state.focused_leaf_id = leaf_id
-        else
-            -- Different tag: find source state and swap clients across tags
-            local src_state, src_t
-            for t, ts in pairs(tag_state) do
-                if get_leaf(ts, drag.pickup.split_id) then
-                    src_state = ts
-                    src_t = t
-                    break
-                end
-            end
-            if src_state then
-                local src_leaf = get_leaf(src_state, drag.pickup.split_id)
-                local dst_leaf = get_leaf(state, leaf_id)
-                local dst_t    = s.selected_tag
-                if src_leaf and dst_leaf and src_t and dst_t then
-                    local src_clients  = src_leaf.tabs
-                    local dst_clients  = dst_leaf.tabs
-                    local src_active   = src_leaf.active_tab
-                    local dst_active   = dst_leaf.active_tab
-                    src_leaf.tabs      = dst_clients
-                    src_leaf.active_tab = clamp_tab_index(dst_active, #dst_clients)
-                    dst_leaf.tabs      = src_clients
-                    dst_leaf.active_tab = clamp_tab_index(src_active, #src_clients)
-                    for _, c in ipairs(src_leaf.tabs) do if c.valid then c:move_to_tag(src_t) end end
-                    for _, c in ipairs(dst_leaf.tabs) do if c.valid then c:move_to_tag(dst_t) end end
-                    state.focused_leaf_id = leaf_id
-                    if src_t.screen then awful.layout.arrange(src_t.screen) end
-                end
-            end
-        end
+    if drag.pickup.split_id ~= leaf_id and get_leaf(state, drag.pickup.split_id) then
+        swap_split_tabs(state, drag.pickup.split_id, leaf_id)
+        state.focused_leaf_id = leaf_id
     end
     focus_leaf_after_arrange(state, leaf_id)
     drag.pickup = pickup_idle()
@@ -578,14 +539,7 @@ local function try_drop_picked_up(t, leaf_id)
     local target = get_leaf(state, leaf_id)
     if not target then drag.pickup = pickup_idle(); return false end
 
-    local c       = drag.pickup.client
-    local src_tag = drag.pickup.client_tag
-
-    if src_tag then
-        local src_state = tag_state[src_tag]
-        if src_state then unpin_client(src_state.root, c) end
-    end
-    if src_tag ~= t then c:move_to_tag(t) end
+    local c = drag.pickup.client
 
     move_client_to_leaf(state.root, c, target)
     state.focused_leaf_id = leaf_id
@@ -593,8 +547,6 @@ local function try_drop_picked_up(t, leaf_id)
     colors.resolve_color_conflict(target, c)
     splitwm.focus_client_after_arrange(c, leaf_id)
     smush_after_layout(t.screen, leaf_id)
-
-    if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
     return true
 end
 
@@ -611,14 +563,8 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     -- Capture old geometry before tree mutation for animation.
     local old_geo = geo_cache[t] and geo_cache[t].geos[leaf_id]
 
-    local c       = drag.pickup.client
-    local src_tag = drag.pickup.client_tag
-
-    if src_tag then
-        local src_state = tag_state[src_tag]
-        if src_state then unpin_client(src_state.root, c) end
-    end
-    if src_tag ~= t then c:move_to_tag(t) end
+    local c = drag.pickup.client
+    unpin_client(state.root, c)
 
     -- Build the two new children: one keeps the target's tabs, one gets the dragged client.
     local child_existing = tree.make_leaf()
@@ -677,8 +623,6 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
             }
         end
     end
-
-    if src_tag and src_tag ~= t and src_tag.screen then awful.layout.arrange(src_tag.screen) end
     return true
 end
 
@@ -1671,41 +1615,6 @@ function splitwm.setup()
         if mousegrabber.isrunning() then mousegrabber.stop() end
         geo_cache[t] = nil
         if s then gears.timer.delayed_call(function() update_ui(s) end) end
-        if t.selected and drag.pickup.tag == "client" and mouse.coords().buttons[1] then
-            mousegrabber.run(function(m)
-                if m.buttons[1] then return true end
-                if drag.pickup.tag ~= "client" or not drag.pickup.client.valid then
-                    drag.pickup = pickup_idle()
-                    return false
-                end
-                local cached = geo_cache[t]
-                if cached and s then
-                    local gap = beautiful.splitwm_gap
-                    local mx, my = m.x, m.y
-                    local state = get_state(t)
-                    local sx    = state.scroll_x or 0
-                    local leaves = tree.collect_leaves(state.root)
-                    for _, leaf in ipairs(leaves) do
-                        local lid = leaf.id
-                        local g = cached.geos[lid]
-                        local gx = g and g.x - sx
-                        if g and mx >= gx and mx < gx + g.width
-                               and my >= g.y - gap and my < g.y + g.height then
-                            try_drop_picked_up(t, lid)
-                            awful.layout.arrange(s)
-                            return false
-                        end
-                    end
-                    -- Dropped in a gap: create a new split at the nearest leaf.
-                    local best_lid, direction, new_first =
-                        tree.find_gap_drop_target(leaves, cached.geos, sx, mx, my, gap)
-                    if best_lid and drop_into_new_split(t, best_lid, direction, new_first) then
-                        awful.layout.arrange(s)
-                    end
-                end
-                return false
-            end, "fleur")
-        end
     end)
 
     awesome.connect_signal("startup", function()

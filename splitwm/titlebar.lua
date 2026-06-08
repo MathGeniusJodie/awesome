@@ -27,7 +27,7 @@ local PICKUP_IDLE = { tag = "idle" }
 local drag = { pickup = PICKUP_IDLE, pending = nil }
 
 local function pickup_idle()            return PICKUP_IDLE end
-local function pickup_client(c, t)      return { tag = "client", client = c, client_tag = t } end
+local function pickup_client(c)         return { tag = "client", client = c } end
 local function pickup_split(id)         return { tag = "split",  split_id = id } end
 
 ---------------------------------------------------------------------------
@@ -823,7 +823,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         if not in_tab_content(m.x, m.y, g)
         or m.y < ty or m.y >= ty + ctx.tb_h then
             drag.pending = nil
-            drag.pickup  = pickup_client(tc, ctx.t)
+            drag.pickup  = pickup_client(tc)
             awful.layout.arrange(ctx.s)
         end
     end
@@ -909,7 +909,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     -- Begin a tab drag: start the mousegrabber after the current event batch.
     local function start_tab_drag()
-        drag.pending = { client = tc, client_tag = ctx.t }
+        drag.pending = { client = tc }
         gears.timer.delayed_call(function()
             if not mouse.coords().buttons[1] then
                 if drag.pending and drag.pending.client == tc then drag.pending = nil end
@@ -992,7 +992,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     tab_widget:connect_signal("mouse::leave", function()
         if drag.pending and drag.pending.client == tc and mouse.coords().buttons[1] then
             drag.pending = nil
-            drag.pickup  = pickup_client(tc, ctx.t)
+            drag.pickup  = pickup_client(tc)
             awful.layout.arrange(ctx.s)
         end
     end)
