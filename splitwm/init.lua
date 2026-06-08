@@ -1540,36 +1540,22 @@ function splitwm.setup()
             end
             return
         end
-        local leaf, state
-        local guarded_focus_leaf = false
+        local leaf, state, tab_idx
         if focus_guard and focus_guard.client == c and focus_guard.leaf_id then
             local _, guarded_state = get_tag_state(c)
             local guarded_leaf = get_leaf(guarded_state, focus_guard.leaf_id)
-            if guarded_leaf then
+            local guarded_idx = tab_index_for_client(guarded_leaf, c)
+            if guarded_idx then
                 leaf = guarded_leaf
                 state = guarded_state
-                guarded_focus_leaf = true
+                tab_idx = guarded_idx
             end
         end
         if not leaf then leaf, state = get_leaf_from_client(c) end
         if not leaf then return end
-        local tab_idx
-        for i, tc in ipairs(leaf.tabs) do
-            if tc == c then tab_idx = i; break end
-        end
-        if guarded_focus_leaf and not tab_idx then
-            leaf, state = get_leaf_from_client(c)
-            guarded_focus_leaf = false
-            if not leaf then return end
-            for i, tc in ipairs(leaf.tabs) do
-                if tc == c then tab_idx = i; break end
-            end
-        end
+        tab_idx = tab_idx or tab_index_for_client(leaf, c)
+        if not tab_idx then return end
         local needs_arrange = false
-        if guarded_focus_leaf and tab_idx
-                and remove_client_from_other_leaves(state, c, leaf) then
-            needs_arrange = true
-        end
         if tab_idx and leaf.active_tab ~= tab_idx then
             leaf.active_tab = tab_idx
             needs_arrange = true
