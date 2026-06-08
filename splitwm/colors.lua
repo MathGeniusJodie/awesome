@@ -15,6 +15,95 @@ local COLORS = {
 local COLORS_BY_NAME = {}
 for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
 
+---------------------------------------------------------------------------
+-- Color-space utilities
+---------------------------------------------------------------------------
+
+local function vec3(x, y, z)
+    return { x, y, z }
+end
+
+local function cbrt(v)
+    return v < 0 and -((-v) ^ (1 / 3)) or v ^ (1 / 3)
+end
+
+local function clamp01(v)
+    return math.max(0, math.min(1, v))
+end
+
+local function srgb_to_linear_channel(v)
+    return v <= 0.04045 and v / 12.92
+        or ((v + 0.055) / 1.055) ^ 2.4
+end
+
+local function linear_to_srgb_channel(v)
+    return v <= 0.0031308 and v * 12.92
+        or 1.055 * (v ^ (1 / 2.4)) - 0.055
+end
+
+function colors.srgb_to_linear_srgb(c)
+    return vec3(
+        srgb_to_linear_channel(c[1]),
+        srgb_to_linear_channel(c[2]),
+        srgb_to_linear_channel(c[3])
+    )
+end
+
+function colors.linear_srgb_to_srgb(c)
+    return vec3(
+        linear_to_srgb_channel(c[1]),
+        linear_to_srgb_channel(c[2]),
+        linear_to_srgb_channel(c[3])
+    )
+end
+
+function colors.linear_srgb_to_oklab(c)
+    local r, g, b = cbrt(c[1]), cbrt(c[2]), cbrt(c[3])
+    return vec3(
+        0.254564575 * r + 0.651941557 * g + 0.093493860 * b,
+        0.340534798 * r - 0.465335923 * g + 0.124801124 * b,
+        0.105142214 * r + 0.318906366 * g - 0.424048543 * b
+    )
+end
+
+function colors.oklab_to_linear_srgb(c)
+    local l, a, b = c[1], c[2], c[3]
+    local r = l + 1.944265062 * a + 0.792693030 * b
+    local g = l - 0.747676717 * a + 0.000431480481 * b
+    local bl = l - 0.0802137488 * a - 2.161349025 * b
+    return vec3(r * r * r, g * g * g, bl * bl * bl)
+end
+
+function colors.srgb_to_oklab(c)
+    return colors.linear_srgb_to_oklab(colors.srgb_to_linear_srgb(c))
+end
+
+function colors.oklab_to_srgb(c)
+    return colors.linear_srgb_to_srgb(colors.oklab_to_linear_srgb(c))
+end
+
+function colors.hex_to_srgb(hex)
+    local r, g, b = (hex or ""):match("^#?(%x%x)(%x%x)(%x%x)")
+    if not r then return nil end
+    return vec3(tonumber(r, 16) / 255, tonumber(g, 16) / 255, tonumber(b, 16) / 255)
+end
+
+function colors.srgb_to_hex(c)
+    local r = math.floor(clamp01(c[1]) * 255 + 0.5)
+    local g = math.floor(clamp01(c[2]) * 255 + 0.5)
+    local b = math.floor(clamp01(c[3]) * 255 + 0.5)
+    return string.format("#%02x%02x%02x", r, g, b)
+end
+
+function colors.hex_to_oklab(hex)
+    local srgb = colors.hex_to_srgb(hex)
+    return srgb and colors.srgb_to_oklab(srgb) or nil
+end
+
+function colors.oklab_to_hex(c)
+    return colors.srgb_to_hex(colors.oklab_to_srgb(c))
+end
+
 -- Preferred color per application class (case-insensitive).
 local CLASS_COLORS = {
     ["discord"]              = "violet",
