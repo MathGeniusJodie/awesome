@@ -588,43 +588,10 @@ local function get_tab_state(tab_idx, leaf, tc)
 end
 
 local function make_tab_icon(tc, icon_size)
-    local rotated_icon = colors.hue_rotated_icon_surface(tc, icon_size)
-    if rotated_icon then
-        return wibox.widget {
-            image          = rotated_icon,
-            forced_width   = icon_size,
-            forced_height  = icon_size,
-            resize         = true,
-            widget         = wibox.widget.imagebox,
-        }
-    end
-
-    if tc.icon then
-        local tab_icon = awful.widget.clienticon(tc)
-        tab_icon.forced_width  = icon_size
-        tab_icon.forced_height = icon_size
-        return tab_icon
-    end
-
-    local theme_icon = client_icons.lookup_class_icon(tc)
-    if theme_icon then
-        return wibox.widget {
-            image          = theme_icon,
-            forced_width   = icon_size,
-            forced_height  = icon_size,
-            resize         = true,
-            widget         = wibox.widget.imagebox,
-        }
-    end
-
-    return wibox.widget {
-        text          = string.sub(tc.class or tc.instance or "?", 1, 2),
-        align         = "center",
-        valign        = "center",
-        forced_width  = icon_size,
-        forced_height = icon_size,
-        widget        = wibox.widget.textbox,
-    }
+    return client_icons.client_icon_widget(tc, icon_size, {
+        image = colors.hue_rotated_icon_surface(tc, icon_size),
+        fallback_text = string.sub(tc.class or tc.instance or "?", 1, 2),
+    })
 end
 
 local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)

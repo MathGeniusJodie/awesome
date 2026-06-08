@@ -1,4 +1,7 @@
-local menubar_utils = require("menubar.utils")
+local ok_menubar_utils, menubar_utils = pcall(require, "menubar.utils")
+if not ok_menubar_utils then
+    menubar_utils = { lookup_icon = function() return nil end }
+end
 
 local M = {}
 
@@ -42,6 +45,157 @@ function M.find_icon_file(icon_name)
         end
     end
     return nil
+end
+
+function M.coerce_surface(icon)
+    if not icon then return nil end
+
+    local ok_lgi, lgi = pcall(require, "lgi")
+    local ok_is_surface, is_surface = pcall(function()
+        return ok_lgi and lgi.cairo.Surface:is_type_of(icon)
+    end)
+    if ok_is_surface and is_surface then
+        return icon
+    end
+
+    local ok_gears_surface, gears_surface = pcall(require, "gears.surface")
+    if ok_gears_surface then
+        local ok_surface, surface = pcall(gears_surface.load_uncached_silently, icon, false)
+        local ok_loaded_surface, loaded_is_surface = pcall(function()
+            return ok_lgi and lgi.cairo.Surface:is_type_of(surface)
+        end)
+        if ok_surface and ok_loaded_surface and loaded_is_surface then
+            return surface
+        end
+    end
+end
+
+function M.icon_path_surface(path)
+    if not path then return nil end
+
+    if path:lower():match("%.png$") then
+        local ok_lgi, lgi = pcall(require, "lgi")
+        if ok_lgi then
+            local ok_surface, surface = pcall(lgi.cairo.ImageSurface.create_from_png, path)
+            if ok_surface and surface then
+                return surface
+            end
+        end
+    end
+
+    local ok_gears_surface, gears_surface = pcall(require, "gears.surface")
+    if not ok_gears_surface then return nil end
+
+    local ok_surface, surface = pcall(gears_surface.load, path)
+    return ok_surface and surface or nil
+end
+
+local function client_icon_value(c)
+    local ok_client_icon, client_icon = pcall(function()
+        return c and c.icon
+    end)
+    return ok_client_icon and client_icon or nil
+end
+
+function M.has_live_client_icon(c)
+    local ok_sizes, sizes = pcall(function()
+        return c and c.icon_sizes
+    end)
+    return ok_sizes and type(sizes) == "table" and #sizes > 0
+end
+
+local function live_client_icon_widget(c, size)
+    if not M.has_live_client_icon(c) then return nil end
+
+    local ok_awful, awful = pcall(require, "awful")
+    if not ok_awful then return nil end
+
+    local icon = awful.widget.clienticon(c)
+    icon.forced_width = size
+    icon.forced_height = size
+    return icon
+end
+
+function M.shown_client_icon_surface(c, size)
+    local target_size = math.max(1, math.floor((size or 64) + 0.5))
+    local icon = live_client_icon_widget(c, target_size)
+    if not icon then return nil end
+
+    local ok_wibox, wibox = pcall(require, "wibox")
+    if not ok_wibox then return nil end
+
+    local ok_surface, surface = pcall(wibox.widget.draw_to_image_surface, icon, target_size, target_size)
+    return ok_surface and surface or nil
+end
+
+function M.class_icon_surface(c)
+    local path = M.lookup_class_icon(c)
+    if M.is_symbolic_icon(path) then return nil end
+    return M.icon_path_surface(path)
+end
+
+function M.icon_surface(icon, size)
+    if type(icon) == "string" then
+        return M.icon_path_surface(icon)
+    end
+
+    local shown_icon_surface = M.shown_client_icon_surface(icon, size)
+    if shown_icon_surface then
+        return shown_icon_surface
+    end
+
+    local client_icon = client_icon_value(icon)
+    if client_icon then
+        if type(client_icon) == "string" then
+            return M.icon_path_surface(client_icon)
+        end
+        return M.coerce_surface(client_icon)
+    end
+
+    return M.class_icon_surface(icon) or M.coerce_surface(icon)
+end
+
+local function image_widget(image, size)
+    local ok_wibox, wibox = pcall(require, "wibox")
+    if not ok_wibox then return nil end
+
+    return wibox.widget {
+        image         = image,
+        forced_width  = size,
+        forced_height = size,
+        resize        = true,
+        widget        = wibox.widget.imagebox,
+    }
+end
+
+function M.client_icon_widget(c, size, opts)
+    opts = opts or {}
+
+    if opts.image then
+        return image_widget(opts.image, size)
+    end
+
+    local live_icon = live_client_icon_widget(c, size)
+    if live_icon then return live_icon end
+
+    local class_icon = M.lookup_class_icon(c)
+    if class_icon then
+        local icon = image_widget(class_icon, size)
+        if icon then return icon end
+    end
+
+    local ok_wibox, wibox = pcall(require, "wibox")
+    if not ok_wibox then return nil end
+
+    local fallback_text = opts.fallback_text or string.sub((c and (c.class or c.instance)) or "?", 1, 2)
+    return wibox.widget {
+        text          = fallback_text,
+        align         = "center",
+        valign        = "center",
+        forced_width  = size,
+        forced_height = size,
+        widget        = wibox.widget.textbox,
+    }
 end
 
 local function class_icon_key(c)
