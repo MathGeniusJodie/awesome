@@ -56,6 +56,8 @@ local smush_restore_client = nil
 local smush_restore_leaf_id = nil
 local smush_focus_client = nil
 
+local focus_client_after_arrange
+
 local function smush_command(mode)
     if mode == "reset" then
         return { smush_helper, "reset" }
@@ -75,12 +77,7 @@ local function restore_focus_after_smush()
     smush_focus_client = nil
     smush_queue_running = false
     if not (restore and restore.valid) then return end
-    if splitwm.focus_client_after_arrange then
-        splitwm.focus_client_after_arrange(restore, restore_leaf_id)
-    else
-        client.focus = restore
-        restore:raise()
-    end
+    focus_client_after_arrange(restore, restore_leaf_id)
 end
 
 process_smush_queue = function()
@@ -161,7 +158,7 @@ local drag_hover_timer = nil  -- polling timer for switching tabs when dragging 
 local focus_guard      = nil  -- transient guard for explicit focus requests
 local focus_request_seq = 0
 
-function splitwm.guard_focus(c, timeout, leaf_id)
+local function guard_focus(c, timeout, leaf_id)
     if not c or not c.valid then return end
     local guard = { client = c, leaf_id = leaf_id }
     focus_guard = guard
@@ -173,7 +170,7 @@ end
 
 local function force_focus_now(c, leaf_id)
     if not c or not c.valid then return end
-    splitwm.guard_focus(c, nil, leaf_id)
+    guard_focus(c, nil, leaf_id)
     if smush_queue_running then
         smush_restore_client = c
         smush_restore_leaf_id = leaf_id
@@ -183,11 +180,11 @@ local function force_focus_now(c, leaf_id)
     c:raise()
 end
 
-function splitwm.focus_client_after_arrange(c, leaf_id)
+focus_client_after_arrange = function(c, leaf_id)
     if not c or not c.valid then return end
     focus_request_seq = focus_request_seq + 1
     local seq = focus_request_seq
-    splitwm.guard_focus(c, nil, leaf_id)
+    guard_focus(c, nil, leaf_id)
     gears.timer.delayed_call(function()
         if seq ~= focus_request_seq then return end
         force_focus_now(c, leaf_id)
@@ -260,7 +257,7 @@ end
 local function focus_leaf_after_arrange(state, leaf_id)
     local leaf = get_leaf(state, leaf_id)
     local c = leaf and leaf.tabs[leaf.active_tab]
-    if c and c.valid then splitwm.focus_client_after_arrange(c, leaf_id) end
+    if c and c.valid then focus_client_after_arrange(c, leaf_id) end
 end
 
 local function smush_leaf_if_narrow(t, state, leaf, restore_client, restore_leaf_id)
@@ -343,12 +340,7 @@ end
 
 local function focus_tab_operation(c, leaf_id, opts)
     if opts and opts.focus == false then return end
-    if splitwm.focus_client_after_arrange then
-        splitwm.focus_client_after_arrange(c, leaf_id)
-    elseif c and c.valid then
-        client.focus = c
-        c:raise()
-    end
+    focus_client_after_arrange(c, leaf_id)
 end
 
 local pending_client_requests = {}
@@ -555,7 +547,7 @@ local function try_drop_picked_up(t, leaf_id)
         return false
     end
     drag.pickup = pickup_idle()
-    splitwm.focus_client_after_arrange(c, leaf_id)
+    focus_client_after_arrange(c, leaf_id)
     smush_after_layout(t.screen, leaf_id)
     return true
 end
@@ -617,7 +609,7 @@ local function drop_into_new_split(t, leaf_id, direction, new_leaf_first)
     colors.resolve_color_conflict(child_new, c)
     state.focused_leaf_id = child_new.id
     drag.pickup = pickup_idle()
-    splitwm.focus_client_after_arrange(c, child_new.id)
+    focus_client_after_arrange(c, child_new.id)
     smush_after_layout(t.screen, child_new.id)
 
     -- Queue split animation: existing leaf animates from old_geo, new leaf slides in from edge.
@@ -904,7 +896,7 @@ local function cycle_tab(t, offset)
     if not leaf or #leaf.tabs == 0 then return false end
     leaf.active_tab = ((leaf.active_tab - 1 + offset) % #leaf.tabs) + 1
     local c = leaf.tabs[leaf.active_tab]
-    if c and c.valid then splitwm.focus_client_after_arrange(c, leaf.id) end
+    if c and c.valid then focus_client_after_arrange(c, leaf.id) end
     return true
 end
 
@@ -934,7 +926,7 @@ local function move_tab_to_direction(t, dir)
     dst_leaf.active_tab = #dst_leaf.tabs
     colors.resolve_color_conflict(dst_leaf, c)
     state.focused_leaf_id = dst_leaf.id
-    splitwm.focus_client_after_arrange(c, dst_leaf.id)
+    focus_client_after_arrange(c, dst_leaf.id)
     return true
 end
 
@@ -1405,7 +1397,7 @@ local function start_drag_hover_poll()
                             leaf.active_tab = tab_idx
                             state.focused_leaf_id = lid
                             awful.layout.arrange(s)
-                            splitwm.focus_client_after_arrange(leaf.tabs[tab_idx], lid)
+                            focus_client_after_arrange(leaf.tabs[tab_idx], lid)
                         end
                         goto done
                     end
