@@ -342,14 +342,59 @@ local function focus_tab_operation(c, leaf_id, opts)
     end
 end
 
+local next_client_request = nil
+
+function splitwm.expect_next_client(opts)
+    opts = opts or {}
+    local s = opts.screen or awful.screen.focused()
+    if type(s) == "number" then s = screen[s] end
+    local t = opts.tag or (s and s.selected_tag)
+    if not t then return nil end
+
+    local state = get_state(t)
+    local leaf = opts.leaf_id and get_leaf(state, opts.leaf_id)
+        or get_focused_leaf(state)
+        or tree.collect_leaves(state.root)[1]
+    if not leaf then return nil end
+
+    state.focused_leaf_id = leaf.id
+    local request = {
+        tag     = t,
+        leaf_id = leaf.id,
+        append  = opts.append == true,
+    }
+    next_client_request = request
+    gears.timer.start_new(opts.timeout or 4, function()
+        if next_client_request == request then next_client_request = nil end
+        return false
+    end)
+    return request
+end
+
+function splitwm.spawn(cmd, opts)
+    splitwm.expect_next_client(opts)
+    return awful.spawn(cmd)
+end
+
+local function take_next_client_request(t)
+    local request = next_client_request
+    if not request or request.tag ~= t then return nil, nil end
+
+    local state = tag_state[t]
+    local leaf = state and get_leaf(state, request.leaf_id)
+    next_client_request = nil
+    if not leaf then return nil, nil end
+    return request, leaf
+end
+
 local function pin_client(t, c)
     local state = get_state(t)
-    local leaf = get_focused_leaf(state)
+    local request, leaf = take_next_client_request(t)
+    if not leaf then leaf = get_focused_leaf(state) end
     if not leaf then leaf = tree.collect_leaves(state.root)[1] end
     for _, tc in ipairs(leaf.tabs) do if tc == c then return end end
     local insert_pos
-    if splitwm._append_next_client then
-        splitwm._append_next_client = false
+    if request and request.append then
         insert_pos = #leaf.tabs + 1
     else
         insert_pos = leaf.active_tab + 1

@@ -1635,8 +1635,12 @@ local function update_titlebars(s, t, state, geos, leaves)
                     if hidden then goto continue end
                 end
                 launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, LAUNCHER_ICON_SIZE, function()
-                    ctx.state.focused_leaf_id = leaf.id
-                    if e.action then e.action() elseif e.cmd then awful.spawn(e.cmd) end
+                    if e.action then
+                        _splitwm.expect_next_client({ tag = ctx.t, leaf_id = leaf.id })
+                        e.action()
+                    elseif e.cmd then
+                        _splitwm.spawn(e.cmd, { tag = ctx.t, leaf_id = leaf.id })
+                    end
                 end)
                 ::continue::
             end

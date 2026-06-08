@@ -38,17 +38,20 @@ function menu.setup(opts)
 
     local function build_menu()
         if not category_items then return end
+        local function launch(cmd)
+            return function() splitwm.spawn(cmd, { append = true }) end
+        end
         local quick_items = {
-            { "Terminal",     function() splitwm._append_next_client = true; awful.spawn(terminal)    end, launcher_icon_fn(terminal)    },
-            { "Browser",      function() splitwm._append_next_client = true; awful.spawn(browser)     end, launcher_icon_fn(browser)     },
-            { "File Manager", function() splitwm._append_next_client = true; awful.spawn(filemanager) end, launcher_icon_fn(filemanager) },
-            { "Templates",    function() splitwm._append_next_client = true; awful.spawn("thunar /home/jodie/Desktop/allfiles/templates") end, "/home/jodie/.local/share/applications/templates-briefcase.svg" },
+            { "Terminal",     launch(terminal),    launcher_icon_fn(terminal)    },
+            { "Browser",      launch(browser),     launcher_icon_fn(browser)     },
+            { "File Manager", launch(filemanager), launcher_icon_fn(filemanager) },
+            { "Templates",    launch("thunar /home/jodie/Desktop/allfiles/templates"), "/home/jodie/.local/share/applications/templates-briefcase.svg" },
         }
         if not is_running({"obsidian", "Obsidian"}) then
-            table.insert(quick_items, { "Obsidian", function() splitwm._append_next_client = true; awful.spawn("obsidian") end, lookup_fn({"obsidian", "md.obsidian.Obsidian"}) })
+            table.insert(quick_items, { "Obsidian", launch("obsidian"), lookup_fn({"obsidian", "md.obsidian.Obsidian"}) })
         end
         if not is_running({"claude-desktop", "Claude"}) then
-            table.insert(quick_items, { "Claude", function() splitwm._append_next_client = true; awful.spawn("claude-desktop") end, lookup_fn({"claude-desktop"}) })
+            table.insert(quick_items, { "Claude", launch("claude-desktop"), lookup_fn({"claude-desktop"}) })
         end
         table.insert(quick_items, { "─────────────" })
 
@@ -76,7 +79,7 @@ function menu.setup(opts)
             local cmdline = entry.cmdline
             table.insert(categories[cat], {
                 entry.name,
-                function() splitwm._append_next_client = true; awful.spawn(cmdline) end,
+                function() splitwm.spawn(cmdline, { append = true }) end,
                 entry.icon,
             })
         end
