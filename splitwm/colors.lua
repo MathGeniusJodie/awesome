@@ -218,7 +218,7 @@ local function render_icon_to_argb32_data(icon, max_size)
     cr:paint()
     surface:flush()
 
-    return data, stride, width, height
+    return data, stride, width, height, surface
 end
 
 function colors.average_icon_color(icon, opts)
@@ -276,6 +276,7 @@ end
 colors.average_app_icon_color = colors.average_icon_color
 
 local TAU = math.pi * 2
+local HUE_SLOT_DEGREES = 40
 local ICON_HUE_CHROMA_THRESHOLD = 0.015
 local color_templates
 
@@ -292,6 +293,10 @@ local function oklab_hue(c)
     if chroma < ICON_HUE_CHROMA_THRESHOLD then return nil end
     local hue = atan2(c[3], c[2])
     return hue < 0 and hue + TAU or hue
+end
+
+local function rotate_hue(hue, radians)
+    return (hue + radians) % TAU
 end
 
 local function hue_distance(a, b)
@@ -341,14 +346,87 @@ local function template_for_hue(hue)
     return best
 end
 
+local function slot_offset_degrees(slot)
+    return slot * HUE_SLOT_DEGREES
+end
+
+local function client_app_key(c)
+    local ok_client_icons, client_icons = pcall(require, "splitwm.client_icons")
+    if ok_client_icons then
+        local key = client_icons.app_key(c)
+        if key then return key end
+    end
+end
+
+local app_hue_slots = {}
+local client_hue_slots = setmetatable({}, { __mode = "k" })
+
+local function release_hue_slot(c)
+    local existing = client_hue_slots[c]
+    if not existing then return end
+
+    local group = app_hue_slots[existing.key]
+    if group and group.used[existing.slot] == c then
+        group.used[existing.slot] = nil
+        if not next(group.used) then
+            app_hue_slots[existing.key] = nil
+        end
+    end
+
+    client_hue_slots[c] = nil
+end
+
+local function hue_slot_for_client(c)
+    local existing = client_hue_slots[c]
+    if existing then return existing end
+
+    local key = client_app_key(c)
+    if not key then return nil end
+
+    local group = app_hue_slots[key]
+    if not group then
+        group = { used = {} }
+        app_hue_slots[key] = group
+    end
+
+    local slot = 0
+    while group.used[slot] do
+        slot = slot + 1
+    end
+
+    local degrees = slot_offset_degrees(slot)
+    local allocation = {
+        key = key,
+        slot = slot,
+        degrees = degrees,
+        radians = math.rad(degrees),
+    }
+    group.used[slot] = c
+    client_hue_slots[c] = allocation
+    return allocation
+end
+
+function colors.get_client_hue_offset(c)
+    local slot = hue_slot_for_client(c)
+    return slot and slot.radians or 0
+end
+
+function colors.get_client_hue_offset_degrees(c)
+    local slot = hue_slot_for_client(c)
+    return slot and slot.degrees or 0
+end
+
 local function color_from_icon_hue(c)
     local avg = colors.average_icon_color(c, { max_size = 48 })
     if not avg then return nil end
 
-    local hue = oklab_hue(colors.linear_srgb_to_oklab(avg.linear_srgb))
-    local template = hue and template_for_hue(hue)
+    local base_hue = oklab_hue(colors.linear_srgb_to_oklab(avg.linear_srgb))
+    local template = base_hue and template_for_hue(base_hue)
     if not template then return nil end
 
+    local slot = hue_slot_for_client(c)
+    local offset = slot and slot.radians or 0
+    local hue = rotate_hue(base_hue, offset)
     local light = colors.oklab_to_hex(oklab_with_hue(template.light, hue))
     local dark = colors.oklab_to_hex(oklab_with_hue(template.dark, hue))
 
@@ -359,6 +437,7 @@ local function color_from_icon_hue(c)
         from_icon = true,
         icon_hex = avg.hex,
         base = template.name,
+        hue_offset_degrees = slot and slot.degrees or 0,
     }
 end
 
@@ -366,9 +445,88 @@ end
 -- Weak keys so entries are evicted automatically when clients are GC'd.
 -- Boxes ({value}) distinguish "not cached" (nil) from "cached nil" ({nil}).
 local color_cache = setmetatable({}, { __mode = "k" })
+local icon_surface_cache = setmetatable({}, { __mode = "k" })
 
-function colors.clear_client_color_cache(c)
+function colors.clear_client_color_cache(c, opts)
     color_cache[c] = nil
+    icon_surface_cache[c] = nil
+    if opts and opts.release_hue_slot then
+        release_hue_slot(c)
+    end
+end
+
+function colors.release_client(c)
+    color_cache[c] = nil
+    icon_surface_cache[c] = nil
+    release_hue_slot(c)
+end
+
+local function byte(v)
+    return math.floor(clamp01(v) * 255 + 0.5)
+end
+
+local function hue_rotate_argb32_data(data, stride, width, height, radians)
+    if not radians or math.abs(radians) < 0.000001 then return end
+
+    for y = 0, height - 1 do
+        local row = y * stride
+        for x = 0, width - 1 do
+            local offset = row + x * 4
+            local b = data[offset + 1] / 255
+            local g = data[offset + 2] / 255
+            local r = data[offset + 3] / 255
+            local a = data[offset + 4] / 255
+
+            if a > 0 then
+                local inv_alpha = 1 / a
+                local srgb = vec3(
+                    clamp01(r * inv_alpha),
+                    clamp01(g * inv_alpha),
+                    clamp01(b * inv_alpha)
+                )
+                local lab = colors.srgb_to_oklab(srgb)
+                local chroma = oklab_chroma(lab)
+
+                if chroma >= ICON_HUE_CHROMA_THRESHOLD then
+                    local hue = rotate_hue(atan2(lab[3], lab[2]), radians)
+                    srgb = colors.oklab_to_srgb(vec3(
+                        lab[1],
+                        math.cos(hue) * chroma,
+                        math.sin(hue) * chroma
+                    ))
+
+                    data[offset + 1] = byte(srgb[3] * a)
+                    data[offset + 2] = byte(srgb[2] * a)
+                    data[offset + 3] = byte(srgb[1] * a)
+                    data[offset + 4] = byte(a)
+                end
+            end
+        end
+    end
+end
+
+function colors.hue_rotated_icon_surface(c, size)
+    local slot = hue_slot_for_client(c)
+    if not slot or slot.slot == 0 then return nil end
+
+    local cache = icon_surface_cache[c]
+    if cache and cache.size == size and cache.slot == slot.slot then
+        return cache.surface
+    end
+
+    local data, stride, width, height, surface = render_icon_to_argb32_data(c, size)
+    if not surface then return nil end
+
+    hue_rotate_argb32_data(data, stride, width, height, slot.radians)
+    surface:mark_dirty()
+
+    icon_surface_cache[c] = {
+        size = size,
+        slot = slot.slot,
+        surface = surface,
+        data = data,
+    }
+    return surface
 end
 
 function colors.get_client_color(c)

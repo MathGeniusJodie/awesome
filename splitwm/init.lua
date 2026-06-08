@@ -1508,6 +1508,7 @@ function splitwm.setup()
     client.connect_signal("unmanage", function(c)
         if drag.pickup.tag == "client" and drag.pickup.client == c then drag.pickup = pickup_idle() end
         if drag.pending and drag.pending.client == c then drag.pending = nil end
+        colors.release_client(c)
         for t, state in pairs(tag_state) do unpin_client(state.root, c) end
         client_actual_geo[c]  = nil
         client_last_target[c] = nil
@@ -1517,13 +1518,19 @@ function splitwm.setup()
         client_actual_geo[c] = c:geometry()
     end)
 
+    local function refresh_client_identity(c)
+        client_icons.prepare_client_icon(c, splitwm.launchers)
+        colors.clear_client_color_cache(c, { release_hue_slot = true })
+        if c.screen then awful.layout.arrange(c.screen) end
+    end
+
     local function refresh_client_icon(c)
         client_icons.prepare_client_icon(c, splitwm.launchers)
         colors.clear_client_color_cache(c)
         if c.screen then awful.layout.arrange(c.screen) end
     end
-    client.connect_signal("property::class", refresh_client_icon)
-    client.connect_signal("property::instance", refresh_client_icon)
+    client.connect_signal("property::class", refresh_client_identity)
+    client.connect_signal("property::instance", refresh_client_identity)
     client.connect_signal("property::icon", refresh_client_icon)
 
     client.connect_signal("focus", function(c)

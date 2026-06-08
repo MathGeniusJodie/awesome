@@ -588,6 +588,17 @@ local function get_tab_state(tab_idx, leaf, tc)
 end
 
 local function make_tab_icon(tc, icon_size)
+    local rotated_icon = colors.hue_rotated_icon_surface(tc, icon_size)
+    if rotated_icon then
+        return wibox.widget {
+            image          = rotated_icon,
+            forced_width   = icon_size,
+            forced_height  = icon_size,
+            resize         = true,
+            widget         = wibox.widget.imagebox,
+        }
+    end
+
     if tc.icon then
         local tab_icon = awful.widget.clienticon(tc)
         tab_icon.forced_width  = icon_size

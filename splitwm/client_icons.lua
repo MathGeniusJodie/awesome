@@ -123,4 +123,15 @@ function M.lookup_class_icon(c)
     return M.prepare_client_icon(c)
 end
 
+function M.app_key(c)
+    local icon = M.lookup_class_icon(c)
+    if icon then return "icon:" .. icon end
+
+    local class = c.class and c.class:lower()
+    if class and class ~= "" then return "class:" .. class end
+
+    local instance = c.instance and c.instance:lower()
+    if instance and instance ~= "" then return "instance:" .. instance end
+end
+
 return M
