@@ -104,6 +104,26 @@ function colors.oklab_to_hex(c)
     return colors.srgb_to_hex(colors.oklab_to_srgb(c))
 end
 
+local function coerce_icon_surface(icon)
+    if not icon then return nil end
+
+    local ok_lgi, lgi = pcall(require, "lgi")
+    local ok_is_surface, is_surface = pcall(function()
+        return ok_lgi and lgi.cairo.Surface:is_type_of(icon)
+    end)
+    if ok_is_surface and is_surface then
+        return icon
+    end
+
+    local ok_gears, gears = pcall(require, "gears")
+    if ok_gears then
+        local ok_surface, surface = pcall(gears.surface.load_uncached_silently, icon, false)
+        if ok_surface and surface then
+            return surface
+        end
+    end
+end
+
 local function load_icon_path_surface(path)
     if path:lower():match("%.png$") then
         local ok_lgi, lgi = pcall(require, "lgi")
@@ -155,10 +175,10 @@ local function load_icon_surface(icon)
         if type(client_icon) == "string" then
             return load_icon_path_surface(client_icon)
         end
-        return client_icon
+        return coerce_icon_surface(client_icon)
     end
 
-    return icon
+    return coerce_icon_surface(icon)
 end
 
 local function surface_size(surface)
@@ -214,7 +234,12 @@ local function render_icon_to_argb32_data(icon, max_size)
     local cr = cairo.Context(surface)
 
     cr:scale(width / source_width, height / source_height)
-    cr:set_source_surface(source, 0, 0)
+    local ok_source = pcall(function()
+        cr:set_source_surface(source, 0, 0)
+    end)
+    if not ok_source then
+        return nil, nil, nil, nil, nil
+    end
     cr:paint()
     surface:flush()
 

@@ -5,7 +5,7 @@ local M = {}
 local class_icon_cache = {}
 local configured_launchers = {}
 
-local ICON_SIZES = { "256x256", "128x128", "96x96", "64x64", "48x48", "32x32", "scalable" }
+local ICON_SIZES = { "256x256", "128x128", "96x96", "64x64", "48x48", "32x32" }
 local ICON_EXTS  = { "png", "svg", "xpm" }
 
 function M.is_symbolic_icon(path)
@@ -35,11 +35,108 @@ function M.find_icon_file(icon_name)
         local p = "/usr/share/pixmaps/" .. icon_name .. "." .. ext
         local fh = io.open(p, "r"); if fh then fh:close(); return p end
     end
+    for _, base in ipairs(bases) do
+        for _, ext in ipairs(ICON_EXTS) do
+            local p = base .. "/scalable/apps/" .. icon_name .. "." .. ext
+            local fh = io.open(p, "r"); if fh then fh:close(); return p end
+        end
+    end
     return nil
 end
 
 local function class_icon_key(c)
     return (c.class or "") .. "\0" .. (c.instance or "")
+end
+
+local function xdg_application_dirs()
+    local dirs = {}
+    local home = os.getenv("HOME")
+    if home then dirs[#dirs + 1] = home .. "/.local/share/applications" end
+
+    local data_dirs = os.getenv("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    for dir in data_dirs:gmatch("[^:]+") do
+        dirs[#dirs + 1] = dir .. "/applications"
+    end
+    return dirs
+end
+
+local function shell_quote(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local function desktop_files()
+    local dirs = {}
+    for _, dir in ipairs(xdg_application_dirs()) do
+        dirs[#dirs + 1] = shell_quote(dir)
+    end
+    if #dirs == 0 then return {} end
+
+    local pipe = io.popen("find " .. table.concat(dirs, " ")
+        .. " -maxdepth 2 -type f -name '*.desktop' 2>/dev/null")
+    if not pipe then return {} end
+
+    local files = {}
+    for path in pipe:lines() do
+        files[#files + 1] = path
+    end
+    pipe:close()
+    return files
+end
+
+local function parse_desktop_icon_entry(path)
+    local fh = io.open(path, "r")
+    if not fh then return nil end
+
+    local in_entry = false
+    local entry = { file = path }
+    for line in fh:lines() do
+        if line == "[Desktop Entry]" then
+            in_entry = true
+        elseif in_entry and line:match("^%[") then
+            break
+        elseif in_entry then
+            local key, value = line:match("^([%w%-]+)%s*=%s*(.+)$")
+            if key == "Icon" or key == "StartupWMClass" or key == "Name" then
+                entry[key] = value
+            end
+        end
+    end
+    fh:close()
+
+    if not entry.Icon then return nil end
+    entry.file_name = path:match("([^/]+)%.desktop$")
+    return entry
+end
+
+local desktop_icon_cache
+
+local function add_desktop_icon(cache, key, icon)
+    if not key or key == "" or not icon or icon == "" then return end
+    key = key:lower()
+    cache[key] = cache[key] or {}
+    cache[key][#cache[key] + 1] = icon
+
+    for token in key:gmatch("[a-z0-9]+") do
+        if #token >= 4 and token ~= key then
+            cache[token] = cache[token] or {}
+            cache[token][#cache[token] + 1] = icon
+        end
+    end
+end
+
+local function desktop_icon_names_by_key()
+    if desktop_icon_cache then return desktop_icon_cache end
+
+    desktop_icon_cache = {}
+    for _, path in ipairs(desktop_files()) do
+        local entry = parse_desktop_icon_entry(path)
+        if entry then
+            add_desktop_icon(desktop_icon_cache, entry.StartupWMClass, entry.Icon)
+            add_desktop_icon(desktop_icon_cache, entry.file_name, entry.Icon)
+            add_desktop_icon(desktop_icon_cache, entry.Name, entry.Icon)
+        end
+    end
+    return desktop_icon_cache
 end
 
 local function add_candidate(candidates, seen, name)
@@ -67,6 +164,14 @@ local function icon_candidates(c, launchers)
     add_candidate(candidates, seen, c.class)
     add_candidate(candidates, seen, c.instance and c.instance:lower())
     add_candidate(candidates, seen, c.class and c.class:lower())
+
+    local desktop_icons = desktop_icon_names_by_key()
+    for _, name in ipairs({ c.instance, c.class, c.instance and c.instance:lower(), c.class and c.class:lower() }) do
+        local icons = name and desktop_icons[name:lower()]
+        for _, icon in ipairs(icons or {}) do
+            add_candidate(candidates, seen, icon)
+        end
+    end
 
     for _, launcher in ipairs(launchers or {}) do
         if launcher_matches_client(c, launcher) then
@@ -109,6 +214,7 @@ end
 function M.set_launchers(launchers)
     configured_launchers = launchers or {}
     class_icon_cache = {}
+    desktop_icon_cache = nil
 end
 
 function M.prepare_client_icon(c, launchers)
