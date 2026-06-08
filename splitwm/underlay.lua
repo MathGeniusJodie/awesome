@@ -44,8 +44,7 @@ function M.setup(deps)
 end
 
 ---------------------------------------------------------------------------
--- Per-screen underlay wibox: wallpaper + chrome + handles in one surface,
--- stacked below all windows and panels (type = "desktop").
+-- Per-screen underlay wibox: wallpaper + chrome + handles below windows/panels.
 ---------------------------------------------------------------------------
 
 local underlay_cache = {}
@@ -159,7 +158,7 @@ end
 
 function M.set_wallpaper(s, ws)
     local u = M.get_or_create_underlay(s)
-    u.wb.bg = ws.dark
+    u.wb.bg = ws.dark or color_bg
     if ws.has_bg then
         local surf = gears.surface.load(ws.bg)
         u.wallpaper_w._surface = surf
@@ -168,12 +167,11 @@ function M.set_wallpaper(s, ws)
         gears.wallpaper.maximized(ws.bg, s, true)
     else
         u.wallpaper_w._surface = nil
-        gears.wallpaper.set(ws.dark)
+        gears.wallpaper.set(ws.dark or color_bg)
     end
     u.wallpaper_w:emit_signal("widget::redraw_needed")
 end
 
----------------------------------------------------------------------------
 -- Drag handles (3-zone: left-only, symmetric, right-only)
 ---------------------------------------------------------------------------
 

@@ -797,7 +797,6 @@ local function get_active_state(s)
     return t, get_state(t)
 end
 
-
 splitwm.set_wallpaper = underlay.set_wallpaper
 
 ---------------------------------------------------------------------------

@@ -69,7 +69,7 @@ beautiful.splitwm_fg_disabled    = "#ffffff55"
 beautiful.splitwm_handle_color   = "#ffffff55"  -- drag handle pill (vertical handles + titlebar pill)
 
 -- Splitwm layout
-beautiful.splitwm_gap              = 42 -- minimum 32
+beautiful.splitwm_gap              = 40 -- minimum 32
 beautiful.splitwm_focus_border_width = 2
 beautiful.splitwm_border_radius    = 2
 beautiful.splitwm_empty_radius     = 14
@@ -89,29 +89,10 @@ package.path = config_dir .. "?.lua;"
             .. package.path
 
 local splitwm     = require("splitwm")
-local swcolors    = require("splitwm.colors")
 local menu        = require("menu")
 local status      = require("status")
 local timebar     = require("timebar")
-local transitions = require("transitions")
 local hunger_mod  = require("hunger")
-
--- Workspace colors: COLORS indices 0,2,4,6,8 (1-based: 1,3,5,7,9) = pink,gold,emerald,blue,purple
--- bg existence is checked once at startup to avoid repeated stat() on every switch
-local _home = os.getenv("HOME")
-local WORKSPACES = {}
-for i, ci in ipairs({1, 3, 5, 7, 9}) do
-    local c = swcolors.COLORS[ci]
-    WORKSPACES[i] = {
-        light  = c.light,
-        dark   = c.dark,
-        bg     = _home .. "/background" .. (ci - 1) .. ".jpg",
-        has_bg = false,
-    }
-end
-for _, ws in ipairs(WORKSPACES) do
-    ws.has_bg = gears.filesystem.file_readable(ws.bg)
-end
 
 ---------------------------------------------------------------------------
 -- Variables
@@ -119,6 +100,13 @@ end
 
 local terminal = os.getenv("TERMINAL") or "xterm"
 local modkey   = "Mod4"
+local _home    = os.getenv("HOME")
+
+local WALLPAPER = {
+    dark   = beautiful.splitwm_color_bg,
+    bg     = _home .. "/background0.jpg",
+    has_bg = gears.filesystem.file_readable(_home .. "/background0.jpg"),
+}
 
 -- Browser detection: try common browsers
 local browser = os.getenv("BROWSER") or "xdg-open https://"
@@ -217,55 +205,6 @@ splitwm.launchers = {
 }
 
 splitwm.setup()
-transitions.setup({ workspaces = WORKSPACES })
-
--- Expose for external callers e.g. awesome-client "tag_next()"
-tag_prev = transitions.switch_prev  -- luacheck: ignore
-tag_next = transitions.switch_next  -- luacheck: ignore
-
----------------------------------------------------------------------------
--- Edge workspace switching (Pacman style)
--- Mouse hitting left/right screen edge switches workspaces.
--- A dead zone prevents re-triggering until mouse retreats from the edge.
----------------------------------------------------------------------------
-
-local EDGE_DEAD_ZONE = beautiful.splitwm_gap  -- px from edge; must clear this before re-triggering
-
-local edge_locked = {}  -- [screen] = "left" | "right" | nil
-
-gears.timer {
-    timeout   = 0.025,
-    autostart = true,
-    callback  = function()
-        local s = mouse.screen
-        if not s then return end
-
-        local pos  = mouse.coords()
-        local mx   = pos.x - s.geometry.x
-        local sw   = s.geometry.width
-        local lock = edge_locked[s]
-
-        if mx <= 0 then
-            if lock ~= "left" then
-                edge_locked[s] = "left"
-                transitions.switch_instant(s, -1)
-                mouse.coords({ x = s.geometry.x + sw - 2, y = pos.y })
-            end
-        elseif mx >= sw - 1 then
-            if lock ~= "right" then
-                edge_locked[s] = "right"
-                transitions.switch_instant(s, 1)
-                mouse.coords({ x = s.geometry.x + 1, y = pos.y })
-            end
-        else
-            if lock == "left"  and mx > EDGE_DEAD_ZONE then
-                edge_locked[s] = nil
-            elseif lock == "right" and mx < sw - 1 - EDGE_DEAD_ZONE then
-                edge_locked[s] = nil
-            end
-        end
-    end,
-}
 
 menu.setup({
     terminal    = terminal,
@@ -294,23 +233,13 @@ beautiful.fg_focus       = "#ffffff"
 
 status.setup({
     splitwm     = splitwm,
-    transitions = transitions,
     hunger_mod  = hunger_mod,
-    WORKSPACES  = WORKSPACES,
     do_scroll   = function(s, delta_x) splitwm.scroll_delta(s, delta_x) end,
 })
 
 awful.screen.connect_for_each_screen(function(s)
-    awful.tag({ "1", "2", "3", "4", "5" }, s, splitwm.layout)
-
-    -- Per-tag wallpaper: rendered in the splitwm underlay wibox (type="desktop").
-    for i, t in ipairs(s.tags) do
-        local ws = WORKSPACES[i]
-        t:connect_signal("property::selected", function()
-            if t.selected then splitwm.set_wallpaper(s, ws) end
-        end)
-        if t.selected then splitwm.set_wallpaper(s, ws) end
-    end
+    awful.tag({ "main" }, s, splitwm.layout)
+    splitwm.set_wallpaper(s, WALLPAPER)
 
     timebar.setup(s)
     status.setup_screen(s)
@@ -400,14 +329,11 @@ local globalkeys = gears.table.join(
     awful.key({ modkey, "Shift" }, "l", splitwm.resize_shrink,
         { description = "shrink split", group = "splitwm" }),
 
-    ---------------------------------------------------------------------------
-    -- Tag switching (standard)
-    ---------------------------------------------------------------------------
+    awful.key({ modkey }, "Left", splitwm.focus_prev_split,
+        { description = "focus previous split", group = "splitwm" }),
 
-    awful.key({ modkey }, "Left",  function() transitions.switch_prev() end,
-        { description = "view previous", group = "tag" }),
-    awful.key({ modkey }, "Right", function() transitions.switch_next() end,
-        { description = "view next", group = "tag" }),
+    awful.key({ modkey }, "Right", splitwm.focus_next_split,
+        { description = "focus next split", group = "splitwm" }),
 
     ---------------------------------------------------------------------------
     -- Media / volume
@@ -425,19 +351,6 @@ local globalkeys = gears.table.join(
         awful.spawn.easy_async("pactl set-sink-mute @DEFAULT_SINK@ toggle", status.refresh_volume)
     end, { description = "toggle mute", group = "media" })
 )
-
--- Bind number keys to tags
-for i = 1, 5 do
-    globalkeys = gears.table.join(globalkeys,
-        awful.key({ modkey }, "#" .. i + 9,
-            function()
-                local s = awful.screen.focused()
-                local t = s.tags[i]
-                if t then transitions.switch(s, t) end
-            end,
-            { description = "view tag #" .. i, group = "tag" })
-    )
-end
 
 root.keys(globalkeys)
 

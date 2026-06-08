@@ -730,120 +730,23 @@ end
 -- Wibar setup
 ---------------------------------------------------------------------------
 
-local _splitwm, _transitions, _hunger_mod, _WORKSPACES
+local _splitwm, _hunger_mod
 
 local _do_scroll
 
 function status.setup(deps)
     _splitwm      = deps.splitwm
-    _transitions  = deps.transitions
     _hunger_mod   = deps.hunger_mod
-    _WORKSPACES   = deps.WORKSPACES
     _do_scroll    = deps.do_scroll
 end
 
 local CAPSULE_HEIGHT  = 24
 local ICON_BOTTOM_PAD = 4   -- gap between icon bottom and capsule bottom edge
-local TAG_PAD         = 2   -- border/padding around each tag thumbnail
-
-local function parse_hex(hex)
-    hex = hex:gsub("#", "")
-    return tonumber(hex:sub(1,2), 16) / 255,
-           tonumber(hex:sub(3,4), 16) / 255,
-           tonumber(hex:sub(5,6), 16) / 255
-end
-
---- Build a single tag button: wallpaper/screenshot thumbnail in a rounded-rect frame.
--- Empty tags show the wallpaper. Tags with windows show the screenshot from
--- transitions.cache, which is captured synchronously on every tag departure.
-local function make_tag_widget(t, ws, wibar_height)
-    local CORNER  = 4
-    local PAD     = TAG_PAD
-    local geo     = t.screen.geometry
-    local thumb_h = wibar_height
-    local thumb_w = math.floor((thumb_h - 2*PAD) * geo.width / geo.height) + 2*PAD
-
-    local thumb = wibox.widget.base.make_widget()
-    thumb.has_wins = false
-    thumb.selected = false
-    thumb.forced_width  = thumb_w
-    thumb.forced_height = thumb_h
-
-    local wp_surface = ws.has_bg and gears.surface.load(ws.bg) or nil
-    local dr, dg, db = parse_hex(ws.dark)
-
-    function thumb:fit(_, w, h) return self.forced_width, h end
-
-    function thumb:draw(_, cr, w, h)
-        local surf = (self.has_wins and _transitions.cache[t]) or wp_surface
-        local pad = PAD
-
-        cr:save()
-        cr:translate(pad, pad)
-        gears.shape.rounded_rect(cr, w - 2*pad, h - 2*pad, CORNER)
-        cr:clip()
-
-        if surf then
-            local sw = surf:get_width()
-            local sh = surf:get_height()
-            local cw, ch = w - 2*pad, h - 2*pad
-            local scale = math.max(cw / sw, ch / sh)
-            cr:save()
-            cr:translate((cw - sw * scale) / 2, (ch - sh * scale) / 2)
-            cr:scale(scale, scale)
-            cr:set_source_surface(surf, 0, 0)
-            cr:paint()
-            cr:restore()
-        else
-            cr:set_source_rgb(dr, dg, db)
-            cr:paint()
-        end
-
-        cr:restore()
-
-        if self.selected then
-            cr:set_source_rgba(1, 1, 1, 0.9)
-            cr:set_line_width(2)
-            cr:translate(pad - 1, pad - 1)
-            gears.shape.rounded_rect(cr, w - 2*(pad - 1), h - 2*(pad - 1), CORNER)
-            cr:stroke()
-        end
-    end
-
-    local function update()
-        thumb.has_wins = #t:clients() > 0
-        thumb.selected = t.selected
-        thumb:emit_signal("widget::redraw_needed")
-    end
-
-    local layout = wibox.container.margin(thumb, 0, 0, 0, 0)
-    layout:buttons(gears.table.join(
-        awful.button({}, 1,
-            function() _transitions.prepare(t.screen, t) end,
-            function() _transitions.switch(t.screen, t) end)
-    ))
-
-    t:connect_signal("property::selected",   function() update() end)
-    t:connect_signal("tagged",               function() update() end)
-    t:connect_signal("untagged",             function() update() end)
-    t:connect_signal("transitions::arrived", function() update() end)
-
-    update()
-    return layout
-end
 
 function status.setup_screen(s)
     local wibar_height = beautiful.splitwm_gap
 
     s.mypromptbox = awful.widget.prompt()
-
-    -- Build taglist manually so we have direct widget references.
-    local taglist_layout = wibox.layout.fixed.horizontal()
-    taglist_layout.spacing = 0
-    for i, t in ipairs(s.tags) do
-        taglist_layout:add(make_tag_widget(t, _WORKSPACES[i], wibar_height))
-    end
-    s.mytaglist = taglist_layout
 
     local hunger_parts = _hunger_mod.new_widget(CAPSULE_HEIGHT)
 
@@ -877,7 +780,7 @@ function status.setup_screen(s)
         width   = s.geometry.width - sg * 2,
         height  = wibar_height,
         bg      = "#00000000",
-        ontop   = false,
+        ontop   = true,
         screen  = s,
         visible = true,
         type    = "dock",
@@ -886,7 +789,6 @@ function status.setup_screen(s)
         layout = wibox.layout.align.horizontal,
         { -- Left
             layout = wibox.layout.fixed.horizontal,
-            wibox.container.margin(s.mytaglist, 0, 0, 0, 0),
             s.mypromptbox,
         },
         { widget = wibox.container.place, valign = "bottom", hunger_row }, -- Center
@@ -910,7 +812,7 @@ function status.setup_screen(s)
         width   = total_w,
         height  = lock_w,
         bg      = "#00000000",
-        ontop   = false,
+        ontop   = true,
         screen  = s,
         visible = true,
         type    = "dock",
