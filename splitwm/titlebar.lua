@@ -538,7 +538,7 @@ local function tb_compute_fingerprint(leaf, state, geo)
     local parts = {
         leaf.active_tab,
         state.focused_leaf_id == leaf.id and 1 or 0,
-        leaf.v_bound_above and "b" or "",
+        geo and geo.v_bound_above and "b" or "",
         leaf.minimized and "m" or "",
         leaf.min_anim  and "a" or "",
         (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id) and "S" or "",
@@ -1402,7 +1402,8 @@ local function update_titlebars(s, t, state, geos, leaves)
             or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, nil, entry)
 
         local drag_pill
-        if leaf.v_bound_above then
+        if geo.v_bound_above then
+            local v_bound_above = geo.v_bound_above
             local pill_bg = wibox.widget {
                 bg     = entry.pill_dragging and color_fg or color_transparent,
                 shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.floor(h / 2)) end,
@@ -1423,7 +1424,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             end)
             drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
                 if event_close_menu_if_open() then return end
-                run_v_drag(s, function() return leaf.v_bound_above end,
+                run_v_drag(s, function() return v_bound_above end,
                     function() entry.pill_dragging = true;  entry.pill_bg.bg = color_fg end,
                     function() entry.pill_dragging = false; entry.pill_bg.bg = color_transparent end)
             end)))

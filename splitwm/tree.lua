@@ -104,8 +104,12 @@ end
 
 local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above, tb_h)
     if node.kind == "leaf" then
-        if geos then geos[node.id] = { x = x, y = y, width = w, height = h } end
-        if bounds ~= nil then node.v_bound_above = v_bound_above end
+        if geos then
+            geos[node.id] = {
+                x = x, y = y, width = w, height = h,
+                v_bound_above = v_bound_above,
+            }
+        end
         return
     end
     local dir, inner = node.direction, gap
