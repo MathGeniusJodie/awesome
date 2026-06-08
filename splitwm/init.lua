@@ -343,7 +343,17 @@ local function focus_tab_operation(c, leaf_id, opts)
     end
 end
 
-local next_client_request = nil
+local pending_client_requests = {}
+
+local function remove_pending_client_request(request)
+    for i, pending in ipairs(pending_client_requests) do
+        if pending == request then
+            table.remove(pending_client_requests, i)
+            return true
+        end
+    end
+    return false
+end
 
 function splitwm.expect_next_client(opts)
     opts = opts or {}
@@ -364,9 +374,9 @@ function splitwm.expect_next_client(opts)
         leaf_id = leaf.id,
         append  = opts.append == true,
     }
-    next_client_request = request
+    table.insert(pending_client_requests, request)
     gears.timer.start_new(opts.timeout or 4, function()
-        if next_client_request == request then next_client_request = nil end
+        remove_pending_client_request(request)
         return false
     end)
     return request
@@ -378,14 +388,16 @@ function splitwm.spawn(cmd, opts)
 end
 
 local function take_next_client_request(t)
-    local request = next_client_request
-    if not request or request.tag ~= t then return nil, nil end
-
-    local state = tag_state[t]
-    local leaf = state and get_leaf(state, request.leaf_id)
-    next_client_request = nil
-    if not leaf then return nil, nil end
-    return request, leaf
+    for i, request in ipairs(pending_client_requests) do
+        if request.tag == t then
+            table.remove(pending_client_requests, i)
+            local state = tag_state[t]
+            local leaf = state and get_leaf(state, request.leaf_id)
+            if leaf then return request, leaf end
+            return nil, nil
+        end
+    end
+    return nil, nil
 end
 
 local function pin_client(t, c)
