@@ -658,54 +658,6 @@ local function tb_compute_fingerprint(leaf, state, geo)
     return table.concat(parts, "\0")
 end
 
-local function remove_client_from_leaf_tabs(leaf, tc)
-    local removed = false
-    local i = 1
-    while i <= #leaf.tabs do
-        if leaf.tabs[i] == tc then
-            table.remove(leaf.tabs, i)
-            removed = true
-            if i < leaf.active_tab then
-                leaf.active_tab = leaf.active_tab - 1
-            elseif i == leaf.active_tab then
-                leaf.active_tab = math.min(math.max(1, i - 1), #leaf.tabs)
-            end
-        else
-            i = i + 1
-        end
-    end
-    if #leaf.tabs == 0 then
-        leaf.active_tab = 0
-    else
-        leaf.active_tab = math.min(math.max(1, leaf.active_tab), #leaf.tabs)
-    end
-    return removed
-end
-
-local function move_remote_tab_to_leaf(ctx, source_leaf, target_leaf, tc)
-    if not tc.valid or source_leaf == target_leaf then return end
-    local removed = false
-    for _, leaf in ipairs(tree.collect_leaves(ctx.state.root)) do
-        if remove_client_from_leaf_tabs(leaf, tc) then
-            removed = true
-            colors.recheck_preferred(leaf, tc)
-        end
-    end
-    if not removed then return end
-
-    local insert_pos = target_leaf.active_tab > 0 and target_leaf.active_tab + 1 or #target_leaf.tabs + 1
-    table.insert(target_leaf.tabs, insert_pos, tc)
-    target_leaf.active_tab = insert_pos
-    ctx.state.focused_leaf_id = target_leaf.id
-    colors.resolve_color_conflict(target_leaf, tc)
-    awful.layout.arrange(ctx.s)
-    if _splitwm.focus_client_after_arrange then
-        _splitwm.focus_client_after_arrange(tc, target_leaf.id)
-    else
-        tc:emit_signal("request::activate", "remote_tab_click", { raise = true })
-    end
-end
-
 local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
     local w = make_circle_icon_btn_widget(draw_fn, size)
     w.shape_border_color = widget_bc
@@ -866,6 +818,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- Activate focus on tc (no-op if client is no longer valid).
     local function focus_tc()
         if not tc.valid then return end
+        if _splitwm.activate_client_in_leaf then
+            _splitwm.activate_client_in_leaf(ctx.t, leaf.id, tc, { screen = ctx.s })
+            return
+        end
         if _splitwm.focus_client_after_arrange then
             _splitwm.focus_client_after_arrange(tc, leaf.id)
         else
@@ -893,9 +849,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         local mx, my = m.x, m.y
         local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
         if g and in_close_btn(mx, my, g) then tc:kill(); return false end
-        leaf.active_tab = tab_idx
-        ctx.state.focused_leaf_id = leaf.id
-        awful.layout.arrange(ctx.s)
         focus_tc()
         return false
     end
@@ -930,15 +883,12 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                             awful.layout.arrange(ctx.s)
                             return false
                         end
-                        if target ~= tab_idx then
-                            leaf.tabs[tab_idx], leaf.tabs[target] =
-                                leaf.tabs[target], leaf.tabs[tab_idx]
-                        end
-                        leaf.active_tab = target
-                        ctx.state.focused_leaf_id = leaf.id
                         drag.pickup = pickup_idle()
-                        awful.layout.arrange(ctx.s)
-                        focus_tc()
+                        if not (_splitwm.swap_client_to_tab_index
+                                and _splitwm.swap_client_to_tab_index(ctx.t, leaf.id, tc, target, { screen = ctx.s })) then
+                            awful.layout.arrange(ctx.s)
+                            focus_tc()
+                        end
                     end
                     return false
                 end
@@ -1048,9 +998,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         and tab_idx ~= leaf.active_tab
         and tc.valid
         and g and in_tab_content(mc.x, mc.y, g) then
-            leaf.active_tab = tab_idx
-            ctx.state.focused_leaf_id = leaf.id
-            awful.layout.arrange(ctx.s)
             focus_tc()
         end
     end)
@@ -1102,10 +1049,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 tc:kill()
                 return
             end
-            leaf.active_tab = tab_idx
-            ctx.state.focused_leaf_id = leaf.id
             drag.pickup = pickup_idle()
-            awful.layout.arrange(ctx.s)
             focus_tc()
         end),
         awful.button({}, 3, function()
@@ -1507,7 +1451,7 @@ local function update_titlebars(s, t, state, geos, leaves)
         for _, other_leaf in ipairs(leaves) do
             if other_leaf.id ~= leaf.id then
                 for _, tc in ipairs(other_leaf.tabs) do
-                    remote_items[#remote_items + 1] = { source_leaf = other_leaf, client = tc }
+                    remote_items[#remote_items + 1] = { client = tc }
                     remote_widgets[#remote_widgets + 1] = tb_build_remote_tab_widget(tc, entry, ctx)
                 end
             end
@@ -1536,7 +1480,9 @@ local function update_titlebars(s, t, state, geos, leaves)
                 if not item then return end
                 remote_tab_click_active = true
                 gears.timer.delayed_call(function() remote_tab_click_active = false end)
-                move_remote_tab_to_leaf(ctx, item.source_leaf, leaf, item.client)
+                if _splitwm.move_client_to_leaf_id then
+                    _splitwm.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
+                end
             end
             remote_row:buttons(gears.table.join(awful.button({}, 1, handle_remote_click)))
             for _, w in ipairs(remote_widgets) do

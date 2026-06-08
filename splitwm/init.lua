@@ -306,6 +306,30 @@ end
 -- Client management
 ---------------------------------------------------------------------------
 
+local function tab_index_for_client(leaf, c)
+    if not leaf or not c then return nil end
+    for i, tc in ipairs(leaf.tabs) do
+        if tc == c then return i end
+    end
+    return nil
+end
+
+local function arrange_tab_operation(t, c, opts)
+    if opts and opts.arrange == false then return end
+    local s = (opts and opts.screen) or (t and t.screen) or (c and c.screen)
+    if s then awful.layout.arrange(s) end
+end
+
+local function focus_tab_operation(c, leaf_id, opts)
+    if opts and opts.focus == false then return end
+    if splitwm.focus_client_after_arrange then
+        splitwm.focus_client_after_arrange(c, leaf_id)
+    elseif c and c.valid then
+        client.focus = c
+        c:raise()
+    end
+end
+
 local function pin_client(t, c)
     local state = get_state(t)
     local leaf = get_focused_leaf(state)
@@ -371,6 +395,74 @@ local function move_client_to_leaf(root, c, target_leaf)
     local insert_pos = target_leaf.active_tab + 1
     table.insert(target_leaf.tabs, insert_pos, c)
     target_leaf.active_tab = insert_pos
+end
+
+local function activate_client_in_leaf(t, leaf_id, c, opts)
+    if not (t and c and c.valid) then return false end
+    local state = get_state(t)
+    local leaf = state.leaf_map[leaf_id]
+    if not leaf then return false end
+
+    local tab_idx = tab_index_for_client(leaf, c)
+    if not tab_idx then return false end
+
+    leaf.active_tab = tab_idx
+    state.focused_leaf_id = leaf.id
+    arrange_tab_operation(t, c, opts)
+    focus_tab_operation(c, leaf.id, opts)
+    return true
+end
+
+local function move_client_to_leaf_id(t, leaf_id, c, opts)
+    if not (t and c and c.valid) then return false end
+    local state = get_state(t)
+    local target_leaf = state.leaf_map[leaf_id]
+    if not target_leaf then return false end
+
+    local src_tag = c.first_tag
+    if src_tag and src_tag ~= t then
+        local src_state = tag_state[src_tag]
+        if src_state then unpin_client(src_state.root, c) end
+        c:move_to_tag(t)
+    end
+
+    if tab_index_for_client(target_leaf, c) then
+        remove_client_from_other_leaves(state, c, target_leaf)
+        return activate_client_in_leaf(t, target_leaf.id, c, opts)
+    end
+
+    remove_client_from_other_leaves(state, c, nil)
+    local insert_pos = target_leaf.active_tab > 0
+        and target_leaf.active_tab + 1
+        or #target_leaf.tabs + 1
+    table.insert(target_leaf.tabs, insert_pos, c)
+    target_leaf.active_tab = insert_pos
+    state.focused_leaf_id = target_leaf.id
+    colors.resolve_color_conflict(target_leaf, c)
+    arrange_tab_operation(t, c, opts)
+    focus_tab_operation(c, target_leaf.id, opts)
+    return true
+end
+
+local function swap_client_to_tab_index(t, leaf_id, c, target_idx, opts)
+    if not (t and c and c.valid) then return false end
+    target_idx = math.floor(tonumber(target_idx) or 0)
+
+    local state = get_state(t)
+    local leaf = state.leaf_map[leaf_id]
+    if not leaf or target_idx < 1 or target_idx > #leaf.tabs then return false end
+
+    local current_idx = tab_index_for_client(leaf, c)
+    if not current_idx then return false end
+    if current_idx ~= target_idx then
+        leaf.tabs[current_idx], leaf.tabs[target_idx] =
+            leaf.tabs[target_idx], leaf.tabs[current_idx]
+    end
+    leaf.active_tab = target_idx
+    state.focused_leaf_id = leaf.id
+    arrange_tab_operation(t, c, opts)
+    focus_tab_operation(c, leaf.id, opts)
+    return true
 end
 
 local function swap_split_tabs(state, leaf_a_id, leaf_b_id)
@@ -1172,6 +1264,10 @@ end
 
 local function insert_at_right_edge(t, s) insert_at_edge(t, s, false) end
 local function insert_at_left_edge(t, s)  insert_at_edge(t, s, true)  end
+
+splitwm.activate_client_in_leaf = activate_client_in_leaf
+splitwm.move_client_to_leaf_id  = move_client_to_leaf_id
+splitwm.swap_client_to_tab_index = swap_client_to_tab_index
 
 ---------------------------------------------------------------------------
 -- Layout object
