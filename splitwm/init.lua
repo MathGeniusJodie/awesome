@@ -53,7 +53,7 @@ local smush_queue = {}
 local smush_queue_running = false
 local smush_restore_client = nil
 local smush_restore_leaf_id = nil
-local smush_focus_active = false
+local smush_focus_client = nil
 
 local function smush_command(mode)
     if mode == "reset" then
@@ -71,7 +71,7 @@ local function restore_focus_after_smush()
     local restore_leaf_id = smush_restore_leaf_id
     smush_restore_client = nil
     smush_restore_leaf_id = nil
-    smush_focus_active = false
+    smush_focus_client = nil
     smush_queue_running = false
     if not (restore and restore.valid) then return end
     if splitwm.focus_client_after_arrange then
@@ -95,13 +95,7 @@ process_smush_queue = function()
         return
     end
 
-    local restore = smush_restore_client
-    local restore_leaf_id = smush_restore_leaf_id
-    if restore and restore.valid and restore ~= c and splitwm.guard_focus then
-        splitwm.guard_focus(restore, 0.8, restore_leaf_id)
-    end
-
-    smush_focus_active = true
+    smush_focus_client = c
     client.focus = c
     c:raise()
     gears.timer.start_new(0.035, function()
@@ -1448,7 +1442,7 @@ function splitwm.setup()
     end)
 
     client.connect_signal("focus", function(c)
-        if smush_focus_active then return end
+        if smush_focus_client == c then return end
         if focus_guard and focus_guard.client ~= c then
             local target = focus_guard.client
             local target_leaf_id = focus_guard.leaf_id
@@ -1499,6 +1493,10 @@ function splitwm.setup()
         if leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
             needs_arrange = true
+        end
+        if smush_queue_running then
+            smush_restore_client = c
+            smush_restore_leaf_id = leaf.id
         end
         if needs_arrange then awful.layout.arrange(c.screen) end
         local t = c.first_tag
