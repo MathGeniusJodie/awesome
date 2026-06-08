@@ -104,42 +104,286 @@ function colors.oklab_to_hex(c)
     return colors.srgb_to_hex(colors.oklab_to_srgb(c))
 end
 
--- Preferred color per application class (case-insensitive).
-local CLASS_COLORS = {
-    ["discord"]              = "violet",
-    ["obsidian"]             = "purple",
-    ["mpv"]                  = "purple",
-    ["claude"]               = "orange",
-    ["librewolf"]            = "cyan",
-    ["code"]                 = "blue",  -- VSCode
-    ["code-oss"]             = "blue",
-    ["yt-gtk"]               = "pink",
-}
+local function load_icon_path_surface(path)
+    if path:lower():match("%.png$") then
+        local ok_lgi, lgi = pcall(require, "lgi")
+        if ok_lgi then
+            local ok_surface, surface = pcall(lgi.cairo.ImageSurface.create_from_png, path)
+            if ok_surface and surface then
+                return surface
+            end
+        end
+    end
 
-local function get_preferred_color(c)
-    if not c.valid or not c.class then return nil end
-    local name = CLASS_COLORS[c.class:lower()]
-    return name and COLORS_BY_NAME[name]
+    local ok_gears, gears = pcall(require, "gears")
+    if not ok_gears then
+        return nil
+    end
+
+    local ok_surface, surface = pcall(gears.surface.load, path)
+    return ok_surface and surface or nil
 end
 
--- Lua-side cache to avoid repeated X11 xproperty reads.
+local function load_theme_icon_surface(c)
+    local ok_theme_icon, theme_icon = pcall(function()
+        local ok_client_icons, client_icons = pcall(require, "splitwm.client_icons")
+        if not ok_client_icons then return nil end
+        local path = client_icons.lookup_class_icon(c)
+        if client_icons.is_symbolic_icon(path) then return nil end
+        return path
+    end)
+
+    if ok_theme_icon and theme_icon then
+        return load_icon_path_surface(theme_icon)
+    end
+end
+
+local function load_icon_surface(icon)
+    if type(icon) == "string" then
+        return load_icon_path_surface(icon)
+    end
+
+    local theme_surface = load_theme_icon_surface(icon)
+    if theme_surface then
+        return theme_surface
+    end
+
+    local ok_client_icon, client_icon = pcall(function()
+        return icon and icon.icon
+    end)
+    if ok_client_icon and client_icon then
+        if type(client_icon) == "string" then
+            return load_icon_path_surface(client_icon)
+        end
+        return client_icon
+    end
+
+    return icon
+end
+
+local function surface_size(surface)
+    local ok_width, width = pcall(function()
+        return surface:get_width()
+    end)
+    local ok_height, height = pcall(function()
+        return surface:get_height()
+    end)
+
+    if not ok_width or not ok_height or not width or not height then
+        return nil, nil
+    end
+
+    return width, height
+end
+
+local function render_icon_to_argb32_data(icon, max_size)
+    local source = load_icon_surface(icon)
+    if not source then
+        return nil, nil, nil, nil
+    end
+
+    local source_width, source_height = surface_size(source)
+    if not source_width or source_width <= 0 or source_height <= 0 then
+        return nil, nil, nil, nil
+    end
+
+    local ok_lgi, lgi = pcall(require, "lgi")
+    if not ok_lgi then
+        return nil, nil, nil, nil
+    end
+
+    local ok_bytes, bytes = pcall(require, "bytes")
+    if not ok_bytes then
+        return nil, nil, nil, nil
+    end
+
+    local cairo = lgi.cairo
+    local scale = 1
+    if max_size and max_size > 0 then
+        scale = math.min(1, max_size / math.max(source_width, source_height))
+    end
+
+    local width = math.max(1, math.floor(source_width * scale + 0.5))
+    local height = math.max(1, math.floor(source_height * scale + 0.5))
+    local ok_stride, stride = pcall(cairo.Format.stride_for_width, cairo.Format.ARGB32, width)
+    stride = ok_stride and stride and stride > 0 and stride or width * 4
+    stride = math.floor(stride + 0.5)
+
+    local data = bytes.new(stride * height)
+    local surface = cairo.ImageSurface.create_for_data(data, cairo.Format.ARGB32, width, height, stride)
+    local cr = cairo.Context(surface)
+
+    cr:scale(width / source_width, height / source_height)
+    cr:set_source_surface(source, 0, 0)
+    cr:paint()
+    surface:flush()
+
+    return data, stride, width, height
+end
+
+function colors.average_icon_color(icon, opts)
+    opts = opts or {}
+
+    local data, stride, width, height = render_icon_to_argb32_data(icon, opts.max_size or 64)
+    if not data then
+        return nil
+    end
+
+    local alpha_threshold = opts.alpha_threshold or 0
+    local sum_r, sum_g, sum_b, sum_weight = 0, 0, 0, 0
+
+    -- Cairo ARGB32 is native endian; on Linux/x86 pixels are stored B, G, R, A.
+    for y = 0, height - 1 do
+        local row = y * stride
+        for x = 0, width - 1 do
+            local offset = row + x * 4
+            local b = data[offset + 1] / 255
+            local g = data[offset + 2] / 255
+            local r = data[offset + 3] / 255
+            local a = data[offset + 4] / 255
+
+            if a > alpha_threshold then
+                local inv_alpha = 1 / a
+                local srgb_r = clamp01(r * inv_alpha)
+                local srgb_g = clamp01(g * inv_alpha)
+                local srgb_b = clamp01(b * inv_alpha)
+
+                sum_r = sum_r + srgb_to_linear_channel(srgb_r) * a
+                sum_g = sum_g + srgb_to_linear_channel(srgb_g) * a
+                sum_b = sum_b + srgb_to_linear_channel(srgb_b) * a
+                sum_weight = sum_weight + a
+            end
+        end
+    end
+
+    if sum_weight <= 0 then
+        return nil
+    end
+
+    local linear_srgb = vec3(sum_r / sum_weight, sum_g / sum_weight, sum_b / sum_weight)
+    local srgb = colors.linear_srgb_to_srgb(linear_srgb)
+
+    return {
+        linear_srgb = linear_srgb,
+        srgb = srgb,
+        hex = colors.srgb_to_hex(srgb),
+        alpha = sum_weight / (width * height),
+        width = width,
+        height = height,
+    }
+end
+
+colors.average_app_icon_color = colors.average_icon_color
+
+local TAU = math.pi * 2
+local ICON_HUE_CHROMA_THRESHOLD = 0.015
+local color_templates
+
+local function atan2(y, x)
+    return math.atan2 and math.atan2(y, x) or math.atan(y, x)
+end
+
+local function oklab_chroma(c)
+    return math.sqrt(c[2] * c[2] + c[3] * c[3])
+end
+
+local function oklab_hue(c)
+    local chroma = oklab_chroma(c)
+    if chroma < ICON_HUE_CHROMA_THRESHOLD then return nil end
+    local hue = atan2(c[3], c[2])
+    return hue < 0 and hue + TAU or hue
+end
+
+local function hue_distance(a, b)
+    local d = math.abs(a - b) % TAU
+    return math.min(d, TAU - d)
+end
+
+local function oklab_with_hue(template, hue)
+    local chroma = oklab_chroma(template)
+    return vec3(
+        template[1],
+        math.cos(hue) * chroma,
+        math.sin(hue) * chroma
+    )
+end
+
+local function get_color_templates()
+    if color_templates then return color_templates end
+
+    color_templates = {}
+    for _, col in ipairs(COLORS) do
+        local light = colors.hex_to_oklab(col.light)
+        local dark = colors.hex_to_oklab(col.dark)
+        local hue = light and oklab_hue(light)
+        if light and dark and hue then
+            color_templates[#color_templates + 1] = {
+                name = col.name,
+                hue = hue,
+                light = light,
+                dark = dark,
+            }
+        end
+    end
+
+    return color_templates
+end
+
+local function template_for_hue(hue)
+    local best, best_dist
+    for _, template in ipairs(get_color_templates()) do
+        local dist = hue_distance(hue, template.hue)
+        if not best_dist or dist < best_dist then
+            best = template
+            best_dist = dist
+        end
+    end
+    return best
+end
+
+local function color_from_icon_hue(c)
+    local avg = colors.average_icon_color(c, { max_size = 48 })
+    if not avg then return nil end
+
+    local hue = oklab_hue(colors.linear_srgb_to_oklab(avg.linear_srgb))
+    local template = hue and template_for_hue(hue)
+    if not template then return nil end
+
+    local light = colors.oklab_to_hex(oklab_with_hue(template.light, hue))
+    local dark = colors.oklab_to_hex(oklab_with_hue(template.dark, hue))
+
+    return {
+        name = "icon:" .. light .. ":" .. dark,
+        light = light,
+        dark = dark,
+        from_icon = true,
+        icon_hex = avg.hex,
+        base = template.name,
+    }
+end
+
+-- Lua-side cache to avoid repeated X11 xproperty reads and icon averaging.
 -- Weak keys so entries are evicted automatically when clients are GC'd.
 -- Boxes ({value}) distinguish "not cached" (nil) from "cached nil" ({nil}).
 local color_cache = setmetatable({}, { __mode = "k" })
+
+function colors.clear_client_color_cache(c)
+    color_cache[c] = nil
+end
 
 function colors.get_client_color(c)
     if not c.valid then return nil end
     local box = color_cache[c]
     if box ~= nil then return box[1] end
-    local name = c:get_xproperty("splitwm_color")
-    local result = name and COLORS_BY_NAME[name]
+    local name = c:get_xproperty("splitwm_manual_color")
+    local result = (name and COLORS_BY_NAME[name]) or color_from_icon_hue(c)
     color_cache[c] = { result }
     return result
 end
 
 local function set_client_color(c, name)
     if not c.valid then return end
-    c:set_xproperty("splitwm_color", name)
+    c:set_xproperty("splitwm_manual_color", name)
     color_cache[c] = { COLORS_BY_NAME[name] }
 end
 
@@ -148,12 +392,9 @@ local function pick_color_for_leaf(leaf, exclude_c)
     for _, tc in ipairs(leaf.tabs) do
         if tc ~= exclude_c and tc.valid then
             local col = colors.get_client_color(tc)
-            if col then used[col.name] = true end
+            if col and COLORS_BY_NAME[col.name] then used[col.name] = true end
         end
     end
-    -- Honour the app's preferred color if it isn't already taken.
-    local preferred = exclude_c and get_preferred_color(exclude_c)
-    if preferred and not used[preferred.name] then return preferred end
     for _, col in ipairs(COLORS) do
         if not used[col.name] then return col end
     end
@@ -161,36 +402,14 @@ local function pick_color_for_leaf(leaf, exclude_c)
 end
 
 local function assign_color(leaf, c)
-    set_client_color(c, pick_color_for_leaf(leaf, c).name)
-end
-
--- After a tab is removed, let remaining tabs reclaim their preferred color
--- if it's no longer taken by anyone else in the leaf.
-function colors.recheck_preferred(leaf, exclude_c)
-    for _, tc in ipairs(leaf.tabs) do
-        if tc == exclude_c or not tc.valid then goto continue end
-        local preferred = get_preferred_color(tc)
-        if not preferred then goto continue end
-        local conflict = false
-        for _, other in ipairs(leaf.tabs) do
-            if other ~= tc and other ~= exclude_c and other.valid then
-                local col = colors.get_client_color(other)
-                if col and col.name == preferred.name then
-                    conflict = true; break
-                end
-            end
-        end
-        if not conflict then
-            set_client_color(tc, preferred.name)
-        end
-        ::continue::
-    end
+    color_cache[c] = { pick_color_for_leaf(leaf, c) }
 end
 
 function colors.resolve_color_conflict(leaf, c)
     if not c.valid then return end
     local existing = colors.get_client_color(c)
     if not existing then assign_color(leaf, c); return end
+    if existing.from_icon then return end
     for _, tc in ipairs(leaf.tabs) do
         if tc ~= c and tc.valid then
             local col = colors.get_client_color(tc)

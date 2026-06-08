@@ -438,9 +438,7 @@ end
 
 local function unpin_client(root, c)
     for _, leaf in ipairs(tree.collect_leaves(root)) do
-        if remove_client_from_leaf(leaf, c) then
-            colors.recheck_preferred(leaf, c)
-        end
+        remove_client_from_leaf(leaf, c)
     end
 end
 
@@ -449,7 +447,6 @@ local function remove_client_from_other_leaves(state, c, keep_leaf)
     for _, leaf in ipairs(tree.collect_leaves(state.root)) do
         if leaf ~= keep_leaf and remove_client_from_leaf(leaf, c) then
             removed = true
-            colors.recheck_preferred(leaf, c)
         end
     end
     return removed
@@ -1423,7 +1420,8 @@ function splitwm.setup()
     color_fg_hover       = beautiful.splitwm_fg_hover    or "#ffffff20"
     color_close          = beautiful.splitwm_close_color or beautiful.splitwm_accent or "#ff6666ff"
 
-    awesome.register_xproperty("splitwm_color", "string")
+    client_icons.set_launchers(splitwm.launchers)
+    awesome.register_xproperty("splitwm_manual_color", "string")
 
     anim.init({
         get_active_state = get_active_state,
@@ -1496,7 +1494,7 @@ function splitwm.setup()
     })
 
     client.connect_signal("manage", function(c)
-        client_icons.prepare_client_icon(c)
+        client_icons.prepare_client_icon(c, splitwm.launchers)
         local t = c.first_tag
         if not t then return end
         local state = get_state(t)
@@ -1520,11 +1518,13 @@ function splitwm.setup()
     end)
 
     local function refresh_client_icon(c)
-        client_icons.prepare_client_icon(c)
+        client_icons.prepare_client_icon(c, splitwm.launchers)
+        colors.clear_client_color_cache(c)
         if c.screen then awful.layout.arrange(c.screen) end
     end
     client.connect_signal("property::class", refresh_client_icon)
     client.connect_signal("property::instance", refresh_client_icon)
+    client.connect_signal("property::icon", refresh_client_icon)
 
     client.connect_signal("focus", function(c)
         if smush_focus_client == c then return end
