@@ -484,7 +484,7 @@ local function mark_menu_closed()
 end
 
 local function event_close_menu_if_open()
-    if _splitwm._menu_just_toggled then return false end
+    if _splitwm.menu_just_toggled and _splitwm.menu_just_toggled() then return false end
     if menu_was_open_this_event    then return true  end
     if hide_tab_color_menu() then
         mark_menu_closed(); return true

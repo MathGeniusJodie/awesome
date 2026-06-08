@@ -201,9 +201,15 @@ function menu.setup(opts)
         end,
     }
 
+    local menu_just_toggled = false
+
+    splitwm.menu_just_toggled = function()
+        return menu_just_toggled
+    end
+
     splitwm.on_menu_request = function()
-        splitwm._menu_just_toggled = true
-        gears.timer.delayed_call(function() splitwm._menu_just_toggled = false end)
+        menu_just_toggled = true
+        gears.timer.delayed_call(function() menu_just_toggled = false end)
         build_menu()
         app_menu:toggle()
         poll_ready = false
