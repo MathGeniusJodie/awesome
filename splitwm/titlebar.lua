@@ -159,6 +159,7 @@ end
 
 local titlebar_cache = {}
 local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+local local_tab_click_active = false
 local remote_tab_click_active = false
 
 -- Cache class→icon_path so lookup_icon (disk I/O) only runs once per class.
@@ -1041,6 +1042,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local mc = mouse.coords()
             local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
             if not (g and in_tab_content(mc.x, mc.y, g)) then return end
+            local_tab_click_active = true
+            gears.timer.delayed_call(function() local_tab_click_active = false end)
             if drag.pickup.tag == "split" and drag.pickup.split_id ~= leaf.id then
                 _handle_split_pickup(ctx.state, leaf.id, ctx.s); return
             end
@@ -1083,6 +1086,8 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local mc = mouse.coords()
             local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
             if not (g and in_tab_content(mc.x, mc.y, g)) then return end
+            local_tab_click_active = true
+            gears.timer.delayed_call(function() local_tab_click_active = false end)
             if _splitwm.on_menu_close then _splitwm.on_menu_close() end
             if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
                 hide_tab_color_menu(); return
@@ -1493,6 +1498,7 @@ local function update_titlebars(s, t, state, geos, leaves)
             remote_row:connect_signal("mouse::enter", function() remote_row.opacity = 1.0 end)
             remote_row:connect_signal("mouse::leave", function() remote_row.opacity = 0.5 end)
             local function handle_remote_click()
+                if local_tab_click_active then return end
                 if remote_tab_click_active then return end
                 local m = mouse.coords()
                 local row_x = geo.x - (state.scroll_x or 0)
