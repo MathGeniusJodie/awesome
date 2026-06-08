@@ -118,7 +118,10 @@ local function coerce_icon_surface(icon)
     local ok_gears, gears = pcall(require, "gears")
     if ok_gears then
         local ok_surface, surface = pcall(gears.surface.load_uncached_silently, icon, false)
-        if ok_surface and surface then
+        local ok_loaded_surface, loaded_is_surface = pcall(function()
+            return ok_lgi and lgi.cairo.Surface:is_type_of(surface)
+        end)
+        if ok_surface and ok_loaded_surface and loaded_is_surface then
             return surface
         end
     end
@@ -158,24 +161,68 @@ local function load_theme_icon_surface(c)
     end
 end
 
-local function load_icon_surface(icon)
+local function client_icon_value(c)
+    local ok_client_icon, client_icon = pcall(function()
+        return c and c.icon
+    end)
+    return ok_client_icon and client_icon or nil
+end
+
+local function find_best_client_icon(sizes, width, height)
+    local best, best_size
+    for k, size in ipairs(sizes or {}) do
+        if not best then
+            best, best_size = k, size
+        else
+            local best_too_small = best_size[1] < width or best_size[2] < height
+            local best_too_large = best_size[1] > width or best_size[2] > height
+            local better_bigger = best_too_small and size[1] > best_size[1] and size[2] > best_size[2]
+            local better_smaller = best_too_large and size[1] < best_size[1] and size[2] < best_size[2]
+                and size[1] >= width and size[2] >= height
+            if better_bigger or better_smaller then best, best_size = k, size end
+        end
+    end
+    return best
+end
+
+local function load_shown_client_icon_surface(c, size)
+    local ok_sizes, sizes = pcall(function()
+        return c and c.icon_sizes
+    end)
+    if not ok_sizes or not sizes then return nil end
+
+    local target_size = size or 64
+    local index = find_best_client_icon(sizes, target_size, target_size)
+    if not index then return nil end
+
+    local ok_icon, icon = pcall(function()
+        return c:get_icon(index)
+    end)
+    if not ok_icon then return nil end
+    return coerce_icon_surface(icon)
+end
+
+local function load_icon_surface(icon, size)
     if type(icon) == "string" then
         return load_icon_path_surface(icon)
+    end
+
+    local shown_icon_surface = load_shown_client_icon_surface(icon, size)
+    if shown_icon_surface then
+        return shown_icon_surface
+    end
+
+    local client_icon = client_icon_value(icon)
+    if client_icon then
+        if type(client_icon) == "string" then
+            return load_icon_path_surface(client_icon)
+        end
+        return coerce_icon_surface(client_icon)
     end
 
     local theme_surface = load_theme_icon_surface(icon)
     if theme_surface then
         return theme_surface
-    end
-
-    local ok_client_icon, client_icon = pcall(function()
-        return icon and icon.icon
-    end)
-    if ok_client_icon and client_icon then
-        if type(client_icon) == "string" then
-            return load_icon_path_surface(client_icon)
-        end
-        return coerce_icon_surface(client_icon)
     end
 
     return coerce_icon_surface(icon)
@@ -197,7 +244,7 @@ local function surface_size(surface)
 end
 
 local function render_icon_to_argb32_data(icon, max_size)
-    local source = load_icon_surface(icon)
+    local source = load_icon_surface(icon, max_size)
     if not source then
         return nil, nil, nil, nil
     end
@@ -375,12 +422,27 @@ local function slot_offset_degrees(slot)
     return slot * HUE_SLOT_DEGREES
 end
 
+local function average_with_hue(icon)
+    local avg = colors.average_icon_color(icon, { max_size = 48 })
+    if not avg then return nil, nil end
+    return avg, oklab_hue(colors.linear_srgb_to_oklab(avg.linear_srgb))
+end
+
 local function client_app_key(c)
     local ok_client_icons, client_icons = pcall(require, "splitwm.client_icons")
     if ok_client_icons then
         local key = client_icons.app_key(c)
         if key then return key end
     end
+end
+
+local function fallback_color_for_client(c)
+    local key = client_app_key(c) or "client"
+    local hash = 0
+    for i = 1, #key do
+        hash = (hash * 33 + key:byte(i)) % 2147483647
+    end
+    return COLORS[(hash % #COLORS) + 1]
 end
 
 local app_hue_slots = {}
@@ -442,10 +504,7 @@ function colors.get_client_hue_offset_degrees(c)
 end
 
 local function color_from_icon_hue(c)
-    local avg = colors.average_icon_color(c, { max_size = 48 })
-    if not avg then return nil end
-
-    local base_hue = oklab_hue(colors.linear_srgb_to_oklab(avg.linear_srgb))
+    local avg, base_hue = average_with_hue(c)
     local template = base_hue and template_for_hue(base_hue)
     if not template then return nil end
 
@@ -559,7 +618,7 @@ function colors.get_client_color(c)
     local box = color_cache[c]
     if box ~= nil then return box[1] end
     local name = c:get_xproperty("splitwm_manual_color")
-    local result = (name and COLORS_BY_NAME[name]) or color_from_icon_hue(c)
+    local result = (name and COLORS_BY_NAME[name]) or color_from_icon_hue(c) or fallback_color_for_client(c)
     color_cache[c] = { result }
     return result
 end

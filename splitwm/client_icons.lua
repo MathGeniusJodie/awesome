@@ -191,18 +191,14 @@ local function resolve_class_icon(c, launchers)
     local symbolic
     for _, name in ipairs(candidates) do
         if name then
-            local path = M.find_icon_file(name)
-            if path then
+            local path = menubar_utils.lookup_icon(name)
+            if path and path ~= false then
                 if not M.is_symbolic_icon(path) then return path end
                 symbolic = symbolic or path
             end
-        end
-    end
 
-    for _, name in ipairs(candidates) do
-        if name then
-            local path = menubar_utils.lookup_icon(name)
-            if path and path ~= false then
+            path = M.find_icon_file(name)
+            if path then
                 if not M.is_symbolic_icon(path) then return path end
                 symbolic = symbolic or path
             end
