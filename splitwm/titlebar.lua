@@ -97,6 +97,9 @@ local LAUNCHER_ICON_SIZE = 34
 -- Minimum vertical movement (px) before a drag-handle drag activates.
 local DRAG_THRESHOLD_PX = 4
 
+local TITLEBAR_RESIZE_CURSOR = "sb_v_double_arrow"
+local DEFAULT_CURSOR = "left_ptr"
+
 -- Tab shape geometry.  TAB_ALPHA is the slant angle from vertical.
 local TAB_ALPHA  = math.rad(20)
 local TAB_EAR    = 12
@@ -1383,20 +1386,30 @@ local function update_titlebars(s, t, state, geos, leaves)
             drag_pill = wibox.widget {
                 { pill_bg, bottom = BTN_V_RAISE, left = 4, right = 4, widget = wibox.container.margin },
                 bg     = color_transparent,
-                cursor = "sb_v_double_arrow",
+                cursor = TITLEBAR_RESIZE_CURSOR,
                 widget = wibox.container.background,
             }
             drag_pill:connect_signal("mouse::enter", function()
+                entry.wb.cursor = TITLEBAR_RESIZE_CURSOR
                 if not entry.pill_dragging then entry.pill_bg.bg = color_handle end
             end)
             drag_pill:connect_signal("mouse::leave", function()
+                entry.wb.cursor = DEFAULT_CURSOR
                 if not entry.pill_dragging then entry.pill_bg.bg = color_transparent end
             end)
             drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
                 if event_close_menu_if_open() then return end
                 run_v_drag(s, function() return v_bound_above end,
-                    function() entry.pill_dragging = true;  entry.pill_bg.bg = color_fg end,
-                    function() entry.pill_dragging = false; entry.pill_bg.bg = color_transparent end)
+                    function()
+                        entry.pill_dragging = true
+                        entry.pill_bg.bg = color_fg
+                        entry.wb.cursor = TITLEBAR_RESIZE_CURSOR
+                    end,
+                    function()
+                        entry.pill_dragging = false
+                        entry.pill_bg.bg = color_transparent
+                        entry.wb.cursor = DEFAULT_CURSOR
+                    end)
             end)))
         end
 

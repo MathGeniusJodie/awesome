@@ -177,6 +177,10 @@ end
 
 -- Total px subtracted from gap to get handle widget width (inset on each side).
 local HANDLE_INSET = 4
+local GAP_RESIZE_CURSOR = "sb_h_double_arrow"
+local GAP_LEFT_CURSOR = "left_side"
+local GAP_RIGHT_CURSOR = "right_side"
+local DEFAULT_CURSOR = "left_ptr"
 
 -- Zone boundaries as fraction of half-gap from center.
 -- Middle zone = ±ZONE_FRAC of gap width; outside = left/right asymmetric.
@@ -189,10 +193,36 @@ local function get_drag_handle(s, i)
     if not drag_handle_pool[s] then drag_handle_pool[s] = {} end
     if drag_handle_pool[s][i] then return drag_handle_pool[s][i] end
 
+    local underlay = M.get_or_create_underlay(s)
     local ref = { b = nil, handle_w = 1 }
     local handle_state = "idle"
-    local wb = M.make_wb_proxy(M.get_or_create_underlay(s).handle_layer, s)
+    local wb = M.make_wb_proxy(underlay.handle_layer, s)
     wb.visible = false
+
+    local function handle_cursor()
+        local b = ref.b
+        if not b or b.edge then return DEFAULT_CURSOR end
+
+        local mx = mouse.coords().x
+        local center = wb.x + math.floor(wb.width / 2)
+        local zone_half = (b.parent_gap or wb.width or 0) * ZONE_FRAC
+        if mx < center - zone_half then return GAP_LEFT_CURSOR end
+        if mx > center + zone_half then return GAP_RIGHT_CURSOR end
+        return GAP_RESIZE_CURSOR
+    end
+
+    local entry = { wb = wb, ref = ref }
+    function entry.update_cursor()
+        if handle_state ~= "dragging" then underlay.wb.cursor = handle_cursor() end
+    end
+
+    if not underlay.drag_handle_cursor_motion_connected then
+        underlay.drag_handle_cursor_motion_connected = true
+        underlay.wb:connect_signal("mouse::move", function()
+            local hovered = underlay.hovered_drag_handle
+            if hovered and hovered.update_cursor then hovered.update_cursor() end
+        end)
+    end
 
     wb.bg    = color_transparent
     wb.shape = function(cr, w, h)
@@ -212,13 +242,15 @@ local function get_drag_handle(s, i)
 
             -- Shared drag scaffolding: calls on_move(mouse_m, st2) each frame,
             -- then arranges and repositions the handle widget.
-            local function start_drag(on_move, wb_x_offset_override)
+            local function start_drag(on_move, wb_x_offset_override, cursor)
                 handle_state = "dragging"
                 wb.bg = color_fg
                 local wb_x_offset = wb_x_offset_override ~= nil and wb_x_offset_override or (wb.x - mx0)
                 mousegrabber.run(function(mouse_m)
                     if not mouse_m.buttons[1] then
                         handle_state = "idle"; wb.bg = color_transparent
+                        if underlay.hovered_drag_handle == entry then entry.update_cursor()
+                        else underlay.wb.cursor = DEFAULT_CURSOR end
                         awful.layout.arrange(s)
                         if _on_resize_finished then _on_resize_finished(s) end
                         return false
@@ -230,7 +262,7 @@ local function get_drag_handle(s, i)
                     wb.visible = true
                     wb.x = mouse_m.x + wb_x_offset
                     return true
-                end, "sb_h_double_arrow")
+                end, cursor or GAP_RESIZE_CURSOR)
             end
 
             -- ── Edge resize ──────────────────────────────────────────────────
@@ -305,6 +337,10 @@ local function get_drag_handle(s, i)
             -- Right: gap moves by delta; preserve click-relative offset.
             local gap_wb_x_off = zone ~= "right" and -math.floor(hw / 2) or nil
 
+            local zone_cursor = zone == "left" and GAP_LEFT_CURSOR
+                or zone == "right" and GAP_RIGHT_CURSOR
+                or GAP_RESIZE_CURSOR
+
             start_drag(function(mouse_m, st2)
                 local sx = st2.scroll_x or 0
                 if zone == "middle" then
@@ -343,7 +379,7 @@ local function get_drag_handle(s, i)
                     st2.scroll_x      = math.min(scroll_x_init - delta, math.max(0, st2.canvas_w - wa.width))
                     st2.scroll_target = st2.scroll_x
                 end
-            end, gap_wb_x_off)
+            end, gap_wb_x_off, zone_cursor)
         end),
         -- Pass scroll events through the handle to the main scroll handler.
         awful.button({}, 6,        function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
@@ -352,15 +388,17 @@ local function get_drag_handle(s, i)
         awful.button({"Shift"}, 5, function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end)
     ))
     wb:connect_signal("mouse::enter", function()
+        underlay.hovered_drag_handle = entry
+        entry.update_cursor()
         if handle_state ~= "dragging" then wb.bg = color_handle end
         if ref.plus_entry then ref.plus_entry.set_handle_hover(true) end
     end)
     wb:connect_signal("mouse::leave", function()
+        if underlay.hovered_drag_handle == entry then underlay.hovered_drag_handle = nil end
+        underlay.wb.cursor = DEFAULT_CURSOR
         if handle_state ~= "dragging" then wb.bg = color_transparent end
         if ref.plus_entry then ref.plus_entry.set_handle_hover(false) end
     end)
-
-    local entry = { wb = wb, ref = ref }
     drag_handle_pool[s][i] = entry
     return entry
 end
@@ -471,7 +509,7 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
                 wb.y      = b.start
                 wb.width  = handle_w
                 wb.height = math.max(1, b.span)
-                wb.cursor = "sb_h_double_arrow"
+                wb.cursor = GAP_RESIZE_CURSOR
                 wb.visible = true
 
                 -- + button: centered vertically in the gap span.
@@ -518,7 +556,7 @@ function M.update_drag_handles(s, state, bounds, scroll_x)
             wb_h.y      = edge_top
             wb_h.width  = handle_w
             wb_h.height = edge_span
-            wb_h.cursor = "left_ptr"
+            wb_h.cursor = DEFAULT_CURSOR
             wb_h.visible = true
 
             pi = pi + 1
