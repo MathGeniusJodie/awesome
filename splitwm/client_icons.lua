@@ -11,11 +11,11 @@ local configured_launchers = {}
 local ICON_SIZES = { "256x256", "128x128", "96x96", "64x64", "48x48", "32x32" }
 local ICON_EXTS  = { "png", "svg", "xpm" }
 
-function M.is_symbolic_icon(path)
+local function is_symbolic_icon(path)
     return path and (path:match("/symbolic/") or path:match("%-symbolic%."))
 end
 
-function M.find_icon_file(icon_name)
+local function find_icon_file(icon_name)
     if not icon_name or icon_name == "" then return nil end
     if icon_name:sub(1, 1) == "/" then
         local f = io.open(icon_name, "r"); if f then f:close(); return icon_name end
@@ -46,8 +46,9 @@ function M.find_icon_file(icon_name)
     end
     return nil
 end
+M.find_icon_file = find_icon_file
 
-function M.coerce_surface(icon)
+local function coerce_surface(icon)
     if not icon then return nil end
 
     local ok_lgi, lgi = pcall(require, "lgi")
@@ -70,7 +71,7 @@ function M.coerce_surface(icon)
     end
 end
 
-function M.icon_path_surface(path)
+local function icon_path_surface(path)
     if not path then return nil end
 
     if path:lower():match("%.png$") then
@@ -97,7 +98,7 @@ local function client_icon_value(c)
     return ok_client_icon and client_icon or nil
 end
 
-function M.has_live_client_icon(c)
+local function has_live_client_icon(c)
     local ok_sizes, sizes = pcall(function()
         return c and c.icon_sizes
     end)
@@ -105,7 +106,7 @@ function M.has_live_client_icon(c)
 end
 
 local function live_client_icon_widget(c, size)
-    if not M.has_live_client_icon(c) then return nil end
+    if not has_live_client_icon(c) then return nil end
 
     local ok_awful, awful = pcall(require, "awful")
     if not ok_awful then return nil end
@@ -116,7 +117,7 @@ local function live_client_icon_widget(c, size)
     return icon
 end
 
-function M.shown_client_icon_surface(c, size)
+local function shown_client_icon_surface(c, size)
     local target_size = math.max(1, math.floor((size or 64) + 0.5))
     local icon = live_client_icon_widget(c, target_size)
     if not icon then return nil end
@@ -128,18 +129,18 @@ function M.shown_client_icon_surface(c, size)
     return ok_surface and surface or nil
 end
 
-function M.class_icon_surface(c)
-    local path = M.lookup_class_icon(c)
-    if M.is_symbolic_icon(path) then return nil end
-    return M.icon_path_surface(path)
+local function class_icon_surface(c)
+    local path = M.prepare_client_icon(c)
+    if is_symbolic_icon(path) then return nil end
+    return icon_path_surface(path)
 end
 
 function M.icon_surface(icon, size)
     if type(icon) == "string" then
-        return M.icon_path_surface(icon)
+        return icon_path_surface(icon)
     end
 
-    local shown_icon_surface = M.shown_client_icon_surface(icon, size)
+    local shown_icon_surface = shown_client_icon_surface(icon, size)
     if shown_icon_surface then
         return shown_icon_surface
     end
@@ -147,12 +148,12 @@ function M.icon_surface(icon, size)
     local client_icon = client_icon_value(icon)
     if client_icon then
         if type(client_icon) == "string" then
-            return M.icon_path_surface(client_icon)
+            return icon_path_surface(client_icon)
         end
-        return M.coerce_surface(client_icon)
+        return coerce_surface(client_icon)
     end
 
-    return M.class_icon_surface(icon) or M.coerce_surface(icon)
+    return class_icon_surface(icon) or coerce_surface(icon)
 end
 
 local function image_widget(image, size)
@@ -168,17 +169,15 @@ local function image_widget(image, size)
     }
 end
 
-function M.client_icon_widget(c, size, opts)
-    opts = opts or {}
-
-    if opts.image then
-        return image_widget(opts.image, size)
+function M.client_icon_widget(c, size, image)
+    if image then
+        return image_widget(image, size)
     end
 
     local live_icon = live_client_icon_widget(c, size)
     if live_icon then return live_icon end
 
-    local class_icon = M.lookup_class_icon(c)
+    local class_icon = M.prepare_client_icon(c)
     if class_icon then
         local icon = image_widget(class_icon, size)
         if icon then return icon end
@@ -187,7 +186,7 @@ function M.client_icon_widget(c, size, opts)
     local ok_wibox, wibox = pcall(require, "wibox")
     if not ok_wibox then return nil end
 
-    local fallback_text = opts.fallback_text or string.sub((c and (c.class or c.instance)) or "?", 1, 2)
+    local fallback_text = string.sub((c and (c.class or c.instance)) or "?", 1, 2)
     return wibox.widget {
         text          = fallback_text,
         align         = "center",
@@ -347,13 +346,13 @@ local function resolve_class_icon(c, launchers)
         if name then
             local path = menubar_utils.lookup_icon(name)
             if path and path ~= false then
-                if not M.is_symbolic_icon(path) then return path end
+                if not is_symbolic_icon(path) then return path end
                 symbolic = symbolic or path
             end
 
-            path = M.find_icon_file(name)
+            path = find_icon_file(name)
             if path then
-                if not M.is_symbolic_icon(path) then return path end
+                if not is_symbolic_icon(path) then return path end
                 symbolic = symbolic or path
             end
         end
@@ -375,12 +374,8 @@ function M.prepare_client_icon(c, launchers)
     return class_icon_cache[key] or nil
 end
 
-function M.lookup_class_icon(c)
-    return M.prepare_client_icon(c)
-end
-
 function M.app_key(c)
-    local icon = M.lookup_class_icon(c)
+    local icon = M.prepare_client_icon(c)
     if icon then return "icon:" .. icon end
 
     local class = c.class and c.class:lower()

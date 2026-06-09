@@ -588,10 +588,7 @@ local function get_tab_state(tab_idx, leaf, tc)
 end
 
 local function make_tab_icon(tc, icon_size)
-    return client_icons.client_icon_widget(tc, icon_size, {
-        image = colors.hue_rotated_icon_surface(tc, icon_size),
-        fallback_text = string.sub(tc.class or tc.instance or "?", 1, 2),
-    })
+    return client_icons.client_icon_widget(tc, icon_size, colors.hue_rotated_icon_surface(tc, icon_size))
 end
 
 local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)

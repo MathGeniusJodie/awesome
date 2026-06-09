@@ -22,8 +22,8 @@ function menu.setup(opts)
     -- Stored after menu_gen resolves icons; used to rebuild menu on each open
     local category_items = nil
     local bottom_items   = nil
-    local launcher_icon_fn  = nil
-    local lookup_fn         = nil
+    local launcher_icon_fn  = function() return nil end
+    local lookup_fn         = function() return nil end
 
     local function is_running(classes)
         for _, c in ipairs(client.get()) do
@@ -37,7 +37,7 @@ function menu.setup(opts)
     end
 
     local function build_menu()
-        if not category_items then return end
+        if not category_items or not bottom_items then return end
         local function launch(cmd)
             return function() splitwm.spawn(cmd, { append = true }) end
         end
