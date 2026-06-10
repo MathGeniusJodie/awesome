@@ -508,7 +508,7 @@ local function show_close_popup(tc, x, y, w, bg_color, border_color, tab_rect)
             text   = "✕",
             align  = "center",
             valign = "center",
-            font   = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
+            font   = beautiful.splitwm_tab_btn_font or "monospace bold 24px",
             widget = wibox.widget.textbox,
         }
         cp.wb:setup {
@@ -858,14 +858,15 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         end
         local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
         if not g or leaf.minimized then return end
-        local x = g.x - (ctx.state.scroll_x or 0)
-            + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
+        -- Full tab width, not just the icon.
+        local tab_w = ctx.icon_size + 2 * TAB_PAD_H
+        local x = g.x - (ctx.state.scroll_x or 0) + tab_slot_x(tab_idx, ctx.icon_size)
         local bar_top = g.y - gap
         local cc = colors.get_client_color(tc)
-        show_close_popup(tc, x, bar_top + ctx.tb_h, ctx.icon_size,
+        show_close_popup(tc, x, bar_top + ctx.tb_h, tab_w,
             cc and cc.dark or theme.color_bg,
             cc and cc.light or theme.color_fg,
-            { x = x, y = bar_top, width = ctx.icon_size, height = ctx.tb_h })
+            { x = x, y = bar_top, width = tab_w, height = ctx.tb_h })
     end)
 
     tab_widget:buttons(gears.table.join(
