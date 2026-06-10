@@ -624,6 +624,10 @@ function colors.window_top_color(c)
             hex = string.format("#%02x%02x%02x", data[3], data[2], data[1])
         end
     end
+    -- Sampling fails transiently around visibility changes (the window may
+    -- not be rendered yet right after a tab switch). Never let a failed
+    -- sample clobber the last good color — return it and retry next call.
+    if not hex and cache then return cache.hex end
     window_top_cache[c] = { hex = hex, t = now }
     return hex
 end
