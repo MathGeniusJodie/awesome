@@ -164,6 +164,14 @@ end
 
 local function api() return core.splitwm or {} end
 
+-- Background for popups attached to a tab: the sampled window color when
+-- known, so they blend with the tab/window like the tab itself does.
+local function window_bg(tc, fallback)
+    return colors.window_top_color(tc)
+        or colors.window_top_color_cached(tc)
+        or fallback
+end
+
 local function focus_leaf(t, leaf_id)
     local state = core.state(t)
     if core.leaf(state, leaf_id) then state.focused_leaf_id = leaf_id end
@@ -886,7 +894,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         local bar_top = g.y - gap
         local cc = colors.get_client_color(tc)
         show_close_popup(tc, x, bar_top + ctx.tb_h, tab_w,
-            cc and cc.dark or theme.color_bg,
+            window_bg(tc, cc and cc.dark or theme.color_bg),
             cc and cc.light or theme.color_fg,
             { x = x, y = bar_top, width = tab_w, height = ctx.tb_h })
     end)
@@ -922,7 +930,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local bar_bottom = g.y - gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
             show_tab_color_menu(tc, ctx.s, tab_mid, bar_bottom,
-                cc and cc.dark or theme.color_bg,
+                window_bg(tc, cc and cc.dark or theme.color_bg),
                 cc and cc.light or theme.color_fg)
         end)
     ))
