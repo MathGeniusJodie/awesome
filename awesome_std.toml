@@ -1,0 +1,48 @@
+[selene]
+base = "lua51"
+name = "awesome_std"
+
+# AwesomeWM runs Lua 5.3+/LuaJIT where math.atan accepts (y, x).
+[[math.atan.args]]
+type = "number"
+
+[[math.atan.args]]
+type = "number"
+required = false
+
+# Globals injected by the AwesomeWM C core.
+[awesome]
+any = true
+
+[client]
+any = true
+
+[root]
+any = true
+
+[screen]
+any = true
+
+[tag]
+any = true
+
+[mouse]
+any = true
+
+[mousegrabber]
+any = true
+
+[keygrabber]
+any = true
+
+[drawin]
+any = true
+
+[button]
+any = true
+
+[dbus]
+any = true
+
+[selection]
+any = true

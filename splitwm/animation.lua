@@ -1,81 +1,37 @@
 ---------------------------------------------------------------------------
--- Split/close/minimize/scroll animations for splitwm.
--- Initialized via M.init(deps) from splitwm.setup().
+-- splitwm.animation — split / close / minimize geometry animations.
+--
+-- Callers queue an animation in one of the *_pending tables and trigger an
+-- arrange; update_ui starts the animation once the new geometry is known.
 ---------------------------------------------------------------------------
 
-local gears     = require("gears")
-local beautiful = require("beautiful")
-local tree      = require("splitwm.tree")
+local gears = require("gears")
+local core  = require("splitwm.core")
+local theme = require("splitwm.theme")
+local tree  = require("splitwm.tree")
+local smush = require("splitwm.smush")
 
-local M = {}
+local animation = {}
 
-M.split_anim_pending    = {}
-M.close_anim_pending    = {}
-M.minimize_anim_pending = {}
-M.split_anim_active     = {}
+-- [screen] = pending descriptor, consumed by update_ui.
+animation.split_pending    = {}
+animation.close_pending    = {}
+animation.minimize_pending = {}
 
-local _get_active_state
-local _effective_tb_h
-local _client_geo
-local _tb
-local _geo_cache
-local _update_ui
-local _on_split_anim_done
-local _on_close_anim_done
+-- [screen] = { timer, min_leaf } while an animation runs.
+local active = {}
 
-function M.init(deps)
-    _get_active_state = deps.get_active_state
-    _effective_tb_h   = deps.effective_tb_h
-    _client_geo       = deps.client_geo
-    _tb               = deps.tb
-    _geo_cache        = deps.geo_cache
-    _update_ui        = deps.update_ui
-    _on_split_anim_done = deps.on_split_anim_done
-    _on_close_anim_done = deps.on_close_anim_done
+function animation.is_active(s)
+    return active[s] ~= nil
 end
 
-function M.is_active(s) return M.split_anim_active[s] end
-
----------------------------------------------------------------------------
-
-local SPLIT_ANIM_FPS      = 60
-local SPLIT_ANIM_DURATION = 0.28
+local FPS      = 60
+local DURATION = 0.28
 
 local function ease_out_back(t)
     local c = 1.1
     t = t - 1
     return t * t * ((c + 1) * t + c) + 1
-end
-
-local function apply_leaf_geo(s, leaf_id, geo)
-    local _, state = _get_active_state(s)
-    if not state then return end
-    local gap      = beautiful.splitwm_gap
-    local bw       = beautiful.splitwm_focus_border_width
-    local tb_h     = _effective_tb_h(gap)
-    local scroll_x = state.scroll_x or 0
-    local tc       = _tb.cache[s] and _tb.cache[s][leaf_id]
-    if tc then
-        tc.wb.x      = geo.x - scroll_x
-        tc.wb.y      = geo.y - gap
-        tc.wb.width  = math.max(1, geo.width)
-        tc.wb.height = math.max(1, geo.height + gap)
-    end
-    local leaf = tree.find_leaf_by_id(state.root, leaf_id)
-    if leaf then
-        local c = leaf.tabs[leaf.active_tab]
-        if c and c.valid and not c.fullscreen then
-            c:geometry(_client_geo(geo, bw, gap, tb_h, scroll_x))
-        end
-    end
-end
-
-local function cancel_split_anim(s)
-    local a = M.split_anim_active[s]
-    if not a then return end
-    if a.min_leaf then a.min_leaf.min_anim = nil end
-    a.timer:stop()
-    M.split_anim_active[s] = nil
 end
 
 local function lerp_geo(g0, g1, p)
@@ -87,15 +43,46 @@ local function lerp_geo(g0, g1, p)
     }
 end
 
--- Runs a fixed-duration ease-out-back animation. on_frame(p) is called each
--- frame with eased progress in [0,1]. min_leaf.min_anim is cleared on completion.
--- Caller must call cancel_split_anim(s) before this if needed.
-local function run_anim(s, on_frame, min_leaf, on_done)
-    local frames = math.max(1, math.floor(SPLIT_ANIM_DURATION * SPLIT_ANIM_FPS))
+-- Position a leaf's tab bar wibox and active client at an animated geometry.
+local function apply_leaf_geo(s, leaf_id, geo)
+    local _, state = core.active_state(s)
+    if not state then return end
+    local gap      = theme.gap()
+    local tb_h     = theme.tb_h(gap)
+    local scroll_x = state.scroll_x or 0
+    local entry    = core.tabbar[s] and core.tabbar[s][leaf_id]
+    if entry then
+        entry.wb.x      = geo.x - scroll_x
+        entry.wb.y      = geo.y - gap
+        entry.wb.width  = math.max(1, geo.width)
+        entry.wb.height = math.max(1, geo.height + gap)
+    end
+    local leaf = tree.find_leaf_by_id(state.root, leaf_id)
+    if leaf then
+        local c = leaf.tabs[leaf.active_tab]
+        if c and c.valid and not c.fullscreen then
+            c:geometry(theme.client_geo(geo, theme.focus_border_width(),
+                gap, tb_h, scroll_x))
+        end
+    end
+end
+
+local function cancel(s)
+    local a = active[s]
+    if not a then return end
+    if a.min_leaf then a.min_leaf.min_anim = nil end
+    a.timer:stop()
+    active[s] = nil
+end
+
+-- Run a fixed-duration ease-out-back animation; on_frame(p) gets eased
+-- progress. min_leaf (if any) stays visible until the animation completes.
+local function run(s, on_frame, min_leaf, on_done)
+    local frames = math.max(1, math.floor(DURATION * FPS))
     local frame  = 0
     local tim
     tim = gears.timer {
-        timeout   = 1 / SPLIT_ANIM_FPS,
+        timeout   = 1 / FPS,
         autostart = true,
         call_now  = false,
         callback  = function()
@@ -103,57 +90,53 @@ local function run_anim(s, on_frame, min_leaf, on_done)
             on_frame(ease_out_back(math.min(frame / frames, 1.0)))
             if frame >= frames then
                 tim:stop()
-                M.split_anim_active[s] = nil
+                active[s] = nil
                 if min_leaf then
                     min_leaf.min_anim = nil
                     for _, c in ipairs(min_leaf.tabs) do c.hidden = true end
                 end
-                _update_ui(s)
+                if core.update_ui then core.update_ui(s) end
                 if on_done then on_done() end
             end
         end,
     }
-    M.split_anim_active[s] = { timer = tim, min_leaf = min_leaf }
+    active[s] = { timer = tim, min_leaf = min_leaf }
 end
 
-function M.start_split_anim(s, t, old_geo, a_id, b_id, dir)
-    cancel_split_anim(s)
-    local cached = _geo_cache[t]
+-- Animate a fresh split: the existing leaf moves from its old geometry, the
+-- new leaf slides in from the splitting edge.
+function animation.start_split(s, t, old_geo, a_id, b_id, dir)
+    cancel(s)
+    local cached = core.geo[t]
     if not cached then return end
     local geo_a = cached.geos[a_id]
     local geo_b = cached.geos[b_id]
     if not geo_a or not geo_b then return end
 
-    local start_a = old_geo
     local start_b
     if dir == tree.DIR_H then
-        if geo_b.x < geo_a.x then
-            start_b = { x = geo_b.x,               y = geo_b.y, width = 1, height = geo_b.height }
-        else
-            start_b = { x = geo_b.x + geo_b.width,  y = geo_b.y, width = 1, height = geo_b.height }
-        end
+        local edge_x = geo_b.x < geo_a.x and geo_b.x or geo_b.x + geo_b.width
+        start_b = { x = edge_x, y = geo_b.y, width = 1, height = geo_b.height }
     else
-        if geo_b.y < geo_a.y then
-            start_b = { x = geo_b.x, y = geo_b.y,                width = geo_b.width, height = 1 }
-        else
-            start_b = { x = geo_b.x, y = geo_b.y + geo_b.height, width = geo_b.width, height = 1 }
-        end
+        local edge_y = geo_b.y < geo_a.y and geo_b.y or geo_b.y + geo_b.height
+        start_b = { x = geo_b.x, y = edge_y, width = geo_b.width, height = 1 }
     end
 
-    apply_leaf_geo(s, a_id, start_a)
+    apply_leaf_geo(s, a_id, old_geo)
     apply_leaf_geo(s, b_id, start_b)
 
-    run_anim(s, function(p)
-        apply_leaf_geo(s, a_id, lerp_geo(start_a, geo_a, p))
+    run(s, function(p)
+        apply_leaf_geo(s, a_id, lerp_geo(old_geo, geo_a, p))
         apply_leaf_geo(s, b_id, lerp_geo(start_b, geo_b, p))
     end, nil, function()
-        if _on_split_anim_done then _on_split_anim_done(s, a_id, b_id) end
+        smush.after_layout(s)
     end)
 end
 
-function M.start_close_anim(s, t, old_geos, leaf_ids)
-    cancel_split_anim(s)
-    local cached = _geo_cache[t]
+-- Animate the surviving leaves expanding into a closed split's space.
+function animation.start_close(s, t, old_geos, leaf_ids)
+    cancel(s)
+    local cached = core.geo[t]
     if not cached then return end
     local end_geos = {}
     for _, id in ipairs(leaf_ids) do
@@ -164,37 +147,36 @@ function M.start_close_anim(s, t, old_geos, leaf_ids)
     for _, id in ipairs(leaf_ids) do
         if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
     end
-    run_anim(s, function(p)
+    run(s, function(p)
         for _, id in ipairs(leaf_ids) do
             if old_geos[id] and end_geos[id] then
                 apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
             end
         end
     end, nil, function()
-        if _on_close_anim_done then _on_close_anim_done(s, leaf_ids) end
+        smush.after_layout(s)
     end)
 end
 
-function M.start_minimize_anim(s, t, old_geos, leaf_ids, min_leaf)
-    cancel_split_anim(s)
-    local cached = _geo_cache[t]
-    if not cached then
+-- Animate all leaves to their post-minimize geometry. min_leaf is the leaf
+-- being minimized (kept visible via its min_anim flag), nil when restoring.
+function animation.start_minimize(s, t, old_geos, leaf_ids, min_leaf)
+    cancel(s)
+    local function abort()
         if min_leaf then min_leaf.min_anim = nil end
-        return
     end
+    local cached = core.geo[t]
+    if not cached then return abort() end
     local end_geos = {}
     for _, id in ipairs(leaf_ids) do
         local g = cached.geos[id]
-        if not g then
-            if min_leaf then min_leaf.min_anim = nil end
-            return
-        end
+        if not g then return abort() end
         end_geos[id] = g
     end
     for _, id in ipairs(leaf_ids) do
         if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
     end
-    run_anim(s, function(p)
+    run(s, function(p)
         for _, id in ipairs(leaf_ids) do
             if old_geos[id] and end_geos[id] then
                 apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
@@ -203,4 +185,4 @@ function M.start_minimize_anim(s, t, old_geos, leaf_ids, min_leaf)
     end, min_leaf)
 end
 
-return M
+return animation

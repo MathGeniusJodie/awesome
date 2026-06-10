@@ -1,2 +1,7 @@
+std = "awesome_std"
+
 [rules]
 multiple_statements = "allow"
+# AwesomeWM's declarative widget syntax legitimately mixes array children
+# with named properties in one table.
+mixed_table = "allow"
