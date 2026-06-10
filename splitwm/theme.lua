@@ -33,7 +33,7 @@ theme.SCROLL_STEP = 100
 
 -- Pixels per trackpad scroll event. Trackpads emit buttons 6/7 as a dense
 -- stream, so small instant steps read as smooth scrolling.
-theme.SCROLL_STEP_SMOOTH = 20
+theme.SCROLL_STEP_SMOOTH = 50
 
 -- Width thresholds below which clients get font-shrink (smush) shortcuts.
 theme.DEFAULT_SMUSH_WIDTH_THRESHOLD      = 900
