@@ -148,7 +148,6 @@ function status.new_chip_widget()
         local cx = math.floor(width / 2)
         local by = height - ch
         local bx = cx - math.floor(cw / 2)
-        local cy = by + math.floor(ch / 2)
 
         cr:set_source_rgba(1, 1, 1, 1)
         cr:save()
@@ -197,7 +196,7 @@ local function make_circle_icon_btn_widget(size, icon_fn, cmd, icon_scale)
     icon.forced_width  = math.floor(size * icon_scale)
     icon.forced_height = math.floor(size * icon_scale)
 
-    function icon:fit(_, w, h) return self.forced_width, self.forced_height end
+    function icon:fit() return self.forced_width, self.forced_height end
 
     function icon:draw(_, cr, w, h)
         cr:set_source(gears.color(beautiful.splitwm_color_fg))
@@ -564,42 +563,23 @@ function status.new_datetime_widget()
     local cal_popup   = nil
     local cal_visible = false
 
-    -- Poll timer: closes calendar when a click lands outside it.
-    -- poll_ready stays false until all buttons are released after opening,
-    -- so the opening click itself doesn't immediately re-close it.
-    local poll_ready = false
-    local cal_poll_timer = gears.timer {
-        timeout   = 0.05,
-        autostart = false,
-        callback  = function()
-            if not (cal_popup and cal_popup.visible) then
-                poll_ready = false
-                return
-            end
-            local m       = mouse.coords()
-            local pressed = (m.buttons[1] or m.buttons[3]) and true or false
-            if not poll_ready then
-                if not pressed then poll_ready = true end
-                return
-            end
-            if pressed then
-                local g = cal_popup:geometry()
-                if m.x < g.x or m.x > g.x + g.width
-                or m.y < g.y or m.y > g.y + g.height then
-                    cal_popup.visible = false
-                    cal_visible       = false
-                    poll_ready        = false
-                    cal_poll_timer:stop()
-                end
-            end
+    local cal_watcher = require("splitwm.click_away").new {
+        visible = function() return cal_popup and cal_popup.visible end,
+        inside  = function(m)
+            local g = cal_popup:geometry()
+            return m.x >= g.x and m.x <= g.x + g.width
+               and m.y >= g.y and m.y <= g.y + g.height
+        end,
+        dismiss = function()
+            cal_popup.visible = false
+            cal_visible       = false
         end,
     }
 
     local function hide_calendar()
         if cal_popup then cal_popup.visible = false end
         cal_visible = false
-        poll_ready  = false
-        cal_poll_timer:stop()
+        cal_watcher.stop()
     end
 
     local function show_calendar()
@@ -651,9 +631,7 @@ function status.new_datetime_widget()
         cal_popup.widget = widget
         cal_visible      = true
 
-        poll_ready = false
-        if cal_poll_timer.started then cal_poll_timer:stop() end
-        cal_poll_timer:start()
+        cal_watcher.arm()
 
         do_refresh = function()
             local w, cw, ch = build_calendar_widget(

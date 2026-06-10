@@ -105,21 +105,20 @@ local function has_live_client_icon(c)
     return ok_sizes and type(sizes) == "table" and #sizes > 0
 end
 
-local function live_client_icon_widget(c, size)
+-- Returns the live-icon widget at its natural (aspect-fitted) size; callers
+-- wanting a fixed square box wrap it in centered_box.
+local function live_client_icon_widget(c)
     if not has_live_client_icon(c) then return nil end
 
     local ok_awful, awful = pcall(require, "awful")
     if not ok_awful then return nil end
 
-    local icon = awful.widget.clienticon(c)
-    icon.forced_width = size
-    icon.forced_height = size
-    return icon
+    return awful.widget.clienticon(c)
 end
 
 local function shown_client_icon_surface(c, size)
     local target_size = math.max(1, math.floor((size or 64) + 0.5))
-    local icon = live_client_icon_widget(c, target_size)
+    local icon = live_client_icon_widget(c)
     if not icon then return nil end
 
     local ok_wibox, wibox = pcall(require, "wibox")
@@ -156,17 +155,32 @@ function M.icon_surface(icon, size)
     return class_icon_surface(icon) or coerce_surface(icon)
 end
 
+-- Imageboxes and clienticon widgets draw at their box origin, so an icon
+-- whose scaled image is narrower than the box ends up left-aligned. Let the
+-- inner widget report its natural fitted size and center it in a fixed
+-- size×size place container instead of forcing the size on the widget.
+local function centered_box(inner, size)
+    local ok_wibox, wibox = pcall(require, "wibox")
+    if not ok_wibox then return nil end
+    return wibox.widget {
+        inner,
+        halign        = "center",
+        valign        = "center",
+        forced_width  = size,
+        forced_height = size,
+        widget        = wibox.container.place,
+    }
+end
+
 local function image_widget(image, size)
     local ok_wibox, wibox = pcall(require, "wibox")
     if not ok_wibox then return nil end
 
-    return wibox.widget {
-        image         = image,
-        forced_width  = size,
-        forced_height = size,
-        resize        = true,
-        widget        = wibox.widget.imagebox,
-    }
+    return centered_box(wibox.widget {
+        image  = image,
+        resize = true,
+        widget = wibox.widget.imagebox,
+    }, size)
 end
 
 function M.client_icon_widget(c, size, image)
@@ -174,8 +188,8 @@ function M.client_icon_widget(c, size, image)
         return image_widget(image, size)
     end
 
-    local live_icon = live_client_icon_widget(c, size)
-    if live_icon then return live_icon end
+    local live_icon = live_client_icon_widget(c)
+    if live_icon then return centered_box(live_icon, size) end
 
     local class_icon = M.prepare_client_icon(c)
     if class_icon then

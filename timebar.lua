@@ -44,7 +44,7 @@ function M.setup(s)
         return w, h
     end
 
-    function canvas:draw(_, cr, w, h)
+    function canvas:draw(_, cr, w, _)
         local in_day, remaining = get_state()
 
         -- ── Day progress: solid rectangle, proportional to remaining time ───

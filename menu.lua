@@ -164,41 +164,20 @@ function menu.setup(opts)
         awful.button({}, 3, function() app_menu:hide() end)
     ))
 
-    -- Poll: close the menu if the user clicks outside it.
-    -- `ready` stays false until all buttons are released after opening, so the
-    -- opening click itself doesn't immediately re-close the menu.
-    local poll_ready = false
-    local menu_poll_timer
-    menu_poll_timer = gears.timer {
-        timeout   = 0.05,
-        autostart = false,
-        callback  = function()
-            if not (app_menu.wibox and app_menu.wibox.visible) then
-                poll_ready = false
-                menu_poll_timer:stop()
-                return
+    -- Close the menu when a click lands outside it (or its open submenus).
+    local menu_watcher = require("splitwm.click_away").new {
+        visible = function() return app_menu.wibox and app_menu.wibox.visible end,
+        inside  = function(m)
+            local function in_menu(m_obj)
+                if not (m_obj and m_obj.wibox and m_obj.wibox.visible) then return false end
+                local g = m_obj.wibox:geometry()
+                if m.x >= g.x and m.x <= g.x + g.width
+                   and m.y >= g.y and m.y <= g.y + g.height then return true end
+                return m_obj.active_child and in_menu(m_obj.active_child) or false
             end
-
-            local m       = mouse.coords()
-            local pressed = (m.buttons[1] or m.buttons[3]) and true or false
-
-            -- Wait for all buttons to be released before arming
-            if not poll_ready then
-                if not pressed then poll_ready = true end
-                return
-            end
-
-            if pressed then
-                local function inside(m_obj)
-                    if not (m_obj and m_obj.wibox and m_obj.wibox.visible) then return false end
-                    local g = m_obj.wibox:geometry()
-                    if m.x >= g.x and m.x <= g.x + g.width
-                       and m.y >= g.y and m.y <= g.y + g.height then return true end
-                    return m_obj.active_child and inside(m_obj.active_child) or false
-                end
-                if not inside(app_menu) then app_menu:hide() end
-            end
+            return in_menu(app_menu)
         end,
+        dismiss = function() app_menu:hide() end,
     }
 
     local menu_just_toggled = false
@@ -212,9 +191,7 @@ function menu.setup(opts)
         gears.timer.delayed_call(function() menu_just_toggled = false end)
         build_menu()
         app_menu:toggle()
-        poll_ready = false
-        if menu_poll_timer.started then menu_poll_timer:stop() end
-        menu_poll_timer:start()
+        menu_watcher.arm()
     end
 
     splitwm.on_menu_close = function()

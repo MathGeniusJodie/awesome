@@ -1,46 +1,29 @@
 ---------------------------------------------------------------------------
--- splitwm.titlebar — Tab bar, split controls, color-picker popup, and
+-- splitwm.titlebar — tab bar, split controls, color-picker popup, and
 -- related UI widgets for the splitwm layout.
 --
--- Shared pickup/drag state lives here (M.drag) so init.lua can reference
--- it by table without needing cross-module setter callbacks.
---
--- Dependencies are injected once via M.setup(deps) from splitwm.setup().
+-- Pickup/drag state lives in core.drag; the per-leaf wibox cache lives in
+-- core.tabbar (animation.lua repositions those wiboxes during animations).
+-- M.init() must run once from splitwm.setup() after beautiful is loaded.
 ---------------------------------------------------------------------------
 
-local awful         = require("awful")
-local gears         = require("gears")
-local wibox         = require("wibox")
-local beautiful     = require("beautiful")
-local icons         = require("splitwm.icons")
-local client_icons  = require("splitwm.client_icons")
-local tree          = require("splitwm.tree")
-local colors        = require("splitwm.colors")
-local underlay      = require("splitwm.underlay")
+local awful        = require("awful")
+local gears        = require("gears")
+local wibox        = require("wibox")
+local beautiful    = require("beautiful")
+local icons        = require("splitwm.icons")
+local client_icons = require("splitwm.client_icons")
+local tree         = require("splitwm.tree")
+local colors       = require("splitwm.colors")
+local core         = require("splitwm.core")
+local theme        = require("splitwm.theme")
+local ops          = require("splitwm.ops")
+local anim         = require("splitwm.animation")
+local underlay     = require("splitwm.underlay")
 
----------------------------------------------------------------------------
--- Shared pickup / pending-drag state
--- init.lua binds `local drag = tb.drag` to get a shared reference.
----------------------------------------------------------------------------
+local M = {}
 
-local PICKUP_IDLE = { tag = "idle" }
-local drag = { pickup = PICKUP_IDLE, pending = nil }
-
-local function pickup_idle()            return PICKUP_IDLE end
-local function pickup_client(c)         return { tag = "client", client = c } end
-local function pickup_split(id)         return { tag = "split",  split_id = id } end
-
----------------------------------------------------------------------------
--- Injected dependencies — populated by M.setup()
----------------------------------------------------------------------------
-
-local _geo_cache, _client_actual_geo, _split_anim_active
-local _try_drop_picked_up, _handle_split_pickup, _drop_into_new_split
-local _make_split_action_callbacks
-local _splitwm
-local _TITLEBAR_HEIGHT, _BTN_SIZE, _BTN_SPACING, _MIN_SPLIT_W, _MIN_SPLIT_H
-local color_bg, color_fg, color_fg_disabled, color_close
-local color_btn_bg, color_transparent, color_fg_hover, color_handle
+local drag = core.drag
 
 ---------------------------------------------------------------------------
 -- Module-local constants
@@ -61,17 +44,11 @@ local MENU_PAD_H     = 0
 local MENU_PAD_V     = 8
 local MENU_BW        = 2   -- border on left / right / bottom
 
--- Left/right padding inside each tab widget (drives close-button x-offset).
+-- Left/right padding inside each tab widget, symmetric around the icon.
 local TAB_PAD_H = 22
--- Extra right-side padding inside the tab, to the right of the close button.
-local TAB_PAD_H_R_EXTRA = 2
-
--- Spacing between the app icon and the close button inside a tab.
--- Must match the `spacing` value in the tab content row widget.
-local ICON_CLOSE_GAP = 0
 
 -- Top/bottom padding inside each tab's content margin.
--- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep these in sync.
+-- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep in sync.
 local TAB_CONTENT_V_PAD = 1
 
 -- Gap between the last tab and the "+" new-tab button.
@@ -80,15 +57,16 @@ local PLUS_BTN_GAP = 54
 -- Gap between the "+" button and the dimmed tabs from other splits.
 local REMOTE_TAB_GROUP_GAP = -5
 
--- Extra positive spacing added between tabs (on top of the shape overlap).
-local TAB_GAP = -24
+-- Extra spacing added between tabs (on top of the shape overlap).
+-- Sized so adjacent tab icons clear each other now that tabs are icon-only.
+local TAB_GAP = 0
 
--- The active tab is drawn above its neighbors; leave a little extra room after
--- it so its right ear does not cover the next tab's icon.
-local ACTIVE_TAB_AFTER_GAP = 26
+-- Vertical overlap between stacked icon pills in a horizontally-minimized
+-- split (was coupled to TAB_GAP when tabs still had inline close buttons).
+local PILL_STACK_GAP = -24
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
--- Distinct from beautiful.splitwm_empty_radius (which styles the content background).
+-- Distinct from beautiful.splitwm_empty_radius (content background).
 local EMPTY_SPLIT_RADIUS = 14
 
 -- Icon size used for app-launcher widgets in empty splits.
@@ -100,75 +78,69 @@ local DRAG_THRESHOLD_PX = 4
 local TITLEBAR_RESIZE_CURSOR = "sb_v_double_arrow"
 local DEFAULT_CURSOR = "left_ptr"
 
--- Tab shape geometry.  TAB_ALPHA is the slant angle from vertical.
+-- Tab shape geometry. TAB_ALPHA is the slant angle from vertical.
 local TAB_ALPHA  = math.rad(20)
 local TAB_EAR    = 12
 local TAB_CORNER = 9
 local TAB_SA     = math.sin(TAB_ALPHA)
 local TAB_CA     = math.cos(TAB_ALPHA)
 local TAB_TA     = math.tan(TAB_ALPHA)
-local function tab_cx(h) return (TAB_CORNER + TAB_EAR) * (1 - TAB_SA) / TAB_CA + h * TAB_TA end
--- Overlap = 2x slant width at the actual titlebar height.  Set in M.setup().
+local function tab_cx(h)
+    return (TAB_CORNER + TAB_EAR) * (1 - TAB_SA) / TAB_CA + h * TAB_TA
+end
+
+-- Overlap = 2x slant width at the actual titlebar height. Set by M.init().
 local TAB_SPACING
 
--- Width of one tab slot including its negative overlap with the next tab.
--- _BTN_SIZE is injected by setup(), so this must be called after setup().
+function M.init()
+    TAB_SPACING = -math.floor(
+        (tab_cx(math.max(theme.TITLEBAR_HEIGHT, beautiful.splitwm_gap or 0))
+            - TAB_EAR * TAB_CA) * 2)
+end
+
+-- Width of one tab slot: the tab widget plus the layout spacing to the next
+-- tab (exact — widgets sit in a fixed.horizontal with that spacing).
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + _BTN_SIZE + TAB_PAD_H + TAB_PAD_H_R_EXTRA + TAB_SPACING + TAB_GAP -4
+    return TAB_PAD_H + icon_size + TAB_PAD_H + TAB_SPACING + TAB_GAP
 end
 
-local function tab_slot_x(tab_idx, active_tab, icon_size)
-    local x = (tab_idx - 1) * tab_step(icon_size)
-    if active_tab and tab_idx > active_tab then x = x + ACTIVE_TAB_AFTER_GAP end
-    return x
+local function tab_slot_x(tab_idx, icon_size)
+    return (tab_idx - 1) * tab_step(icon_size)
 end
 
-local function tab_content_bounds(tab_idx, active_tab, icon_size)
-    local x1 = tab_slot_x(tab_idx, active_tab, icon_size) + TAB_PAD_H
-    local x2 = x1 + icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4
-    return x1, x2
+local function tab_content_bounds(tab_idx, icon_size)
+    local x1 = tab_slot_x(tab_idx, icon_size) + TAB_PAD_H
+    return x1, x1 + icon_size
 end
 
-local function tab_content_hit(x, tab_idx, active_tab, icon_size)
-    local x1, x2 = tab_content_bounds(tab_idx, active_tab, icon_size)
+local function tab_content_hit(x, tab_idx, icon_size)
+    local x1, x2 = tab_content_bounds(tab_idx, icon_size)
     return x >= x1 and x < x2
 end
 
-local function tab_index_at(x, active_tab, n_tabs, icon_size)
+local function tab_index_at(x, n_tabs, icon_size)
     if n_tabs <= 0 then return nil end
     for i = 1, n_tabs do
-        if tab_content_hit(x, i, active_tab, icon_size) then return i end
+        if tab_content_hit(x, i, icon_size) then return i end
     end
     return nil
 end
 
+M.tab_index_at      = tab_index_at
+M.TAB_CONTENT_V_PAD = TAB_CONTENT_V_PAD
+
 ---------------------------------------------------------------------------
--- Titlebar cache and color-menu state
+-- Tab bar cache and color-menu state
 ---------------------------------------------------------------------------
 
-local titlebar_cache = {}
-local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+local click_away = require("splitwm.click_away")
+
+local tab_color_menu_state = { wb = nil, watcher = nil }
 local local_tab_click_active = false
 
--- Per-event dedup flag: set true for the duration of the event that closed a menu,
--- so multiple handlers firing in the same event batch don't each trigger on_menu_close.
+-- Per-event dedup flag: set for the duration of the event that closed a
+-- menu, so multiple handlers in one event batch don't each re-trigger.
 local menu_was_open_this_event = false
-
----------------------------------------------------------------------------
--- Module table
----------------------------------------------------------------------------
-
-local M = {}
-
-M.drag               = drag
-M.cache              = titlebar_cache
-M.pickup_idle        = pickup_idle
-M.pickup_client      = pickup_client
-M.pickup_split       = pickup_split
--- Exported for init.lua hover-tab calculation; depends on _BTN_SIZE/TAB_SPACING set in setup().
-M.tab_step           = tab_step
-M.tab_index_at       = tab_index_at
-M.TAB_CONTENT_V_PAD  = TAB_CONTENT_V_PAD
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile
@@ -191,60 +163,41 @@ function M.tab_shape(cr, w, h)
 end
 
 ---------------------------------------------------------------------------
--- Setup
+-- splitwm-table accessors (launchers and menu hooks set by rc.lua/menu.lua)
 ---------------------------------------------------------------------------
 
-function M.setup(deps)
-    _geo_cache               = deps.geo_cache
-    _client_actual_geo       = deps.client_actual_geo
-    _split_anim_active       = deps.split_anim_active
-    _try_drop_picked_up      = deps.try_drop_picked_up
-    _handle_split_pickup     = deps.handle_split_pickup
-    _drop_into_new_split     = deps.drop_into_new_split
-    _make_split_action_callbacks = deps.make_split_action_callbacks
-    _splitwm                 = deps.splitwm
-    _TITLEBAR_HEIGHT         = deps.TITLEBAR_HEIGHT
-    TAB_SPACING              = -math.floor((tab_cx(math.max(_TITLEBAR_HEIGHT, beautiful.splitwm_gap or 0)) - TAB_EAR * TAB_CA) * 2)
-    M.TAB_SPACING            = TAB_SPACING
-    _BTN_SIZE                = deps.BTN_SIZE
-    _BTN_SPACING             = deps.BTN_SPACING
-    _MIN_SPLIT_W             = deps.MIN_SPLIT_W
-    _MIN_SPLIT_H             = deps.MIN_SPLIT_H
-    color_bg                 = deps.color_bg
-    color_fg                 = deps.color_fg
-    color_fg_disabled        = deps.color_fg_disabled
-    color_close              = deps.color_close
-    color_btn_bg             = deps.color_btn_bg
-    color_transparent        = deps.color_transparent
-    color_fg_hover           = deps.color_fg_hover
-    color_handle             = deps.color_handle
+local function api() return core.splitwm or {} end
+
+local function focus_leaf(t, leaf_id)
+    local state = core.state(t)
+    if core.leaf(state, leaf_id) then state.focused_leaf_id = leaf_id end
 end
 
 ---------------------------------------------------------------------------
 -- Flush caches (called from splitwm.flush_caches)
 ---------------------------------------------------------------------------
- 
+
 function M.flush_caches()
-    for _, sc in pairs(titlebar_cache) do
+    for _, sc in pairs(core.tabbar) do
         for _, entry in pairs(sc) do
             for _, obj in ipairs(entry.tooltip_objs) do
                 entry.tooltip:remove_from_object(obj)
             end
         end
     end
-    -- Clear in-place so existing M.cache references stay valid.
-    for k in pairs(titlebar_cache) do titlebar_cache[k] = nil end
+    -- Clear in-place so existing core.tabbar references stay valid.
+    for k in pairs(core.tabbar) do core.tabbar[k] = nil end
 end
 
 ---------------------------------------------------------------------------
--- Vertical drag helper (used by the pill drag strip in the tab bar)
+-- Vertical drag helper (pill drag strip in the tab bar)
 ---------------------------------------------------------------------------
 
 local function run_v_drag(s, get_b, on_start, on_stop)
-    -- Capture start position before the delayed_call so it reflects the press position.
+    -- Capture start position before the delayed_call so it reflects the press.
     local start_y = mouse.coords().y
     local moved   = false
-    -- Delay starting the grab until after the current event batch is fully processed.
+    -- Delay the grab until the current event batch is fully processed.
     gears.timer.delayed_call(function()
         if not mouse.coords().buttons[1] then return end
         if on_start then on_start() end
@@ -254,13 +207,25 @@ local function run_v_drag(s, get_b, on_start, on_stop)
                 if on_stop then on_stop() end
                 return false
             end
-            if not moved and math.abs(m.y - start_y) < DRAG_THRESHOLD_PX then return true end
+            if not moved and math.abs(m.y - start_y) < DRAG_THRESHOLD_PX then
+                return true
+            end
             moved = true
             local b = get_b()
             if not b then if on_stop then on_stop() end; return false end
+            -- Resize the two neighbors of this gap; combined height constant.
             local igap = b.parent_gap or 0
-            b.branch.ratio = math.max(0.1, math.min(0.9,
-                (m.y - b.parent_y - math.floor(igap / 2)) / (b.parent_h - igap)))
+            local rs = 0
+            for _, r in ipairs(b.branch.ratios) do rs = rs + r end
+            if rs <= 0 then rs = 1 end
+            local abs_top   = b.branch.ratios[b.top_idx]     / rs * b.usable
+            local abs_bot   = b.branch.ratios[b.top_idx + 1] / rs * b.usable
+            local combined  = abs_top + abs_bot
+            local min_h     = math.min(theme.MIN_SPLIT_H, combined / 2)
+            local new_top   = math.max(min_h, math.min(combined - min_h,
+                m.y - b.top_y - math.floor(igap / 2)))
+            b.branch.ratios[b.top_idx]     = new_top / b.usable * rs
+            b.branch.ratios[b.top_idx + 1] = (combined - new_top) / b.usable * rs
             awful.layout.arrange(s)
             return true
         end, "sb_v_double_arrow")
@@ -272,15 +237,14 @@ end
 ---------------------------------------------------------------------------
 
 local function make_launcher_widget(entry, size, callback)
-    local icon_path = entry.icon
     local inner
-    if icon_path then
+    if entry.icon then
         inner = wibox.widget {
-            image          = icon_path,
-            forced_width   = size,
-            forced_height  = size,
-            resize         = true,
-            widget         = wibox.widget.imagebox,
+            image         = entry.icon,
+            forced_width  = size,
+            forced_height = size,
+            resize        = true,
+            widget        = wibox.widget.imagebox,
         }
     else
         inner = wibox.widget {
@@ -290,7 +254,7 @@ local function make_launcher_widget(entry, size, callback)
                 font   = "monospace bold " .. math.floor(size * 0.55) .. "px",
                 widget = wibox.widget.textbox,
             },
-            bg            = color_btn_bg,
+            bg            = theme.color_btn_bg,
             shape         = gears.shape.circle,
             forced_width  = size,
             forced_height = size,
@@ -309,12 +273,12 @@ local function make_launcher_widget(entry, size, callback)
             left = 2, right = 2, top = 0, bottom = 0,
             widget = wibox.container.margin,
         },
-        bg     = color_transparent,
-        fg     = color_fg,
+        bg     = theme.color_transparent,
+        fg     = theme.color_fg,
         widget = wibox.container.background,
     }
-    w:connect_signal("mouse::enter", function() w.bg = color_fg_hover end)
-    w:connect_signal("mouse::leave", function() w.bg = color_transparent end)
+    w:connect_signal("mouse::enter", function() w.bg = theme.color_fg_hover end)
+    w:connect_signal("mouse::leave", function() w.bg = theme.color_transparent end)
     w:buttons(gears.table.join(awful.button({}, 1, callback)))
     return w
 end
@@ -322,8 +286,8 @@ end
 local function make_circle_icon_btn_widget(draw_fn, size)
     local icon = wibox.widget.base.make_widget()
     function icon:draw(_, cr, w, h)
-        local col = self._disabled and color_fg_disabled
-                    or (self._dark and color_bg or color_fg)
+        local col = self._disabled and theme.color_fg_disabled
+            or (self._dark and theme.color_bg or theme.color_fg)
         cr:set_source(gears.color(col))
         cr:set_line_width(2)
         cr:set_line_cap(CAIRO_LINE_CAP_ROUND)
@@ -332,11 +296,11 @@ local function make_circle_icon_btn_widget(draw_fn, size)
     function icon:fit(_, w, h) return w, h end
     local w = wibox.widget {
         icon,
-        bg                 = color_btn_bg,
-        shape              = gears.shape.circle,
-        forced_width       = size,
-        forced_height      = size,
-        widget             = wibox.container.background,
+        bg            = theme.color_btn_bg,
+        shape         = gears.shape.circle,
+        forced_width  = size,
+        forced_height = size,
+        widget        = wibox.container.background,
     }
     w._icon = icon
     return w
@@ -346,11 +310,28 @@ end
 -- Tab color picker popup menu
 ---------------------------------------------------------------------------
 
+-- Border drawn on left/right/bottom only — the top edge meets the tab bar.
+-- Shared by the color picker and the hover close popup.
+local function make_side_border_widget()
+    local w = wibox.widget.base.make_widget()
+    function w:draw(_, cr, ww, hh)
+        if not self._bpat then return end
+        cr:set_source(self._bpat)
+        cr:set_line_width(MENU_BW)
+        local o = MENU_BW / 2
+        cr:move_to(o, 0) cr:line_to(o, hh) cr:stroke()
+        cr:move_to(ww - o, 0) cr:line_to(ww - o, hh) cr:stroke()
+        cr:move_to(0, hh - o) cr:line_to(ww, hh - o) cr:stroke()
+    end
+    function w:fit(_, ww, hh) return ww, hh end
+    return w
+end
+
 local function hide_tab_color_menu()
     local ms = tab_color_menu_state
     if not (ms.wb and ms.wb.visible) then return false end
     ms.wb.visible = false
-    if ms.poll and ms.poll.started then ms.poll:stop() end
+    if ms.watcher then ms.watcher.stop() end
     return true
 end
 
@@ -358,7 +339,8 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     local ms        = tab_color_menu_state
     local content_w = MENU_CIRC_COLS * MENU_CIRC_SIZE + (MENU_CIRC_COLS - 1) * MENU_CIRC_GAP
     local menu_w    = tab_w or (MENU_BW * 2 + MENU_PAD_H * 2 + content_w)
-    local menu_h    = MENU_PAD_V * 2 + MENU_CIRC_ROWS * MENU_CIRC_SIZE + (MENU_CIRC_ROWS - 1) * MENU_CIRC_GAP + MENU_BW
+    local menu_h    = MENU_PAD_V * 2 + MENU_CIRC_ROWS * MENU_CIRC_SIZE
+        + (MENU_CIRC_ROWS - 1) * MENU_CIRC_GAP + MENU_BW
 
     if not ms.wb then
         ms.wb = wibox { ontop = true, visible = false, border_width = 0 }
@@ -368,7 +350,8 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     wb.height = menu_h
     wb.bg     = bg_color
 
-    -- Circle widgets are created once and reused; update selection + handlers each open.
+    -- Circle widgets are created once and reused; selection + handlers are
+    -- refreshed each time the menu opens.
     local current = colors.get_client_color(tc)
     if not ms.circs then
         ms.circs = {}
@@ -376,7 +359,7 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
             local circ = wibox.widget {
                 bg                 = col.light,
                 shape              = gears.shape.circle,
-                shape_border_color = color_transparent,
+                shape_border_color = theme.color_transparent,
                 shape_border_width = MENU_BW,
                 forced_width       = MENU_CIRC_SIZE,
                 forced_height      = MENU_CIRC_SIZE,
@@ -389,7 +372,8 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     end
     for i, col in ipairs(colors.COLORS) do
         local circ = ms.circs[i]
-        circ.shape_border_color = (current and current.name == col.name) and color_fg or color_transparent
+        circ.shape_border_color = (current and current.name == col.name)
+            and theme.color_fg or theme.color_transparent
         local col_name = col.name
         circ:buttons(gears.table.join(awful.button({}, 1, function()
             if tc.valid then
@@ -402,28 +386,20 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
 
     -- Border widget created once; source color updated each open.
     if not ms.border_w then
-        local bw = wibox.widget.base.make_widget()
-        function bw:draw(_, cr, w, h)
-            if not self._bpat then return end
-            cr:set_source(self._bpat)
-            cr:set_line_width(MENU_BW)
-            local o = MENU_BW / 2
-            cr:move_to(o, 0) cr:line_to(o, h) cr:stroke()
-            cr:move_to(w - o, 0) cr:line_to(w - o, h) cr:stroke()
-            cr:move_to(0, h - o) cr:line_to(w, h - o) cr:stroke()
-        end
-        function bw:fit(_, w, h) return w, h end
-        ms.border_w = bw
+        ms.border_w = make_side_border_widget()
     end
     ms.border_w._bpat = gears.color(border_color)
     ms.border_w:emit_signal("widget::redraw_needed")
 
-    -- Grid layout and wb:setup only rebuilt when menu width changes.
+    -- Grid layout and wb:setup are only rebuilt when menu width changes.
     if ms.last_menu_w ~= menu_w then
         ms.last_menu_w = menu_w
         local grid = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.vertical }
         for row = 0, MENU_CIRC_ROWS - 1 do
-            local row_spec = { spacing = MENU_CIRC_GAP, layout = wibox.layout.fixed.horizontal }
+            local row_spec = {
+                spacing = MENU_CIRC_GAP,
+                layout = wibox.layout.fixed.horizontal,
+            }
             for col = 1, MENU_CIRC_COLS do
                 local idx = row * MENU_CIRC_COLS + col
                 if ms.circs[idx] then table.insert(row_spec, ms.circs[idx]) end
@@ -433,7 +409,11 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
         wb:setup {
             ms.border_w,
             {
-                { grid, halign = "center", valign = "center", widget = wibox.container.place },
+                {
+                    grid,
+                    halign = "center", valign = "center",
+                    widget = wibox.container.place,
+                },
                 left   = MENU_BW,
                 right  = MENU_BW,
                 top    = MENU_PAD_V,
@@ -449,57 +429,122 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     wb.y = bar_bottom
     wb.visible = true
 
-    ms.poll_ready = false
-    if not ms.poll then
-        ms.poll = gears.timer {
-            timeout   = 0.05,
-            autostart = false,
-            callback  = function()
-                if not (wb and wb.visible) then
-                    ms.poll_ready = false; ms.poll:stop(); return
-                end
-                local m = mouse.coords()
-                local pressed = m.buttons[1] or m.buttons[3]
-                if not ms.poll_ready then
-                    if not pressed then ms.poll_ready = true end
-                    return
-                end
-                if pressed then
-                    local g = wb:geometry()
-                    if not (m.x >= g.x and m.x < g.x + g.width
-                        and m.y >= g.y and m.y < g.y + g.height) then
-                        hide_tab_color_menu()
-                    end
-                end
+    if not ms.watcher then
+        ms.watcher = click_away.new {
+            visible = function() return ms.wb and ms.wb.visible end,
+            inside  = function(m)
+                local g = ms.wb:geometry()
+                return m.x >= g.x and m.x < g.x + g.width
+                    and m.y >= g.y and m.y < g.y + g.height
             end,
+            dismiss = hide_tab_color_menu,
         }
     end
-    if ms.poll.started then ms.poll:stop() end
-    ms.poll:start()
+    ms.watcher.arm()
 end
 
 -- Closes the menu if open and returns true; returns false if already closed.
 -- Deduplicates within a single event: multiple handlers firing for the same
--- click all check this, but only the first actually calls on_menu_close().
+-- click all check this, but only the first actually closes.
 local function mark_menu_closed()
     menu_was_open_this_event = true
     gears.timer.delayed_call(function() menu_was_open_this_event = false end)
 end
 
 local function event_close_menu_if_open()
-    if _splitwm.menu_just_toggled and _splitwm.menu_just_toggled() then return false end
-    if menu_was_open_this_event    then return true  end
+    local sw = api()
+    if sw.menu_just_toggled and sw.menu_just_toggled() then return false end
+    if menu_was_open_this_event then return true end
     if hide_tab_color_menu() then
         mark_menu_closed(); return true
     end
-    if _splitwm.on_menu_close and _splitwm.on_menu_close() then
+    if sw.on_menu_close and sw.on_menu_close() then
         mark_menu_closed(); return true
     end
     return false
 end
 
 ---------------------------------------------------------------------------
--- Titlebar helper functions
+-- Hover close popup — ✕ shown under the active tab, styled like the
+-- color picker (client-colored bg, side/bottom border).
+---------------------------------------------------------------------------
+
+local close_popup = { wb = nil, client = nil, tab_rect = nil }
+
+local function hide_close_popup()
+    close_popup.client   = nil
+    close_popup.tab_rect = nil
+    if close_popup.wb then close_popup.wb.visible = false end
+end
+
+local function point_in(r, mx, my)
+    return r and mx >= r.x and mx < r.x + r.width
+        and my >= r.y and my < r.y + r.height
+end
+
+-- Hide once the cursor has left both the source tab and the popup. Checked
+-- by position, not by enter/leave events: the tooltip appearing under the
+-- cursor fires spurious leave events that would flicker the popup.
+local function schedule_hide_close_popup()
+    gears.timer.start_new(0.15, function()
+        local cp = close_popup
+        if not (cp.wb and cp.wb.visible) then return false end
+        local m = mouse.coords()
+        if point_in(cp.wb:geometry(), m.x, m.y) or point_in(cp.tab_rect, m.x, m.y) then
+            schedule_hide_close_popup()
+        else
+            hide_close_popup()
+        end
+        return false
+    end)
+end
+
+local function show_close_popup(tc, x, y, w, bg_color, border_color, tab_rect)
+    local cp = close_popup
+    if not cp.wb then
+        cp.wb = wibox { ontop = true, visible = false, border_width = 0 }
+        cp.border_w = make_side_border_widget()
+        cp.label = wibox.widget {
+            text   = "✕",
+            align  = "center",
+            valign = "center",
+            font   = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
+            widget = wibox.widget.textbox,
+        }
+        cp.wb:setup {
+            cp.border_w,
+            {
+                cp.label,
+                left = MENU_BW, right = MENU_BW, bottom = MENU_BW,
+                widget = wibox.container.margin,
+            },
+            layout = wibox.layout.stack,
+        }
+        cp.wb:connect_signal("mouse::enter", function()
+            cp.wb.cursor = "hand2"
+        end)
+        cp.wb:buttons(gears.table.join(awful.button({}, 1, function()
+            local c = cp.client
+            hide_close_popup()
+            if c and c.valid then c:kill() end
+        end)))
+    end
+    cp.client   = tc
+    cp.tab_rect = tab_rect
+    cp.border_w._bpat = gears.color(border_color)
+    cp.border_w:emit_signal("widget::redraw_needed")
+    cp.wb.bg = bg_color
+    cp.wb.fg = theme.color_fg
+    cp.wb.width   = w
+    cp.wb.height  = theme.BTN_SIZE + MENU_BW
+    cp.wb.x       = x
+    cp.wb.y       = y
+    cp.wb.visible = true
+    schedule_hide_close_popup()
+end
+
+---------------------------------------------------------------------------
+-- Tab bar helper functions
 ---------------------------------------------------------------------------
 
 local function on_hover_fg(w, hover_fg, normal_fg)
@@ -519,17 +564,17 @@ local function set_btn_disabled(w, wb)
 end
 
 local function tb_get_or_create_entry(s, leaf)
-    local cache = titlebar_cache[s]
+    local cache = core.tabbar[s]
     local entry = cache[leaf.id]
     if entry then return entry end
     entry = {
-        wb                = underlay.make_wb_proxy(underlay.get_or_create_underlay(s).chrome_layer, s),
-        tooltip           = awful.tooltip {
+        wb = underlay.make_wb_proxy(underlay.get_or_create(s).chrome_layer, s),
+        tooltip = awful.tooltip {
             text = "", delay_show = 0.3, font = "monospace bold 12px",
-            bg = color_bg, fg = color_fg, border_width = 0,
+            bg = theme.color_bg, fg = theme.color_fg, border_width = 0,
         },
-        tooltip_objs      = {},
-        tb_h              = nil,
+        tooltip_objs = {},
+        tb_h         = nil,
     }
     cache[leaf.id] = entry
     return entry
@@ -538,21 +583,23 @@ end
 -- Fingerprint check to prevent unneeded heavy redraws.
 -- Tab names are excluded: tooltip text is set dynamically on mouse::enter.
 local function append_tab_fingerprint(parts, tc, include_pickup)
-    parts[#parts+1] = tostring(tc.window)
-    parts[#parts+1] = tc.class or ""
-    parts[#parts+1] = tc.instance or ""
+    parts[#parts + 1] = tostring(tc.window)
+    parts[#parts + 1] = tc.class or ""
+    parts[#parts + 1] = tc.instance or ""
     if include_pickup and drag.pickup.tag == "client" and drag.pickup.client == tc then
-        parts[#parts+1] = "P"
+        parts[#parts + 1] = "P"
     end
     local col = colors.get_client_color(tc)
-    if col then parts[#parts+1] = col.name end
+    if col then parts[#parts + 1] = col.name end
 end
 
 local function tb_compute_all_tabs_fingerprint(leaves)
     local parts = {}
     for _, leaf in ipairs(leaves) do
-        parts[#parts+1] = tostring(leaf.id)
-        for _, tc in ipairs(leaf.tabs) do append_tab_fingerprint(parts, tc, false) end
+        parts[#parts + 1] = tostring(leaf.id)
+        for _, tc in ipairs(leaf.tabs) do
+            append_tab_fingerprint(parts, tc, false)
+        end
     end
     return table.concat(parts, "\0")
 end
@@ -563,7 +610,7 @@ local function tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
         state.focused_leaf_id == leaf.id and 1 or 0,
         geo and geo.v_bound_above and "b" or "",
         leaf.minimized and "m" or "",
-        leaf.min_anim  and "a" or "",
+        leaf.min_anim and "a" or "",
         (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id) and "S" or "",
         geo and geo.width or 0,
         geo and geo.height or 0,
@@ -573,40 +620,84 @@ local function tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
     return table.concat(parts, "\0")
 end
 
-local function tb_make_btn(entry, widget_bc, draw_fn, size, callback)
+local function tb_make_btn(widget_bc, draw_fn, size, callback)
     local w = make_circle_icon_btn_widget(draw_fn, size)
     w.shape_border_color = widget_bc
-    if callback then w:buttons(gears.table.join(awful.button({}, 1, callback))) end
-    w:connect_signal("mouse::enter", function() if not w._disabled then w.bg = color_bg end end)
-    w:connect_signal("mouse::leave", function() if not w._disabled then w.bg = color_btn_bg end end)
+    if callback then
+        w:buttons(gears.table.join(awful.button({}, 1, callback)))
+    end
+    w:connect_signal("mouse::enter", function()
+        if not w._disabled then w.bg = theme.color_bg end
+    end)
+    w:connect_signal("mouse::leave", function()
+        if not w._disabled then w.bg = theme.color_btn_bg end
+    end)
     return w
 end
 
 -- tab_state: "active" | "inactive" | "picked"
 local function get_tab_state(tab_idx, leaf, tc)
-    if drag.pickup.tag == "client" and drag.pickup.client == tc then return "picked"
-    elseif tab_idx == leaf.active_tab then return "active"
-    else return "inactive"
+    if drag.pickup.tag == "client" and drag.pickup.client == tc then
+        return "picked"
+    elseif tab_idx == leaf.active_tab then
+        return "active"
     end
+    return "inactive"
 end
 
 local function make_tab_icon(tc, icon_size)
-    return client_icons.client_icon_widget(tc, icon_size, colors.hue_rotated_icon_surface(tc, icon_size))
+    return client_icons.client_icon_widget(tc, icon_size,
+        colors.hue_rotated_icon_surface(tc, icon_size))
 end
 
-local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
+---------------------------------------------------------------------------
+-- Shared tab visual
+---------------------------------------------------------------------------
+
+-- Builds the tab visual used by both local and remote tabs: shaped
+-- background, app icon, close-button slot, and tooltip wiring.
+-- tab_state: "active" | "inactive" | "picked" | "remote".
+local function build_tab_visual(tc, entry, ctx, tab_state)
     local client_color = colors.get_client_color(tc)
-    local tab_bg = (client_color and client_color.dark) or color_btn_bg
-    local tab_bg_pat = gears.color(tab_bg)
+    local tab_bg = tab_state == "picked" and theme.color_fg
+        or (client_color and client_color.dark)
+        or (tab_state == "active" and theme.color_bg)
+        or theme.color_btn_bg
+    local tab_bg_pat    = gears.color(tab_bg)
+    local widget_bc_pat = gears.color(ctx.widget_bc)
+    local outlined = tab_state == "active" or tab_state == "picked"
 
     local tab_draw = wibox.widget.base.make_widget()
     function tab_draw:draw(_, cr, w2, h2)
-        local h = h2 - 1
+        local h = h2 - 1  -- 1px room at top so the border stroke isn't clipped
         cr:translate(0, 1)
-        tab_path(cr, w2, h)
-        cr:close_path()
-        cr:set_source(tab_bg_pat)
-        cr:fill()
+        if ctx.simple_tabs and tab_state ~= "remote" then
+            local r = math.floor(h / 4)
+            local sw = w2 - 2 * (TAB_EAR + 4)
+            cr:translate(TAB_EAR + 4, 0)
+            gears.shape.rounded_rect(cr, sw, h, r)
+            cr:set_source(tab_bg_pat)
+            cr:fill()
+            if outlined then
+                gears.shape.rounded_rect(cr, sw, h, r)
+                cr:set_source(tab_state == "picked"
+                    and gears.color(theme.color_fg) or widget_bc_pat)
+                cr:set_line_width(2)
+                cr:stroke()
+            end
+        else
+            tab_path(cr, w2, h)
+            cr:close_path()
+            cr:set_source(tab_bg_pat)
+            cr:fill()
+            if outlined then
+                tab_path(cr, w2, h)
+                cr:set_source(tab_state == "picked"
+                    and gears.color(theme.color_fg) or widget_bc_pat)
+                cr:set_line_width(2)
+                cr:stroke()
+            end
+        end
     end
     function tab_draw:fit(_, _, _) return 0, 0 end
 
@@ -616,39 +707,31 @@ local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
         valign = "center",
         widget = wibox.container.place,
     }
-    local close_placeholder = wibox.widget {
-        forced_width = _BTN_SIZE - 4,
-        widget       = wibox.container.background,
-    }
-    local content_row = wibox.widget {
-        icon_widget, close_placeholder, spacing = ICON_CLOSE_GAP,
-        layout = wibox.layout.fixed.horizontal,
-    }
-    if on_click then
-        content_row:buttons(gears.table.join(awful.button({}, 1, on_click)))
-    end
 
-    local content = wibox.widget {
-        {
-            content_row,
-            forced_width  = ctx.icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4,
-            forced_height = ctx.icon_size,
-            widget        = wibox.container.background,
-        },
-        left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
-        top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
-        widget = wibox.container.margin,
-    }
     local tab_widget = wibox.widget {
         tab_draw,
-        content,
+        {
+            icon_widget,
+            left = TAB_PAD_H, right = TAB_PAD_H,
+            top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
+            widget = wibox.container.margin,
+        },
         layout = wibox.layout.stack,
     }
+
     tab_widget:connect_signal("mouse::enter", function()
         entry.tooltip.text = (tc.valid and tc.name) or "?"
     end)
     entry.tooltip:add_to_object(tab_widget)
     table.insert(entry.tooltip_objs, tab_widget)
+    return tab_widget
+end
+
+local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
+    local tab_widget = build_tab_visual(tc, entry, ctx, "remote")
+    if on_click then
+        tab_widget:buttons(gears.table.join(awful.button({}, 1, on_click)))
+    end
     return tab_widget
 end
 
@@ -658,289 +741,171 @@ end
 
 local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_state = get_tab_state(tab_idx, leaf, tc)
-    local gap       = beautiful.splitwm_gap
-
-    -- Returns true if (mx, my) is over the close button of this tab.
-    local function in_close_btn(mx, my, g)
-        local sx   = ctx.state.scroll_x or 0
-        local cx1  = g.x - sx + tab_slot_x(tab_idx, leaf.active_tab, ctx.icon_size)
-            + TAB_PAD_H + ctx.icon_size + ICON_CLOSE_GAP
-        return tab_state == "active"
-           and mx >= cx1 and mx < cx1 + _BTN_SIZE - 4
-           and my >= g.y - gap
-           and my <  g.y - gap + ctx.tb_h
-    end
+    local gap       = theme.gap()
 
     local function in_tab_content(mx, my, g)
         local sx = ctx.state.scroll_x or 0
-        return tab_content_hit(mx - (g.x - sx), tab_idx, leaf.active_tab, ctx.icon_size)
-           and my >= g.y - gap
-           and my <  g.y - gap + ctx.tb_h
+        return tab_content_hit(mx - (g.x - sx), tab_idx, ctx.icon_size)
+            and my >= g.y - gap
+            and my < g.y - gap + ctx.tb_h
     end
-
-    local icon_widget = wibox.widget {
-        make_tab_icon(tc, ctx.icon_size),
-        halign = "center",
-        valign = "center",
-        widget = wibox.container.place,
-    }
-    local close_btn = wibox.widget {
-        { text = "✕", align = "center", font = ctx.tab_btn_font, widget = wibox.widget.textbox },
-        fg           = tab_state == "active" and color_fg or color_transparent,
-        forced_width = _BTN_SIZE - 4,
-        widget       = wibox.container.background,
-    }
 
     -- Activate focus on tc (no-op if client is no longer valid).
     local function focus_tc()
         if not tc.valid then return end
-        _splitwm.activate_client_in_leaf(ctx.t, leaf.id, tc, { screen = ctx.s })
+        ops.activate_client_in_leaf(ctx.t, leaf.id, tc, { screen = ctx.s })
     end
 
-    -- Phase 1: while button held, promote pending → pickup once cursor leaves the tab bounds.
-    local function try_promote_pending(m)
-        local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-        if not g then return end
-        local gap = beautiful.splitwm_gap
-        local ty  = g.y - gap
-        if not in_tab_content(m.x, m.y, g)
-        or m.y < ty or m.y >= ty + ctx.tb_h then
-            drag.pending = nil
-            drag.pickup  = pickup_client(tc)
-            awful.layout.arrange(ctx.s)
-        end
-    end
-
-    -- Phase 2: button released while still pending (quick click — cursor never left the tab).
-    local function settle_pending(m)
-        drag.pending = nil
+    -- Button released with this tab picked up: drop, kill, or reorder.
+    -- Dropping a tab onto its own slot is a self-swap, which focuses it —
+    -- so a plain click is just the degenerate case of a drag.
+    local function settle(m)
         local mx, my = m.x, m.y
-        local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-        if g and in_close_btn(mx, my, g) then tc:kill(); return false end
-        focus_tc()
-        return false
-    end
-
-    -- Phase 3: button released with an active pickup — drop, kill, or reorder.
-    local function settle_pickup(m)
-        local mx, my = m.x, m.y
-        local gap    = beautiful.splitwm_gap
         local sx     = ctx.state.scroll_x or 0
-        local cached = _geo_cache[ctx.t]
-        -- Released over the close button of the originating tab: close the tab.
-        local og = cached and cached.geos[leaf.id]
-        if og and in_close_btn(mx, my, og) then
-            drag.pickup = pickup_idle()
-            tc:kill()
-            return false
-        end
+        local cached = core.geo[ctx.t]
         if cached then
-            local leaves = tree.collect_leaves(ctx.state.root)
-            for _, drop_leaf in ipairs(leaves) do
+            for _, drop_leaf in ipairs(tree.collect_leaves(ctx.state.root)) do
                 local lid = drop_leaf.id
                 local g = cached.geos[lid]
                 local gx = g and g.x - sx
                 if g and mx >= gx and mx < gx + g.width
-                       and my >= g.y - gap and my < g.y + g.height then
+                        and my >= g.y - gap and my < g.y + g.height then
                     if lid ~= leaf.id then
-                        _try_drop_picked_up(ctx.t, lid)
+                        ops.try_drop_picked_up(ctx.t, lid)
                         awful.layout.arrange(ctx.s)
                     elseif my < g.y then
                         -- Same leaf, in tab bar: reorder tabs by drop position.
-                        local target = tab_index_at(mx - gx, leaf.active_tab, #leaf.tabs, ctx.icon_size)
+                        local target = tab_index_at(mx - gx, #leaf.tabs, ctx.icon_size)
                         if not target then
-                            drag.pickup = pickup_idle()
+                            core.drop_pickup()
                             awful.layout.arrange(ctx.s)
                             return false
                         end
-                        drag.pickup = pickup_idle()
-                        if not _splitwm.swap_client_to_tab_index(ctx.t, leaf.id, tc, target, { screen = ctx.s }) then
+                        core.drop_pickup()
+                        if not ops.swap_client_to_tab_index(ctx.t, leaf.id, tc,
+                                target, { screen = ctx.s }) then
                             awful.layout.arrange(ctx.s)
                             focus_tc()
                         end
+                    else
+                        -- Same leaf, client area: a drop here is a no-op move.
+                        core.drop_pickup()
+                        awful.layout.arrange(ctx.s)
+                        focus_tc()
                     end
                     return false
                 end
             end
         end
-        -- Released in a gap (between splits or at screen edges): create a new split there.
+        -- Released in a gap (between splits or at edges): new split there.
         if cached then
             local leaves = tree.collect_leaves(ctx.state.root)
             local best_lid, direction, new_first =
                 tree.find_gap_drop_target(leaves, cached.geos, sx, mx, my, gap)
-            if best_lid and _drop_into_new_split(ctx.t, best_lid, direction, new_first) then
+            if best_lid and ops.drop_into_new_split(ctx.t, best_lid, direction, new_first) then
                 awful.layout.arrange(ctx.s)
             end
         end
         return false
     end
 
-    -- Shared mousegrabber callback: dispatches to the appropriate drag phase.
+    -- Mousegrabber callback while this tab is held. The picked visual is
+    -- only painted once the cursor leaves the tab, so plain clicks don't
+    -- flash the drag style.
+    local shown_picked = false
     local function drag_release_fn(m)
-        if m.buttons[1] and drag.pending and drag.pending.client == tc then
-            try_promote_pending(m); return true
+        if m.buttons[1] then
+            if not shown_picked then
+                local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
+                if g and not in_tab_content(m.x, m.y, g) then
+                    shown_picked = true
+                    awful.layout.arrange(ctx.s)
+                end
+            end
+            return true
         end
-        if m.buttons[1] then return true end
-        if drag.pending and drag.pending.client == tc then return settle_pending(m) end
         if drag.pickup.tag == "client" and not drag.pickup.client.valid then
-            drag.pickup = pickup_idle(); awful.layout.arrange(ctx.s); return false
+            core.drop_pickup(); awful.layout.arrange(ctx.s); return false
         end
-        if drag.pickup.tag == "client" then return settle_pickup(m) end
+        if drag.pickup.tag == "client" then return settle(m) end
         return false
     end
 
-    -- Begin a tab drag: start the mousegrabber after the current event batch.
+    -- Begin a tab drag: pick up immediately, grab after the event batch.
     local function start_tab_drag()
-        drag.pending = { client = tc }
+        hide_close_popup()
+        drag.pickup  = core.pickup_client(tc)
+        shown_picked = false
         gears.timer.delayed_call(function()
+            if drag.pickup.tag ~= "client" or drag.pickup.client ~= tc then return end
             if not mouse.coords().buttons[1] then
-                if drag.pending and drag.pending.client == tc then drag.pending = nil end
+                -- Released within the same event batch: settle as a click.
+                settle(mouse.coords())
                 return
             end
             if mousegrabber.isrunning() then return end
-            local has_pending = drag.pending and drag.pending.client == tc
-            local has_pickup  = drag.pickup.tag == "client" and drag.pickup.client == tc
-            if not has_pending and not has_pickup then return end
             mousegrabber.run(drag_release_fn, "fleur")
         end)
     end
 
+    local tab_widget = build_tab_visual(tc, entry, ctx, tab_state)
 
-    local client_color  = colors.get_client_color(tc)
-    local tab_bg = tab_state == "picked" and color_fg
-        or (client_color and client_color.dark)
-        or (tab_state == "active" and color_bg)
-        or color_btn_bg
-    local tab_bg_pat    = gears.color(tab_bg)
-    local widget_bc_pat = gears.color(ctx.widget_bc)
-
-    local tab_draw = wibox.widget.base.make_widget()
-    function tab_draw:draw(_, cr, w2, h2)
-        local h = h2 - 1  -- 1px breathing room at top so the border stroke isn't clipped
-        cr:translate(0, 1)
-        if ctx.simple_tabs then
-            local r = math.floor(h / 4)
-            local sw = w2 - 2 * (TAB_EAR + 4)
-            cr:translate(TAB_EAR + 4, 0)
-            gears.shape.rounded_rect(cr, sw, h, r)
-            cr:set_source(tab_bg_pat)
-            cr:fill()
-            if tab_state == "active" or tab_state == "picked" then
-                gears.shape.rounded_rect(cr, sw, h, r)
-                cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
-                cr:set_line_width(2)
-                cr:stroke()
-            end
-        else
-            tab_path(cr, w2, h)
-            cr:close_path()
-            cr:set_source(tab_bg_pat)
-            cr:fill()
-            if tab_state == "active" or tab_state == "picked" then
-                tab_path(cr, w2, h)
-                cr:set_source(tab_state == "picked" and gears.color(color_fg) or widget_bc_pat)
-                cr:set_line_width(2)
-                cr:stroke()
-            end
-        end
-    end
-    function tab_draw:fit(_, _, _) return 0, 0 end
-
-    local tab_widget = wibox.widget {
-        tab_draw,
-        {
-            {
-                icon_widget, close_btn, spacing = ICON_CLOSE_GAP, layout = wibox.layout.fixed.horizontal,
-            },
-            left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA, top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD, widget = wibox.container.margin,
-        },
-        layout = wibox.layout.stack,
-    }
-
+    -- The ✕ lives in a hover popup under the active tab (no inline button).
     tab_widget:connect_signal("mouse::enter", function()
-        entry.tooltip.text = (tc.valid and tc.name) or "?"
-        local mc = mouse.coords()
-        local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-        -- If the mouse button is held and we're not dragging a tab, switch to this tab.
-        if mouse.coords().buttons[1]
-        and drag.pickup.tag == "idle"
-        and drag.pending == nil
-        and tab_idx ~= leaf.active_tab
-        and tc.valid
-        and g and in_tab_content(mc.x, mc.y, g) then
-            focus_tc()
+        if tab_state ~= "active" or drag.pickup.tag ~= "idle" then return end
+        if close_popup.client == tc and close_popup.wb and close_popup.wb.visible then
+            return
         end
+        local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
+        if not g or leaf.minimized then return end
+        local x = g.x - (ctx.state.scroll_x or 0)
+            + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
+        local bar_top = g.y - gap
+        local cc = colors.get_client_color(tc)
+        show_close_popup(tc, x, bar_top + ctx.tb_h, ctx.icon_size,
+            cc and cc.dark or theme.color_bg,
+            cc and cc.light or theme.color_fg,
+            { x = x, y = bar_top, width = ctx.icon_size, height = ctx.tb_h })
     end)
-    tab_widget:connect_signal("mouse::leave", function()
-        if drag.pending and drag.pending.client == tc and mouse.coords().buttons[1] then
-            drag.pending = nil
-            drag.pickup  = pickup_client(tc)
-            awful.layout.arrange(ctx.s)
-        end
-    end)
-    entry.tooltip:add_to_object(tab_widget)
-    table.insert(entry.tooltip_objs, tab_widget)
 
     tab_widget:buttons(gears.table.join(
         awful.button({}, 1, function()
             local mc = mouse.coords()
-            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+            local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
             if not (g and in_tab_content(mc.x, mc.y, g)) then return end
             local_tab_click_active = true
             gears.timer.delayed_call(function() local_tab_click_active = false end)
             if drag.pickup.tag == "split" and drag.pickup.split_id ~= leaf.id then
-                _handle_split_pickup(ctx.state, leaf.id, ctx.s); return
+                ops.handle_split_pickup(ctx.state, leaf.id, ctx.s); return
             end
-            if drag.pickup.tag == "client" and drag.pickup.client.valid and drag.pickup.client ~= tc then
-                _try_drop_picked_up(ctx.t, leaf.id)
-                awful.layout.arrange(ctx.s)
-                return
-            end
-            -- Clicking the picked tab again cancels the drag.
-            if tab_state == "picked" and drag.pickup.tag == "client" and drag.pickup.client == tc then
-                drag.pickup = pickup_idle()
+            if drag.pickup.tag == "client" and drag.pickup.client.valid
+                    and drag.pickup.client ~= tc then
+                ops.try_drop_picked_up(ctx.t, leaf.id)
                 awful.layout.arrange(ctx.s)
                 return
             end
             start_tab_drag()
-        end, function()
-            -- Release handler: fires only for quick clicks (before mousegrabber starts).
-            local is_pending = drag.pending and drag.pending.client == tc
-            if not is_pending and (drag.pickup.tag ~= "client" or drag.pickup.client ~= tc) then return end
-            if is_pending then drag.pending = nil end
-            local mc = mouse.coords()
-            local g  = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
-            if not (g and in_tab_content(mc.x, mc.y, g)) then
-                drag.pickup = pickup_idle()
-                return
-            end
-            if g and in_close_btn(mc.x, mc.y, g) then
-                drag.pickup = pickup_idle()
-                tc:kill()
-                return
-            end
-            drag.pickup = pickup_idle()
-            focus_tc()
         end),
         awful.button({}, 3, function()
             if not tc.valid then return end
             local mc = mouse.coords()
-            local g = _geo_cache[ctx.t] and _geo_cache[ctx.t].geos[leaf.id]
+            local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
             if not (g and in_tab_content(mc.x, mc.y, g)) then return end
             local_tab_click_active = true
             gears.timer.delayed_call(function() local_tab_click_active = false end)
-            if _splitwm.on_menu_close then _splitwm.on_menu_close() end
+            local sw = api()
+            if sw.on_menu_close then sw.on_menu_close() end
+            hide_close_popup()
             if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
                 hide_tab_color_menu(); return
             end
-            local tab_x      = g.x - (ctx.state.scroll_x or 0)
-                + select(1, tab_content_bounds(tab_idx, leaf.active_tab, ctx.icon_size))
-            local bar_bottom = g.y - beautiful.splitwm_gap + ctx.tb_h
+            local tab_x = g.x - (ctx.state.scroll_x or 0)
+                + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
+            local bar_bottom = g.y - gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
             show_tab_color_menu(tc, ctx.s, tab_x, bar_bottom,
-                cc and cc.dark or color_bg,
-                cc and cc.light or color_fg,
-                ctx.icon_size + ICON_CLOSE_GAP + _BTN_SIZE - 4)
+                cc and cc.dark or theme.color_bg,
+                cc and cc.light or theme.color_fg)
         end)
     ))
 
@@ -948,30 +913,30 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 end
 
 ---------------------------------------------------------------------------
--- Build the right-side split control buttons (swap, split, close)
+-- Build the right-side split control buttons (minimize, swap, split, close)
 ---------------------------------------------------------------------------
 
 local function tb_build_split_controls(leaf, entry, ctx)
-    local gap      = beautiful.splitwm_gap
-    local geo      = ctx.geo
+    local gap = theme.gap()
+    local geo = ctx.geo
     local parent = tree.find_parent(ctx.state.root, leaf)
-    local can_vsplit = geo and geo.width  >= 2 * _MIN_SPLIT_W + gap
-    local can_hsplit = geo and geo.height >= 2 * _MIN_SPLIT_H + gap
+    local can_vsplit = geo and geo.width  >= 2 * theme.MIN_SPLIT_W + gap
+    local can_hsplit = geo and geo.height >= 2 * theme.MIN_SPLIT_H + gap
 
     local function make_btn(draw_fn, callback, disabled)
-        return tb_make_btn(entry, ctx.widget_bc, draw_fn, _BTN_SIZE,
+        return tb_make_btn(ctx.widget_bc, draw_fn, theme.BTN_SIZE,
             not disabled and callback)
     end
 
-    local cb     = _make_split_action_callbacks(ctx.state, leaf.id, ctx.t, ctx.s)
-    local wider  = geo and geo.width >= geo.height
-    local auto_icon    = wider and icons.vsplit or icons.hsplit
-    local auto_cb      = wider and (can_vsplit and cb.vsplit or nil)
-                                or (can_hsplit and cb.hsplit or nil)
-    local auto_cb_opp  = wider and (can_hsplit and cb.hsplit or nil)
-                                or (can_vsplit and cb.vsplit or nil)
-    local can_split    = wider and can_vsplit or can_hsplit
-    local split_btn       = make_btn(auto_icon,  auto_cb,  not can_split)
+    local cb    = ops.split_action_callbacks(ctx.state, leaf.id, ctx.t, ctx.s)
+    local wider = geo and geo.width >= geo.height
+    local auto_icon   = wider and icons.vsplit or icons.hsplit
+    local auto_cb     = wider and (can_vsplit and cb.vsplit or nil)
+                              or (can_hsplit and cb.hsplit or nil)
+    local auto_cb_opp = wider and (can_hsplit and cb.hsplit or nil)
+                              or (can_vsplit and cb.vsplit or nil)
+    local can_split = wider and can_vsplit or can_hsplit
+    local split_btn = make_btn(auto_icon, auto_cb, not can_split)
     if auto_cb_opp then
         split_btn:buttons(gears.table.join(
             split_btn:buttons(),
@@ -981,14 +946,16 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local close_split_btn = make_btn(icons.close, cb.close, not parent)
 
     if not can_split then set_btn_disabled(split_btn, entry.wb) end
-    if parent then on_hover_fg(close_split_btn, color_close, color_fg)
-    else           set_btn_disabled(close_split_btn, entry.wb) end
+    if parent then
+        on_hover_fg(close_split_btn, theme.color_close, theme.color_fg)
+    else
+        set_btn_disabled(close_split_btn, entry.wb)
+    end
 
-    -- Minimize / expand button (disabled when leaf has no parent)
-    local parent_dir   = parent and parent.direction
-    local is_minimized = leaf.minimized
+    -- Minimize / expand button (disabled when leaf has no parent).
+    local parent_dir = parent and parent.direction
     local min_icon
-    if is_minimized then
+    if leaf.minimized then
         min_icon = (parent_dir == tree.DIR_V) and icons.expand_v or icons.expand_h
     else
         min_icon = (parent_dir == tree.DIR_V) and icons.minimize_v or icons.minimize_h
@@ -996,48 +963,52 @@ local function tb_build_split_controls(leaf, entry, ctx)
     local minimize_btn = make_btn(min_icon, parent and cb.minimize_toggle or nil, not parent)
     if not parent then set_btn_disabled(minimize_btn, entry.wb) end
 
-    local is_split_picked = (drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id)
-    local swap_btn = make_circle_icon_btn_widget(icons.swap, _BTN_SIZE)
+    local is_split_picked = drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id
+    local swap_btn = make_circle_icon_btn_widget(icons.swap, theme.BTN_SIZE)
     swap_btn.shape_border_color = ctx.widget_bc
-    if is_split_picked then swap_btn.bg = color_fg; swap_btn._icon._dark = true end
+    if is_split_picked then swap_btn.bg = theme.color_fg; swap_btn._icon._dark = true end
     entry.swap_btn        = swap_btn
     entry.swap_btn_picked = is_split_picked
     swap_btn:connect_signal("mouse::enter", function()
-        if not entry.swap_btn_picked then swap_btn.bg = color_bg end
+        if not entry.swap_btn_picked then swap_btn.bg = theme.color_bg end
     end)
     swap_btn:connect_signal("mouse::leave", function()
-        swap_btn.bg = entry.swap_btn_picked and color_fg or color_btn_bg
+        swap_btn.bg = entry.swap_btn_picked and theme.color_fg or theme.color_btn_bg
         if swap_btn._icon then
             swap_btn._icon._dark = entry.swap_btn_picked
             swap_btn._icon:emit_signal("widget::redraw_needed")
         end
     end)
     swap_btn:buttons(gears.table.join(awful.button({}, 1, function()
-        if drag.pickup.tag == "split" and drag.pickup.split_id == leaf.id then
-            drag.pickup = pickup_idle()
-        elseif drag.pickup.tag == "split" then
-            _handle_split_pickup(ctx.state, leaf.id, ctx.s); return
-        elseif drag.pickup.tag == "client" then
-            drag.pickup = pickup_idle()
+        if drag.pickup.tag == "split" and drag.pickup.split_id ~= leaf.id then
+            ops.handle_split_pickup(ctx.state, leaf.id, ctx.s); return
+        elseif drag.pickup.tag ~= "idle" then
+            -- Picked-up own split or a client: cancel the pickup.
+            core.drop_pickup()
         else
-            drag.pickup = pickup_split(leaf.id)
-            _splitwm.focus_leaf(ctx.t, leaf.id)
+            drag.pickup = core.pickup_split(leaf.id)
+            focus_leaf(ctx.t, leaf.id)
         end
         awful.layout.arrange(ctx.s)
     end)))
 
-    return { minimize = minimize_btn, split = split_btn, close = close_split_btn, swap = swap_btn }
+    return {
+        minimize = minimize_btn,
+        split    = split_btn,
+        close    = close_split_btn,
+        swap     = swap_btn,
+    }
 end
 
 ---------------------------------------------------------------------------
--- Build the focus border drawn around the client area
+-- Focus border drawn around the client area
 ---------------------------------------------------------------------------
 
-local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
-    local w   = wibox.widget.base.make_widget()
-    w._bc     = border_color
-    w._tb_h   = tb_h
-    w._bw     = bw
+local function tb_build_border_widget(border_color, tb_h, bw, radius)
+    local w = wibox.widget.base.make_widget()
+    w._bc   = border_color
+    w._tb_h = tb_h
+    w._bw   = bw
     function w:draw(_, cr, width, height)
         if not self._bc then return end
         cr:set_source(gears.color(self._bc))
@@ -1045,16 +1016,14 @@ local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
         local half = self._bw / 2
         local x    = half
         local y    = self._tb_h - half
-        local cw   = entry_ref and entry_ref.border_client_w
-        local ch   = entry_ref and entry_ref.border_client_h
-        local wd   = cw and (cw + self._bw) or (width  - self._bw)
-        local h    = ch and (ch + self._bw) or (height - self._tb_h)
+        local wd   = width - self._bw
+        local h    = height - self._tb_h
         local r    = radius or beautiful.splitwm_border_radius
         cr:new_sub_path()
         cr:arc(x + wd - r, y + r,     r, -math.pi / 2, 0)
-        cr:arc(x + wd - r, y + h - r, r,  0,            math.pi / 2)
-        cr:arc(x + r,      y + h - r, r,   math.pi / 2, math.pi)
-        cr:arc(x + r,      y + r,     r,   math.pi,     3 * math.pi / 2)
+        cr:arc(x + wd - r, y + h - r, r, 0,            math.pi / 2)
+        cr:arc(x + r,      y + h - r, r, math.pi / 2,  math.pi)
+        cr:arc(x + r,      y + r,     r, math.pi,      3 * math.pi / 2)
         cr:close_path()
         cr:stroke()
     end
@@ -1063,15 +1032,15 @@ local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
 end
 
 ---------------------------------------------------------------------------
--- Split tab_widgets into two layers
+-- Split tab widgets into two layers
 ---------------------------------------------------------------------------
 
 -- The active tab and widgets after index n_tabs (i.e. the "+" button) float
--- above the border widget; inactive tabs stay behind it.
--- Spacers preserve layout width in each layer.
+-- above the border widget; inactive tabs stay behind it. Spacers preserve
+-- layout width in each layer.
 --
 -- Spacers are pooled on `entry` so make_widget() is only called when the tab
--- count grows beyond its previous maximum — not on every fingerprint change.
+-- count grows beyond its previous maximum, not on every fingerprint change.
 local function tb_split_tab_layers(tab_widgets, active_tab, n_tabs, entry)
     if not entry._spacers then entry._spacers = {} end
     local pool = entry._spacers
@@ -1081,26 +1050,16 @@ local function tb_split_tab_layers(tab_widgets, active_tab, n_tabs, entry)
         function sp:draw() end
         pool[#pool + 1] = sp
     end
-    if not entry._active_tab_margin then
-        entry._active_tab_margin = wibox.container.margin()
-        entry._active_tab_margin.right = ACTIVE_TAB_AFTER_GAP
-    end
-
     local behind, above = {}, {}
     for i, tw in ipairs(tab_widgets) do
         local sp = pool[i]
-        local render_tw = tw
-        if i == active_tab and active_tab < n_tabs then
-            entry._active_tab_margin:set_widget(tw)
-            render_tw = entry._active_tab_margin
-        end
-        sp._ref = render_tw
+        sp._ref = tw
         if i == active_tab or i > n_tabs then
             table.insert(behind, sp)
-            table.insert(above,  render_tw)
+            table.insert(above, tw)
         else
             table.insert(behind, tw)
-            table.insert(above,  sp)
+            table.insert(above, sp)
         end
     end
     return behind, above
@@ -1112,12 +1071,19 @@ end
 
 local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
     local tab_spacing = #behind > 1 and (TAB_SPACING + TAB_GAP) or 0
-    local tabs        = { spacing = tab_spacing, layout = wibox.layout.fixed.horizontal, table.unpack(behind) }
-    local ctrl_cover  = {
+    local tabs = {
+        spacing = tab_spacing,
+        layout = wibox.layout.fixed.horizontal,
+        table.unpack(behind),
+    }
+    local ctrl_cover = {
         {
             {
-                { controls.minimize, controls.swap, controls.split, controls.close,
-                  spacing = _BTN_SPACING, layout = wibox.layout.fixed.horizontal },
+                {
+                    controls.minimize, controls.swap, controls.split, controls.close,
+                    spacing = theme.BTN_SPACING,
+                    layout = wibox.layout.fixed.horizontal,
+                },
                 widget = wibox.container.margin,
             },
             bg = ctx.bar_bg, widget = wibox.container.background,
@@ -1126,10 +1092,16 @@ local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
     }
     local bar_content
     if drag_pill then
-        bar_content = { tabs, drag_pill, ctrl_cover, layout = wibox.layout.align.horizontal }
+        bar_content = {
+            tabs, drag_pill, ctrl_cover,
+            layout = wibox.layout.align.horizontal,
+        }
     else
-        bar_content = { tabs, { ctrl_cover, halign = "right", widget = wibox.container.place },
-                        layout = wibox.layout.stack }
+        bar_content = {
+            tabs,
+            { ctrl_cover, halign = "right", widget = wibox.container.place },
+            layout = wibox.layout.stack,
+        }
     end
     return {
         {
@@ -1142,7 +1114,7 @@ local function tb_build_bar_layer(behind, controls, drag_pill, ctx)
 end
 
 ---------------------------------------------------------------------------
--- Assemble the three-layer wibox layout for a leaf's titlebar
+-- Assemble the three-layer wibox layout for a leaf's tab bar
 ---------------------------------------------------------------------------
 
 local function tb_assemble_wibox(entry, behind, above, controls, border_draw, middle_drag, ctx)
@@ -1156,8 +1128,12 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
             {
                 {
                     {
-                        { spacing = TAB_SPACING + TAB_GAP, layout = wibox.layout.fixed.horizontal, table.unpack(above) },
-                        right = _MIN_SPLIT_W, widget = wibox.container.margin,
+                        {
+                            spacing = TAB_SPACING + TAB_GAP,
+                            layout = wibox.layout.fixed.horizontal,
+                            table.unpack(above),
+                        },
+                        right = theme.MIN_SPLIT_W, widget = wibox.container.margin,
                     },
                     top = ctx.top_pad, widget = wibox.container.margin,
                 },
@@ -1170,7 +1146,7 @@ local function tb_assemble_wibox(entry, behind, above, controls, border_draw, mi
 end
 
 ---------------------------------------------------------------------------
--- Assemble the titlebar wibox for an empty leaf
+-- Assemble the wibox for an empty leaf (launcher grid)
 ---------------------------------------------------------------------------
 
 local function tb_assemble_empty_leaf(entry, bar_widgets, controls, border_draw, middle_drag, launcher_ws, ctx)
@@ -1182,15 +1158,27 @@ local function tb_assemble_empty_leaf(entry, bar_widgets, controls, border_draw,
     local icon_grid
     if #row2 > 0 then
         icon_grid = {
-            { spacing = _BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(row1) },
-            { spacing = _BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(row2) },
-            spacing = _BTN_SPACING, layout = wibox.layout.fixed.vertical,
+            {
+                spacing = theme.BTN_SPACING,
+                layout = wibox.layout.fixed.horizontal,
+                table.unpack(row1),
+            },
+            {
+                spacing = theme.BTN_SPACING,
+                layout = wibox.layout.fixed.horizontal,
+                table.unpack(row2),
+            },
+            spacing = theme.BTN_SPACING, layout = wibox.layout.fixed.vertical,
         }
     else
-        icon_grid = { spacing = _BTN_SPACING, layout = wibox.layout.fixed.horizontal, table.unpack(launcher_ws) }
+        icon_grid = {
+            spacing = theme.BTN_SPACING,
+            layout = wibox.layout.fixed.horizontal,
+            table.unpack(launcher_ws),
+        }
     end
     local corner_r = beautiful.splitwm_empty_radius
-    local bw       = beautiful.splitwm_focus_border_width
+    local bw       = theme.focus_border_width()
     entry.wb:setup {
         -- Layer 1: content background
         {
@@ -1198,11 +1186,17 @@ local function tb_assemble_empty_leaf(entry, bar_widgets, controls, border_draw,
             {
                 {
                     {
-                        { icon_grid, halign = "center", valign = "center", widget = wibox.container.place },
+                        {
+                            icon_grid,
+                            halign = "center", valign = "center",
+                            widget = wibox.container.place,
+                        },
                         widget = wibox.container.background,
                     },
-                    bg    = color_btn_bg,
-                    shape = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, corner_r) end,
+                    bg    = theme.color_btn_bg,
+                    shape = function(cr, w, h)
+                        gears.shape.rounded_rect(cr, w, h, corner_r)
+                    end,
                     widget = wibox.container.background,
                 },
                 left = bw, right = bw, bottom = bw, widget = wibox.container.margin,
@@ -1218,320 +1212,346 @@ local function tb_assemble_empty_leaf(entry, bar_widgets, controls, border_draw,
 end
 
 ---------------------------------------------------------------------------
--- Main titlebar update
+-- Main tab bar update
 ---------------------------------------------------------------------------
 
-local function update_titlebars(s, t, state, geos, leaves)
-    if not titlebar_cache[s] then titlebar_cache[s] = {} end
+local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
+    local geo = geos[leaf.id]
+    if not geo then return end
 
-    local gap  = beautiful.splitwm_gap
-    local tb_h = math.max(_TITLEBAR_HEIGHT, gap)
-    local bw   = beautiful.splitwm_focus_border_width
-    local alive = {}
-    local all_tabs_fp = tb_compute_all_tabs_fingerprint(leaves)
+    local gap  = theme.gap()
+    local tb_h = theme.tb_h(gap)
+    local bw   = theme.focus_border_width()
 
-    local function update_leaf(leaf)
-        local geo = geos[leaf.id]
-        if not geo then return end
+    local entry = tb_get_or_create_entry(s, leaf)
+    entry.tb_h  = tb_h
+    local wb    = entry.wb
+    local scroll_x = state.scroll_x or 0
+    local wa = s.workarea
+    local vis_x = geo.x - scroll_x
+    local off_screen = vis_x + geo.width <= wa.x or vis_x >= wa.x + wa.width
+    wb.visible = not off_screen
+    if not off_screen and not anim.is_active(s) then
+        wb.x      = vis_x
+        wb.y      = geo.y - gap
+        wb.width  = geo.width
+        wb.height = geo.height + gap
+    end
 
-        local entry    = tb_get_or_create_entry(s, leaf)
-        entry.tb_h     = tb_h
-        local wb       = entry.wb
-        local scroll_x = state.scroll_x or 0
-        local border_ref_client = leaf.tabs[leaf.active_tab]
-        local wa = s.workarea
-        local vis_x = geo.x - scroll_x
-        local off_screen = vis_x + geo.width <= wa.x or vis_x >= wa.x + wa.width
-        wb.visible = not off_screen
-        if not off_screen and not _split_anim_active[s] then
-            wb.x      = vis_x
-            wb.y      = geo.y - gap
-            wb.width  = geo.width
-            wb.height = geo.height + gap
+    local fp = tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
+    if entry.fp == fp then return end
+    entry.fp = fp
+
+    local is_focused    = state.focused_leaf_id == leaf.id
+    local active_client = leaf.tabs[leaf.active_tab]
+    local active_picked = drag.pickup.tag == "client"
+        and drag.pickup.client == active_client
+    local active_color = active_client and colors.get_client_color(active_client)
+    local focus_color  = active_picked and theme.color_fg
+        or (active_color and active_color.light)
+        or theme.color_fg
+    local par_for_min = tree.find_parent(state.root, leaf)
+    local par_dir_min = par_for_min and par_for_min.direction
+    local ctx = {
+        s            = s,
+        t            = t,
+        state        = state,
+        geo          = geo,
+        widget_bc    = is_focused and focus_color or theme.color_transparent,
+        bar_bg       = theme.color_transparent,
+        top_pad      = math.max(gap, theme.TITLEBAR_HEIGHT) - theme.TITLEBAR_HEIGHT,
+        tb_h         = tb_h,
+        tb_bar_h     = tb_h,
+        icon_size    = tb_h - 2 * TAB_CONTENT_V_PAD,
+        simple_tabs  = leaf.minimized and not leaf.min_anim
+            and par_dir_min ~= tree.DIR_H,
+    }
+
+    -- Detach tooltip from previous tab widgets before rebuilding.
+    entry.tooltip:hide()
+    for _, obj in ipairs(entry.tooltip_objs) do
+        entry.tooltip:remove_from_object(obj)
+    end
+    entry.tooltip_objs = {}
+
+    -- Build per-tab widgets.
+    local tab_widgets = {}
+    for i, tc in ipairs(leaf.tabs) do
+        table.insert(tab_widgets, tb_build_tab_widget(leaf, tc, i, entry, ctx))
+    end
+
+    -- "+" and remote tabs live after local tabs; tb_split_tab_layers keeps
+    -- them in the floating layer.
+    table.insert(tab_widgets, wibox.widget {
+        tb_make_btn(ctx.widget_bc, icons.plus, theme.BTN_SIZE, function()
+            pcall(function() mousegrabber.stop() end)
+            focus_leaf(ctx.t, leaf.id)
+            local sw = api()
+            if sw.on_menu_request then sw.on_menu_request() end
+        end),
+        left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0,
+        bottom = BTN_V_RAISE,
+        widget = wibox.container.margin,
+    })
+
+    local remote_widgets = {}
+    local pending_remote_click = nil
+    local function queue_remote_click(remote_idx, remote_client)
+        if local_tab_click_active then return end
+        if not remote_client.valid then return end
+        if pending_remote_click then
+            if remote_idx > pending_remote_click.idx then
+                pending_remote_click.idx = remote_idx
+                pending_remote_click.client = remote_client
+            end
+            return
         end
+        pending_remote_click = { idx = remote_idx, client = remote_client }
+        gears.timer.delayed_call(function()
+            local item = pending_remote_click
+            pending_remote_click = nil
+            if not (item and item.client and item.client.valid) then return end
+            ops.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
+        end)
+    end
 
-        -- Geometry-only fingerprint: border size is only recomputed when geometry
-        -- or active client changes, NOT on focus changes from hover.
-        local geo_fp_parts = { leaf.active_tab, geo.width, geo.height }
-        for _, tc in ipairs(leaf.tabs) do geo_fp_parts[#geo_fp_parts+1] = tostring(tc.window) end
-        local geo_fp = table.concat(geo_fp_parts, "\0")
-        if entry.geo_fp ~= geo_fp then
-            entry.geo_fp = geo_fp
-            entry.border_client_w = nil
-            entry.border_client_h = nil
-            if border_ref_client and border_ref_client.valid and not border_ref_client.fullscreen then
-                local ag    = _client_actual_geo[border_ref_client]
-                local exp_w = geo.width - bw * 2
-                local exp_h = geo.height + gap - bw - tb_h
-                if ag and ag.width  < exp_w - 1 then entry.border_client_w = ag.width  end
-                if ag and ag.height < exp_h - 1 then entry.border_client_h = ag.height end
+    for _, other_leaf in ipairs(leaves) do
+        if other_leaf.id ~= leaf.id then
+            for _, tc in ipairs(other_leaf.tabs) do
+                local remote_client = tc
+                local remote_idx = #remote_widgets + 1
+                remote_widgets[remote_idx] =
+                    tb_build_remote_tab_widget(remote_client, entry, ctx, function()
+                        queue_remote_click(remote_idx, remote_client)
+                    end)
             end
         end
-
-        local fp = tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
-        if entry.fp == fp then return end
-        entry.fp              = fp
-
-        local is_focused    = state.focused_leaf_id == leaf.id
-        local active_client = leaf.tabs[leaf.active_tab]
-        local active_picked = drag.pickup.tag == "client" and drag.pickup.client == active_client
-        local active_color  = active_client and colors.get_client_color(active_client)
-        local focus_color   = active_picked and color_fg
-            or (active_color and active_color.light)
-            or color_fg
-        local par_for_min = tree.find_parent(state.root, leaf)
-        local par_dir_min = par_for_min and par_for_min.direction
-        local ctx = {
-            s            = s,
-            t            = t,
-            state        = state,
-            geo          = geo,
-            widget_bc    = is_focused and focus_color or color_transparent,
-            bar_bg       = color_transparent,
-            top_pad      = math.max(gap, _TITLEBAR_HEIGHT) - _TITLEBAR_HEIGHT,
-            tb_h         = tb_h,
-            tb_bar_h     = tb_h,
-            icon_size    = tb_h - 2 * TAB_CONTENT_V_PAD,
-            tab_btn_font = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
-            simple_tabs  = leaf.minimized and not leaf.min_anim and par_dir_min ~= tree.DIR_H,
+    end
+    if #remote_widgets > 0 then
+        local top_spacing = TAB_SPACING + TAB_GAP
+        local remote_left = REMOTE_TAB_GROUP_GAP + math.max(0, -(TAB_SPACING + TAB_GAP))
+        local remote_row = wibox.widget {
+            spacing = top_spacing,
+            layout  = wibox.layout.fixed.horizontal,
+            table.unpack(remote_widgets),
         }
-
-        -- Detach tooltip from previous tab widgets before rebuilding.
-        entry.tooltip:hide()
-        for _, obj in ipairs(entry.tooltip_objs) do entry.tooltip:remove_from_object(obj) end
-        entry.tooltip_objs = {}
-
-        -- Build per-tab widgets.
-        local tab_widgets = {}
-        for i, tc in ipairs(leaf.tabs) do
-            table.insert(tab_widgets, tb_build_tab_widget(leaf, tc, i, entry, ctx))
-        end
-
-        -- "+" and remote tabs live after local tabs; tb_split_tab_layers keeps them above.
+        remote_row.opacity = 0.5
+        remote_row:connect_signal("mouse::enter", function() remote_row.opacity = 1.0 end)
+        remote_row:connect_signal("mouse::leave", function() remote_row.opacity = 0.5 end)
         table.insert(tab_widgets, wibox.widget {
-            tb_make_btn(entry, ctx.widget_bc, icons.plus, _BTN_SIZE, function()
-                pcall(function() mousegrabber.stop() end)
-                _splitwm.focus_leaf(ctx.t, leaf.id)
-                if _splitwm.on_menu_request then _splitwm.on_menu_request() end
-            end),
-            left = #leaf.tabs > 0 and PLUS_BTN_GAP or 0, bottom = BTN_V_RAISE, widget = wibox.container.margin,
+            remote_row,
+            left = remote_left,
+            widget = wibox.container.margin,
         })
+    end
 
-        local remote_widgets = {}
-        local pending_remote_click = nil
-        local function queue_remote_click(remote_idx, remote_client)
-            if local_tab_click_active then return end
-            if not remote_client.valid then return end
-            if pending_remote_click then
-                if remote_idx > pending_remote_click.idx then
-                    pending_remote_click.idx = remote_idx
-                    pending_remote_click.client = remote_client
-                end
+    local controls = tb_build_split_controls(leaf, entry, ctx)
+
+    local border_draw = #leaf.tabs == 0
+        and tb_build_border_widget(is_focused and theme.color_fg or nil,
+            tb_h, bw, EMPTY_SPLIT_RADIUS)
+        or tb_build_border_widget(is_focused and focus_color or nil,
+            tb_h, bw, nil)
+
+    local drag_pill
+    if geo.v_bound_above then
+        local v_bound_above = geo.v_bound_above
+        local pill_bg = wibox.widget {
+            bg     = entry.pill_dragging and theme.color_fg or theme.color_transparent,
+            shape  = function(cr, w, h)
+                gears.shape.rounded_rect(cr, w, h, math.floor(h / 2))
+            end,
+            widget = wibox.container.background,
+        }
+        entry.pill_bg = pill_bg
+        drag_pill = wibox.widget {
+            {
+                pill_bg,
+                bottom = BTN_V_RAISE, left = 4, right = 4,
+                widget = wibox.container.margin,
+            },
+            bg     = theme.color_transparent,
+            cursor = TITLEBAR_RESIZE_CURSOR,
+            widget = wibox.container.background,
+        }
+        drag_pill:connect_signal("mouse::enter", function()
+            entry.wb.cursor = TITLEBAR_RESIZE_CURSOR
+            if not entry.pill_dragging then entry.pill_bg.bg = theme.color_handle end
+        end)
+        drag_pill:connect_signal("mouse::leave", function()
+            entry.wb.cursor = DEFAULT_CURSOR
+            if not entry.pill_dragging then entry.pill_bg.bg = theme.color_transparent end
+        end)
+        drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
+            if event_close_menu_if_open() then return end
+            run_v_drag(s, function() return v_bound_above end,
+                function()
+                    entry.pill_dragging = true
+                    entry.pill_bg.bg = theme.color_fg
+                    entry.wb.cursor = TITLEBAR_RESIZE_CURSOR
+                end,
+                function()
+                    entry.pill_dragging = false
+                    entry.pill_bg.bg = theme.color_transparent
+                    entry.wb.cursor = DEFAULT_CURSOR
+                end)
+        end)))
+    end
+
+    local function set_leaf_wb_buttons()
+        entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
+            if drag.pickup.tag == "split" then
+                ops.handle_split_pickup(ctx.state, leaf.id, ctx.s); return
+            end
+            if drag.pickup.tag == "client" then
+                ops.try_drop_picked_up(ctx.t, leaf.id)
+                awful.layout.arrange(ctx.s)
                 return
             end
-            pending_remote_click = { idx = remote_idx, client = remote_client }
-            gears.timer.delayed_call(function()
-                local item = pending_remote_click
-                pending_remote_click = nil
-                if not (item and item.client and item.client.valid) then return end
-                _splitwm.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
-            end)
-        end
+            if event_close_menu_if_open() then return end
+            focus_leaf(ctx.t, leaf.id)
+            awful.layout.arrange(ctx.s)
+        end)))
+    end
 
-        for _, other_leaf in ipairs(leaves) do
-            if other_leaf.id ~= leaf.id then
-                for _, tc in ipairs(other_leaf.tabs) do
-                    local remote_client = tc
-                    local remote_idx = #remote_widgets + 1
-                    remote_widgets[remote_idx] =
-                        tb_build_remote_tab_widget(remote_client, entry, ctx, function()
-                            queue_remote_click(remote_idx, remote_client)
-                        end)
-                end
-            end
-        end
-        if #remote_widgets > 0 then
-            local top_spacing = TAB_SPACING + TAB_GAP
-            local remote_left = REMOTE_TAB_GROUP_GAP + math.max(0, -(TAB_SPACING + TAB_GAP))
-            local remote_row = wibox.widget {
-                spacing = top_spacing,
-                layout  = wibox.layout.fixed.horizontal,
-                table.unpack(remote_widgets),
+    if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
+        -- Horizontal squeeze: vertical pill of tab icons.
+        local function build_h_min_tab_icon(tc, i)
+            local icon_sz = ctx.icon_size - 2
+            local tstate = get_tab_state(i, leaf, tc)
+            local client_color = colors.get_client_color(tc)
+            local tab_bg = (client_color and client_color.dark)
+                or (tstate == "active" and theme.color_bg)
+                or theme.color_btn_bg
+            local pill_sz = icon_sz + 2
+            local r       = math.floor(pill_sz / 2)
+            return wibox.widget {
+                {
+                    make_tab_icon(tc, icon_sz),
+                    halign = "center", valign = "center",
+                    widget = wibox.container.place,
+                },
+                bg            = tab_bg,
+                shape         = function(cr, w, h)
+                    gears.shape.rounded_rect(cr, w, h, r)
+                end,
+                forced_width  = pill_sz,
+                forced_height = pill_sz,
+                widget        = wibox.container.background,
             }
-            remote_row.opacity = 0.5
-            remote_row:connect_signal("mouse::enter", function() remote_row.opacity = 1.0 end)
-            remote_row:connect_signal("mouse::leave", function() remote_row.opacity = 0.5 end)
-            table.insert(tab_widgets, wibox.widget {
-                remote_row,
-                left = remote_left,
-                widget = wibox.container.margin,
-            })
         end
 
-        local controls    = tb_build_split_controls(leaf, entry, ctx)
-
-        local border_draw = #leaf.tabs == 0
-            and tb_build_border_widget(is_focused and color_fg or nil, tb_h, bw, EMPTY_SPLIT_RADIUS)
-            or  tb_build_border_widget(is_focused and focus_color or nil, tb_h, bw, nil, entry)
-
-        local drag_pill
-        if geo.v_bound_above then
-            local v_bound_above = geo.v_bound_above
-            local pill_bg = wibox.widget {
-                bg     = entry.pill_dragging and color_fg or color_transparent,
-                shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.floor(h / 2)) end,
-                widget = wibox.container.background,
-            }
-            entry.pill_bg = pill_bg
-            drag_pill = wibox.widget {
-                { pill_bg, bottom = BTN_V_RAISE, left = 4, right = 4, widget = wibox.container.margin },
-                bg     = color_transparent,
-                cursor = TITLEBAR_RESIZE_CURSOR,
-                widget = wibox.container.background,
-            }
-            drag_pill:connect_signal("mouse::enter", function()
-                entry.wb.cursor = TITLEBAR_RESIZE_CURSOR
-                if not entry.pill_dragging then entry.pill_bg.bg = color_handle end
-            end)
-            drag_pill:connect_signal("mouse::leave", function()
-                entry.wb.cursor = DEFAULT_CURSOR
-                if not entry.pill_dragging then entry.pill_bg.bg = color_transparent end
-            end)
-            drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
-                if event_close_menu_if_open() then return end
-                run_v_drag(s, function() return v_bound_above end,
-                    function()
-                        entry.pill_dragging = true
-                        entry.pill_bg.bg = color_fg
-                        entry.wb.cursor = TITLEBAR_RESIZE_CURSOR
-                    end,
-                    function()
-                        entry.pill_dragging = false
-                        entry.pill_bg.bg = color_transparent
-                        entry.wb.cursor = DEFAULT_CURSOR
-                    end)
-            end)))
+        local pill_contents = {}
+        for i, tc in ipairs(leaf.tabs) do
+            pill_contents[#pill_contents + 1] = build_h_min_tab_icon(tc, i)
         end
 
-        local function set_leaf_wb_buttons()
-            entry.wb:buttons(gears.table.join(awful.button({}, 1, function()
-                if drag.pickup.tag == "split"  then _handle_split_pickup(ctx.state, leaf.id, ctx.s); return end
-                if drag.pickup.tag == "client" then _try_drop_picked_up(ctx.t, leaf.id); awful.layout.arrange(ctx.s); return end
-                if event_close_menu_if_open() then return end
-                _splitwm.focus_leaf(ctx.t, leaf.id); awful.layout.arrange(ctx.s)
-            end)))
-        end
-
-        if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
-            local function build_h_min_tab_icon(tc, i)
-                local icon_sz = ctx.icon_size - 2
-                local tab_state    = get_tab_state(i, leaf, tc)
-                local client_color = colors.get_client_color(tc)
-                local tab_bg = (client_color and client_color.dark)
-                    or (tab_state == "active" and color_bg)
-                    or color_btn_bg
-                local pill_sz = icon_sz + 2
-                local r       = math.floor(pill_sz / 2)
-                return wibox.widget {
-                    { make_tab_icon(tc, icon_sz), halign = "center", valign = "center", widget = wibox.container.place },
-                    bg           = tab_bg,
-                    shape        = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, r) end,
-                    forced_width  = pill_sz,
-                    forced_height = pill_sz,
-                    widget        = wibox.container.background,
-                }
-            end
-
-            local pill_contents = {}
-            for i, tc in ipairs(leaf.tabs) do
-                pill_contents[#pill_contents + 1] = build_h_min_tab_icon(tc, i)
-            end
-
-            local vstack = { spacing = TAB_GAP, layout = wibox.layout.fixed.vertical, table.unpack(pill_contents) }
-            entry.wb:setup {
+        local vstack = {
+            spacing = PILL_STACK_GAP,
+            layout = wibox.layout.fixed.vertical,
+            table.unpack(pill_contents),
+        }
+        entry.wb:setup {
+            {
                 {
                     {
-                        { controls.minimize,
-                          halign = "center", valign = "center", widget = wibox.container.place },
-                        top = ctx.top_pad, widget = wibox.container.margin,
+                        controls.minimize,
+                        halign = "center", valign = "center",
+                        widget = wibox.container.place,
                     },
-                    bg            = ctx.bar_bg,
-                    forced_height = ctx.tb_h,
-                    widget        = wibox.container.background,
+                    top = ctx.top_pad, widget = wibox.container.margin,
                 },
+                bg            = ctx.bar_bg,
+                forced_height = ctx.tb_h,
+                widget        = wibox.container.background,
+            },
+            {
                 {
                     {
                         {
-                            { vstack, halign = "center", valign = "top", widget = wibox.container.place },
-                            left = 4, right = 4, top = 4, bottom = 4, widget = wibox.container.margin,
+                            vstack,
+                            halign = "center", valign = "top",
+                            widget = wibox.container.place,
                         },
-                        bg     = color_btn_bg,
-                        shape  = function(cr, w, h) gears.shape.rounded_rect(cr, w, h, math.min(w, h) / 2) end,
-                        widget = wibox.container.background,
+                        left = 4, right = 4, top = 4, bottom = 4,
+                        widget = wibox.container.margin,
                     },
-                    left = 4, right = 4, top = 4, bottom = 4,
-                    widget = wibox.container.margin,
+                    bg     = theme.color_btn_bg,
+                    shape  = function(cr, w, h)
+                        gears.shape.rounded_rect(cr, w, h, math.min(w, h) / 2)
+                    end,
+                    widget = wibox.container.background,
                 },
-                layout = wibox.layout.align.vertical,
-            }
-            set_leaf_wb_buttons()
-        elseif leaf.minimized and not leaf.min_anim then
-            -- Vertical squeeze: show only the tab bar, no border or content overlay.
-            entry.wb:setup(tb_build_bar_layer(tab_widgets, controls, drag_pill, ctx))
-            set_leaf_wb_buttons()
-        elseif #leaf.tabs == 0 then
-            local running_classes = {}
-            for _, c in ipairs(client.get()) do
-                if c.class then running_classes[c.class:lower()] = true end
-            end
-            local launcher_ws = {}
-            for _, e in ipairs(_splitwm.launchers) do
-                if e.hide_if_class then
-                    local hidden = false
-                    for _, cls in ipairs(e.hide_if_class) do
-                        if running_classes[cls:lower()] then hidden = true; break end
-                    end
-                    if hidden then goto continue end
-                end
-                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e, LAUNCHER_ICON_SIZE, function()
-                    if e.action then
-                        _splitwm.expect_next_client({ tag = ctx.t, leaf_id = leaf.id })
-                        e.action()
-                    elseif e.cmd then
-                        _splitwm.spawn(e.cmd, { tag = ctx.t, leaf_id = leaf.id })
-                    end
-                end)
-                ::continue::
-            end
-            tb_assemble_empty_leaf(entry, tab_widgets, controls, border_draw, drag_pill, launcher_ws, ctx)
-            set_leaf_wb_buttons()
-        else
-            entry.wb:buttons(gears.table.join())
-            local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab, #leaf.tabs, entry)
-            tb_assemble_wibox(entry, behind, above, controls, border_draw, drag_pill, ctx)
+                left = 4, right = 4, top = 4, bottom = 4,
+                widget = wibox.container.margin,
+            },
+            layout = wibox.layout.align.vertical,
+        }
+        set_leaf_wb_buttons()
+    elseif leaf.minimized and not leaf.min_anim then
+        -- Vertical squeeze: only the tab bar, no border or content overlay.
+        entry.wb:setup(tb_build_bar_layer(tab_widgets, controls, drag_pill, ctx))
+        set_leaf_wb_buttons()
+    elseif #leaf.tabs == 0 then
+        local running_classes = {}
+        for _, c in ipairs(client.get()) do
+            if c.class then running_classes[c.class:lower()] = true end
         end
+        local function launcher_hidden(e)
+            for _, cls in ipairs(e.hide_if_class or {}) do
+                if running_classes[cls:lower()] then return true end
+            end
+            return false
+        end
+        local launcher_ws = {}
+        for _, e in ipairs(api().launchers or {}) do
+            if not launcher_hidden(e) then
+                launcher_ws[#launcher_ws + 1] = make_launcher_widget(e,
+                    LAUNCHER_ICON_SIZE, function()
+                        if e.action then
+                            ops.expect_next_client({ tag = ctx.t, leaf_id = leaf.id })
+                            e.action()
+                        elseif e.cmd then
+                            ops.expect_next_client({ tag = ctx.t, leaf_id = leaf.id })
+                            awful.spawn(e.cmd)
+                        end
+                    end)
+            end
+        end
+        tb_assemble_empty_leaf(entry, tab_widgets, controls, border_draw,
+            drag_pill, launcher_ws, ctx)
+        set_leaf_wb_buttons()
+    else
+        entry.wb:buttons(gears.table.join())
+        local behind, above = tb_split_tab_layers(tab_widgets, leaf.active_tab,
+            #leaf.tabs, entry)
+        tb_assemble_wibox(entry, behind, above, controls, border_draw, drag_pill, ctx)
+    end
+end
+
+function M.update(s, t, state, geos, leaves)
+    if not core.tabbar[s] then core.tabbar[s] = {} end
+
+    if close_popup.client and not close_popup.client.valid then
+        hide_close_popup()
     end
 
+    local all_tabs_fp = tb_compute_all_tabs_fingerprint(leaves)
+    local alive = {}
     for _, leaf in ipairs(leaves) do
         alive[leaf.id] = true
-        update_leaf(leaf)
+        update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
     end
 
     -- Hide and clean up entries for dead leaves.
     local dead = {}
-    for leaf_id in pairs(titlebar_cache[s]) do
-        if not alive[leaf_id] then dead[#dead+1] = leaf_id end
+    for leaf_id in pairs(core.tabbar[s]) do
+        if not alive[leaf_id] then dead[#dead + 1] = leaf_id end
     end
     for _, leaf_id in ipairs(dead) do
-        titlebar_cache[s][leaf_id].wb.visible = false
-        titlebar_cache[s][leaf_id] = nil
+        core.tabbar[s][leaf_id].wb.visible = false
+        core.tabbar[s][leaf_id] = nil
     end
 end
-
----------------------------------------------------------------------------
--- Public update entry point
----------------------------------------------------------------------------
-
-M.update = update_titlebars
 
 return M
