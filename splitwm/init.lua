@@ -171,7 +171,6 @@ local function connect_client_signals()
         if drag.pickup.tag == "client" and drag.pickup.client == c then
             core.drop_pickup()
         end
-        if drag.pending and drag.pending.client == c then drag.pending = nil end
         colors.release_client(c)
         for _, state in pairs(core.tag_state) do
             ops.unpin_client(state.root, c)
@@ -232,7 +231,7 @@ local function connect_client_signals()
             state.focused_leaf_id = leaf.id
             awful.layout.arrange(c.screen)
         end
-        if drag.pickup.tag == "idle" and drag.pending == nil then
+        if drag.pickup.tag == "idle" then
             arrange.start_drag_hover_poll()
         end
     end)
@@ -248,7 +247,6 @@ function splitwm.setup()
 
     tag.connect_signal("property::selected", function(t)
         local s = core.screen_of(t.screen)
-        core.drag.pending = nil
         if mousegrabber.isrunning() then mousegrabber.stop() end
         core.geo[t] = nil
         if s then

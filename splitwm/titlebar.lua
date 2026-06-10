@@ -573,19 +573,54 @@ local function make_tab_icon(tc, icon_size)
         colors.hue_rotated_icon_surface(tc, icon_size))
 end
 
-local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
+---------------------------------------------------------------------------
+-- Shared tab visual
+---------------------------------------------------------------------------
+
+-- Builds the tab visual used by both local and remote tabs: shaped
+-- background, app icon, close-button slot, and tooltip wiring.
+-- tab_state: "active" | "inactive" | "picked" | "remote".
+local function build_tab_visual(tc, entry, ctx, tab_state)
     local client_color = colors.get_client_color(tc)
-    local tab_bg = (client_color and client_color.dark) or theme.color_btn_bg
-    local tab_bg_pat = gears.color(tab_bg)
+    local tab_bg = tab_state == "picked" and theme.color_fg
+        or (client_color and client_color.dark)
+        or (tab_state == "active" and theme.color_bg)
+        or theme.color_btn_bg
+    local tab_bg_pat    = gears.color(tab_bg)
+    local widget_bc_pat = gears.color(ctx.widget_bc)
+    local outlined = tab_state == "active" or tab_state == "picked"
 
     local tab_draw = wibox.widget.base.make_widget()
     function tab_draw:draw(_, cr, w2, h2)
-        local h = h2 - 1
+        local h = h2 - 1  -- 1px room at top so the border stroke isn't clipped
         cr:translate(0, 1)
-        tab_path(cr, w2, h)
-        cr:close_path()
-        cr:set_source(tab_bg_pat)
-        cr:fill()
+        if ctx.simple_tabs and tab_state ~= "remote" then
+            local r = math.floor(h / 4)
+            local sw = w2 - 2 * (TAB_EAR + 4)
+            cr:translate(TAB_EAR + 4, 0)
+            gears.shape.rounded_rect(cr, sw, h, r)
+            cr:set_source(tab_bg_pat)
+            cr:fill()
+            if outlined then
+                gears.shape.rounded_rect(cr, sw, h, r)
+                cr:set_source(tab_state == "picked"
+                    and gears.color(theme.color_fg) or widget_bc_pat)
+                cr:set_line_width(2)
+                cr:stroke()
+            end
+        else
+            tab_path(cr, w2, h)
+            cr:close_path()
+            cr:set_source(tab_bg_pat)
+            cr:fill()
+            if outlined then
+                tab_path(cr, w2, h)
+                cr:set_source(tab_state == "picked"
+                    and gears.color(theme.color_fg) or widget_bc_pat)
+                cr:set_line_width(2)
+                cr:stroke()
+            end
+        end
     end
     function tab_draw:fit(_, _, _) return 0, 0 end
 
@@ -595,39 +630,45 @@ local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
         valign = "center",
         widget = wibox.container.place,
     }
-    local close_placeholder = wibox.widget {
+    -- The ✕ is only visible on the active tab; otherwise it's an invisible
+    -- spacer that keeps every tab the same width.
+    local close_btn = wibox.widget {
+        {
+            text = "✕", align = "center", font = ctx.tab_btn_font,
+            widget = wibox.widget.textbox,
+        },
+        fg           = tab_state == "active" and theme.color_fg or theme.color_transparent,
         forced_width = theme.BTN_SIZE - 4,
         widget       = wibox.container.background,
     }
-    local content_row = wibox.widget {
-        icon_widget, close_placeholder, spacing = ICON_CLOSE_GAP,
-        layout = wibox.layout.fixed.horizontal,
-    }
-    if on_click then
-        content_row:buttons(gears.table.join(awful.button({}, 1, on_click)))
-    end
 
-    local content = wibox.widget {
-        {
-            content_row,
-            forced_width  = ctx.icon_size + ICON_CLOSE_GAP + theme.BTN_SIZE - 4,
-            forced_height = ctx.icon_size,
-            widget        = wibox.container.background,
-        },
-        left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
-        top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
-        widget = wibox.container.margin,
-    }
     local tab_widget = wibox.widget {
         tab_draw,
-        content,
+        {
+            {
+                icon_widget, close_btn, spacing = ICON_CLOSE_GAP,
+                layout = wibox.layout.fixed.horizontal,
+            },
+            left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
+            top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
+            widget = wibox.container.margin,
+        },
         layout = wibox.layout.stack,
     }
+
     tab_widget:connect_signal("mouse::enter", function()
         entry.tooltip.text = (tc.valid and tc.name) or "?"
     end)
     entry.tooltip:add_to_object(tab_widget)
     table.insert(entry.tooltip_objs, tab_widget)
+    return tab_widget
+end
+
+local function tb_build_remote_tab_widget(tc, entry, ctx, on_click)
+    local tab_widget = build_tab_visual(tc, entry, ctx, "remote")
+    if on_click then
+        tab_widget:buttons(gears.table.join(awful.button({}, 1, on_click)))
+    end
     return tab_widget
 end
 
@@ -657,52 +698,16 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             and my < g.y - gap + ctx.tb_h
     end
 
-    local icon_widget = wibox.widget {
-        make_tab_icon(tc, ctx.icon_size),
-        halign = "center",
-        valign = "center",
-        widget = wibox.container.place,
-    }
-    local close_btn = wibox.widget {
-        {
-            text = "✕", align = "center", font = ctx.tab_btn_font,
-            widget = wibox.widget.textbox,
-        },
-        fg           = tab_state == "active" and theme.color_fg or theme.color_transparent,
-        forced_width = theme.BTN_SIZE - 4,
-        widget       = wibox.container.background,
-    }
-
     -- Activate focus on tc (no-op if client is no longer valid).
     local function focus_tc()
         if not tc.valid then return end
         ops.activate_client_in_leaf(ctx.t, leaf.id, tc, { screen = ctx.s })
     end
 
-    -- Phase 1: while held, promote pending → pickup once cursor leaves the tab.
-    local function try_promote_pending(m)
-        local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
-        if not g then return end
-        local ty = g.y - gap
-        if not in_tab_content(m.x, m.y, g)
-                or m.y < ty or m.y >= ty + ctx.tb_h then
-            drag.pending = nil
-            drag.pickup  = core.pickup_client(tc)
-            awful.layout.arrange(ctx.s)
-        end
-    end
-
-    -- Phase 2: released while still pending (quick click — never left the tab).
-    local function settle_pending(m)
-        drag.pending = nil
-        local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
-        if g and in_close_btn(m.x, m.y, g) then tc:kill(); return false end
-        focus_tc()
-        return false
-    end
-
-    -- Phase 3: released with an active pickup — drop, kill, or reorder.
-    local function settle_pickup(m)
+    -- Button released with this tab picked up: drop, kill, or reorder.
+    -- Dropping a tab onto its own slot is a self-swap, which focuses it —
+    -- so a plain click is just the degenerate case of a drag.
+    local function settle(m)
         local mx, my = m.x, m.y
         local sx     = ctx.state.scroll_x or 0
         local cached = core.geo[ctx.t]
@@ -738,6 +743,11 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                             awful.layout.arrange(ctx.s)
                             focus_tc()
                         end
+                    else
+                        -- Same leaf, client area: a drop here is a no-op move.
+                        core.drop_pickup()
+                        awful.layout.arrange(ctx.s)
+                        focus_tc()
                     end
                     return false
                 end
@@ -755,115 +765,45 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         return false
     end
 
-    -- Shared mousegrabber callback: dispatches to the appropriate drag phase.
+    -- Mousegrabber callback while this tab is held. The picked visual is
+    -- only painted once the cursor leaves the tab, so plain clicks don't
+    -- flash the drag style.
+    local shown_picked = false
     local function drag_release_fn(m)
-        if m.buttons[1] and drag.pending and drag.pending.client == tc then
-            try_promote_pending(m); return true
+        if m.buttons[1] then
+            if not shown_picked then
+                local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
+                if g and not in_tab_content(m.x, m.y, g) then
+                    shown_picked = true
+                    awful.layout.arrange(ctx.s)
+                end
+            end
+            return true
         end
-        if m.buttons[1] then return true end
-        if drag.pending and drag.pending.client == tc then return settle_pending(m) end
         if drag.pickup.tag == "client" and not drag.pickup.client.valid then
             core.drop_pickup(); awful.layout.arrange(ctx.s); return false
         end
-        if drag.pickup.tag == "client" then return settle_pickup(m) end
+        if drag.pickup.tag == "client" then return settle(m) end
         return false
     end
 
-    -- Begin a tab drag: start the mousegrabber after the current event batch.
+    -- Begin a tab drag: pick up immediately, grab after the event batch.
     local function start_tab_drag()
-        drag.pending = { client = tc }
+        drag.pickup  = core.pickup_client(tc)
+        shown_picked = false
         gears.timer.delayed_call(function()
+            if drag.pickup.tag ~= "client" or drag.pickup.client ~= tc then return end
             if not mouse.coords().buttons[1] then
-                if drag.pending and drag.pending.client == tc then drag.pending = nil end
+                -- Released within the same event batch: settle as a click.
+                settle(mouse.coords())
                 return
             end
             if mousegrabber.isrunning() then return end
-            local has_pending = drag.pending and drag.pending.client == tc
-            local has_pickup  = drag.pickup.tag == "client" and drag.pickup.client == tc
-            if not has_pending and not has_pickup then return end
             mousegrabber.run(drag_release_fn, "fleur")
         end)
     end
 
-    local client_color = colors.get_client_color(tc)
-    local tab_bg = tab_state == "picked" and theme.color_fg
-        or (client_color and client_color.dark)
-        or (tab_state == "active" and theme.color_bg)
-        or theme.color_btn_bg
-    local tab_bg_pat    = gears.color(tab_bg)
-    local widget_bc_pat = gears.color(ctx.widget_bc)
-
-    local tab_draw = wibox.widget.base.make_widget()
-    function tab_draw:draw(_, cr, w2, h2)
-        local h = h2 - 1  -- 1px room at top so the border stroke isn't clipped
-        cr:translate(0, 1)
-        if ctx.simple_tabs then
-            local r = math.floor(h / 4)
-            local sw = w2 - 2 * (TAB_EAR + 4)
-            cr:translate(TAB_EAR + 4, 0)
-            gears.shape.rounded_rect(cr, sw, h, r)
-            cr:set_source(tab_bg_pat)
-            cr:fill()
-            if tab_state == "active" or tab_state == "picked" then
-                gears.shape.rounded_rect(cr, sw, h, r)
-                cr:set_source(tab_state == "picked"
-                    and gears.color(theme.color_fg) or widget_bc_pat)
-                cr:set_line_width(2)
-                cr:stroke()
-            end
-        else
-            tab_path(cr, w2, h)
-            cr:close_path()
-            cr:set_source(tab_bg_pat)
-            cr:fill()
-            if tab_state == "active" or tab_state == "picked" then
-                tab_path(cr, w2, h)
-                cr:set_source(tab_state == "picked"
-                    and gears.color(theme.color_fg) or widget_bc_pat)
-                cr:set_line_width(2)
-                cr:stroke()
-            end
-        end
-    end
-    function tab_draw:fit(_, _, _) return 0, 0 end
-
-    local tab_widget = wibox.widget {
-        tab_draw,
-        {
-            {
-                icon_widget, close_btn, spacing = ICON_CLOSE_GAP,
-                layout = wibox.layout.fixed.horizontal,
-            },
-            left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
-            top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
-            widget = wibox.container.margin,
-        },
-        layout = wibox.layout.stack,
-    }
-
-    tab_widget:connect_signal("mouse::enter", function()
-        entry.tooltip.text = (tc.valid and tc.name) or "?"
-        local mc = mouse.coords()
-        local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
-        -- Button held and not dragging a tab: switch to this tab.
-        if mc.buttons[1]
-                and drag.pickup.tag == "idle"
-                and drag.pending == nil
-                and tab_idx ~= leaf.active_tab
-                and tc.valid
-                and g and in_tab_content(mc.x, mc.y, g) then
-            focus_tc()
-        end
-    end)
-    tab_widget:connect_signal("mouse::leave", function()
-        if drag.pending and drag.pending.client == tc and mouse.coords().buttons[1] then
-            drag.pending = nil
-            drag.pickup  = core.pickup_client(tc)
-            awful.layout.arrange(ctx.s)
-        end
-    end)
-    entry.tooltip:add_to_object(tab_widget)
-    table.insert(entry.tooltip_objs, tab_widget)
+    local tab_widget = build_tab_visual(tc, entry, ctx, tab_state)
 
     tab_widget:buttons(gears.table.join(
         awful.button({}, 1, function()
@@ -881,35 +821,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                 awful.layout.arrange(ctx.s)
                 return
             end
-            -- Clicking the picked tab again cancels the drag.
-            if tab_state == "picked" and drag.pickup.tag == "client"
-                    and drag.pickup.client == tc then
-                core.drop_pickup()
-                awful.layout.arrange(ctx.s)
-                return
-            end
             start_tab_drag()
-        end, function()
-            -- Release handler: only for quick clicks (before mousegrabber).
-            local is_pending = drag.pending and drag.pending.client == tc
-            if not is_pending
-                    and (drag.pickup.tag ~= "client" or drag.pickup.client ~= tc) then
-                return
-            end
-            if is_pending then drag.pending = nil end
-            local mc = mouse.coords()
-            local g  = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
-            if not (g and in_tab_content(mc.x, mc.y, g)) then
-                core.drop_pickup()
-                return
-            end
-            if in_close_btn(mc.x, mc.y, g) then
-                core.drop_pickup()
-                tc:kill()
-                return
-            end
-            core.drop_pickup()
-            focus_tc()
         end),
         awful.button({}, 3, function()
             if not tc.valid then return end

@@ -158,8 +158,7 @@ end
 -- in any tab bar switches to it.
 local function hover_poll_tick()
     local m = mouse.coords()
-    if not m.buttons[1] or core.drag.pickup.tag ~= "idle"
-            or core.drag.pending ~= nil then
+    if not m.buttons[1] or core.drag.pickup.tag ~= "idle" then
         M.stop_drag_hover_poll()
         return
     end

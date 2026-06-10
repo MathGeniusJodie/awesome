@@ -32,7 +32,8 @@ end
 -- Pending "next client goes here" requests (splitwm.spawn / expect_next_client)
 ---------------------------------------------------------------------------
 
-local pending_requests = {}
+-- Single slot: the most recent request wins, and expires after its timeout.
+local pending_request = nil
 
 function ops.expect_next_client(opts)
     opts = opts or {}
@@ -47,34 +48,24 @@ function ops.expect_next_client(opts)
     if not leaf then return nil end
 
     state.focused_leaf_id = leaf.id
-    local request = {
-        tag     = t,
-        leaf_id = leaf.id,
-        append  = opts.append == true,
+    pending_request = {
+        tag      = t,
+        leaf_id  = leaf.id,
+        append   = opts.append == true,
+        deadline = os.time() + (opts.timeout or 4),
     }
-    table.insert(pending_requests, request)
-    gears.timer.start_new(opts.timeout or 4, function()
-        for i, pending in ipairs(pending_requests) do
-            if pending == request then
-                table.remove(pending_requests, i)
-                break
-            end
-        end
-        return false
-    end)
-    return request
+    return pending_request
 end
 
 local function take_request(t)
-    for i, request in ipairs(pending_requests) do
-        if request.tag == t then
-            table.remove(pending_requests, i)
-            local state = core.tag_state[t]
-            local leaf = state and core.leaf(state, request.leaf_id)
-            if leaf then return request, leaf end
-            return nil, nil
-        end
+    local request = pending_request
+    if not request or request.tag ~= t or os.time() > request.deadline then
+        return nil, nil
     end
+    pending_request = nil
+    local state = core.tag_state[t]
+    local leaf = state and core.leaf(state, request.leaf_id)
+    if leaf then return request, leaf end
     return nil, nil
 end
 

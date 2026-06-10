@@ -15,9 +15,9 @@ core.tag_state = setmetatable({}, { __mode = "k" })
 -- Last computed geometry per tag: { geos = {[leaf_id]=rect}, bounds = {...} }.
 core.geo = setmetatable({}, { __mode = "k" })
 
--- Tab pickup / pending-drag state shared between titlebar, underlay and ops.
+-- Tab/split pickup state shared between titlebar, underlay and ops.
 core.PICKUP_IDLE = { tag = "idle" }
-core.drag = { pickup = core.PICKUP_IDLE, pending = nil }
+core.drag = { pickup = core.PICKUP_IDLE }
 
 function core.pickup_client(c)  return { tag = "client", client = c } end
 function core.pickup_split(id)  return { tag = "split", split_id = id } end
