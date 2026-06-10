@@ -186,7 +186,16 @@ local function connect_client_signals()
         -- Keep focus inside the split the window was closed from: autofocus
         -- picks the next client from global history, which may live in
         -- another split and would drag focus (and the canvas) over there.
-        local nxt = keep_leaf.tabs[keep_leaf.active_tab]
+        -- Within the split, focus history still applies: prefer the most
+        -- recently focused tab of this leaf, else the neighboring tab.
+        local nxt
+        for _, hc in ipairs(awful.client.focus.history.list) do
+            if hc ~= c and hc.valid and core.tab_index(keep_leaf, hc) then
+                nxt = hc
+                break
+            end
+        end
+        nxt = nxt or keep_leaf.tabs[keep_leaf.active_tab]
         if nxt and nxt.valid then
             focus.force_now(nxt)
             focus.after_arrange(nxt, keep_leaf.id)
