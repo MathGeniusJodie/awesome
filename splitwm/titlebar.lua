@@ -367,12 +367,14 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     end
     for i, col in ipairs(colors.COLORS) do
         local circ = ms.circs[i]
-        circ.shape_border_color = (current and current.name == col.name)
+        local selected = current and not current.from_icon
+            and (current.base or current.name) == col.name
+        circ.shape_border_color = selected
             and theme.color_fg or theme.color_transparent
         local col_name = col.name
         circ:buttons(gears.table.join(awful.button({}, 1, function()
             if tc.valid then
-                colors.set_client_color(tc, col_name)
+                colors.set_client_palette_color(tc, col_name)
                 hide_tab_color_menu()
                 awful.layout.arrange(s)
             end

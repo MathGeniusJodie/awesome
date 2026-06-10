@@ -275,7 +275,7 @@ function splitwm.setup()
     theme.init()
     tb.init()
     client_icons.set_launchers(splitwm.launchers)
-    awesome.register_xproperty("splitwm_manual_color", "string")
+    awesome.register_xproperty("splitwm_manual_hue_offset", "string")
 
     connect_client_signals()
 

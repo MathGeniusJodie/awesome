@@ -12,9 +12,6 @@ local COLORS = {
     { name = "purple",  light = "#d6a8e0", dark = "#8a6093" },
 }
 
-local COLORS_BY_NAME = {}
-for _, entry in ipairs(COLORS) do COLORS_BY_NAME[entry.name] = entry end
-
 ---------------------------------------------------------------------------
 -- Color-space utilities
 ---------------------------------------------------------------------------
@@ -374,36 +371,33 @@ local function hue_slot_for_client(c)
     return allocation
 end
 
-function colors.get_client_hue_offset(c)
-    local slot = hue_slot_for_client(c)
-    return slot and slot.radians or 0
+local function hue_for_template_name(name)
+    for _, tpl in ipairs(get_color_templates()) do
+        if tpl.name == name then return tpl.hue end
+    end
 end
 
-function colors.get_client_hue_offset_degrees(c)
-    local slot = hue_slot_for_client(c)
-    return slot and slot.degrees or 0
-end
-
-local function color_from_icon_hue(c)
-    local avg, base_hue = average_with_hue(c)
-    local template = base_hue and template_for_hue(base_hue)
+-- Build a full tab color (light/dark pair) for an effective hue by rotating
+-- the nearest palette template in oklab space. Single source of truth for
+-- icon-derived, slot-offset, fallback, and manual colors alike.
+local function color_from_hue(hue)
+    local template = template_for_hue(hue)
     if not template then return nil end
-
-    local slot = hue_slot_for_client(c)
-    local offset = slot and slot.radians or 0
-    local hue = rotate_hue(base_hue, offset)
     local light = colors.oklab_to_hex(oklab_with_hue(template.light, hue))
-    local dark = colors.oklab_to_hex(oklab_with_hue(template.dark, hue))
-
+    local dark  = colors.oklab_to_hex(oklab_with_hue(template.dark, hue))
     return {
-        name = "icon:" .. light .. ":" .. dark,
+        name  = "hue:" .. light .. ":" .. dark,
         light = light,
-        dark = dark,
-        from_icon = true,
-        icon_hex = avg.hex,
-        base = template.name,
-        hue_offset_degrees = slot and slot.degrees or 0,
+        dark  = dark,
+        base  = template.name,
+        hue   = hue,
     }
+end
+
+-- Manually chosen colors are stored as a hue OFFSET (degrees) from the
+-- client's base hue, so the tab color and the icon rotate together.
+local function manual_hue_offset(c)
+    return tonumber(c:get_xproperty("splitwm_manual_hue_offset"))
 end
 
 -- Lua-side cache to avoid repeated X11 xproperty reads and icon averaging.
@@ -470,44 +464,84 @@ local function hue_rotate_argb32_data(data, stride, width, height, radians)
     end
 end
 
+-- Icon surface rotated by the client's color rotation, so the icon always
+-- lands on the tab's effective hue. nil when no rotation applies.
 function colors.hue_rotated_icon_surface(c, size)
-    local slot = hue_slot_for_client(c)
-    if not slot or slot.slot == 0 then return nil end
+    local col = colors.get_client_color(c)
+    local rot = col and col.icon_rotation or 0
+    if math.abs(rot) < 0.001 then return nil end
 
     local cache = icon_surface_cache[c]
-    if cache and cache.size == size and cache.slot == slot.slot then
+    if cache and cache.size == size and cache.rot == rot then
         return cache.surface
     end
 
     local data, stride, width, height, surface = render_icon_to_argb32_data(c, size)
     if not surface then return nil end
 
-    hue_rotate_argb32_data(data, stride, width, height, slot.radians)
+    hue_rotate_argb32_data(data, stride, width, height, rot)
     surface:mark_dirty()
 
     icon_surface_cache[c] = {
         size = size,
-        slot = slot.slot,
+        rot = rot,
         surface = surface,
         data = data,
     }
     return surface
 end
 
+-- Effective hue = base hue + offset:
+--   base hue   — the icon's average hue, else the hash-fallback palette hue
+--   offset     — the manual offset if set, else the per-app dedup slot
+-- The icon is rotated by the same offset so it matches the tab color.
 function colors.get_client_color(c)
     if not c.valid then return nil end
     local box = color_cache[c]
     if box ~= nil then return box[1] end
-    local name = c:get_xproperty("splitwm_manual_color")
-    local result = (name and COLORS_BY_NAME[name]) or color_from_icon_hue(c) or fallback_color_for_client(c)
+
+    local result
+    local avg, icon_hue = average_with_hue(c)
+    local manual_deg = manual_hue_offset(c)
+
+    local base_hue = icon_hue
+    if not base_hue then
+        base_hue = hue_for_template_name(fallback_color_for_client(c).name)
+    end
+
+    if base_hue then
+        local offset = 0
+        if manual_deg then
+            offset = math.rad(manual_deg)
+        elseif avg then
+            local slot = hue_slot_for_client(c)
+            offset = slot and slot.radians or 0
+        end
+        result = color_from_hue(rotate_hue(base_hue, offset))
+        if result then
+            result.base_hue      = base_hue
+            result.manual        = manual_deg ~= nil
+            result.from_icon     = manual_deg == nil and avg ~= nil
+            result.icon_rotation = avg and offset or 0
+            if avg then result.icon_hex = avg.hex end
+        end
+    end
+    result = result or fallback_color_for_client(c)
     color_cache[c] = { result }
     return result
 end
 
-local function set_client_color(c, name)
+-- Apply a palette swatch: stored as the hue offset that rotates the
+-- client's base hue onto the swatch hue.
+function colors.set_client_palette_color(c, name)
     if not c.valid then return end
-    c:set_xproperty("splitwm_manual_color", name)
-    color_cache[c] = { COLORS_BY_NAME[name] }
+    local target = hue_for_template_name(name)
+    local cur = colors.get_client_color(c)
+    if not target or not cur or not cur.base_hue then return end
+    local offset = (target - cur.base_hue) % TAU
+    c:set_xproperty("splitwm_manual_hue_offset",
+        string.format("%.2f", math.deg(offset)))
+    colors.clear_client_color_cache(c)
 end
 
 local function pick_color_for_leaf(leaf, exclude_c)
@@ -515,7 +549,7 @@ local function pick_color_for_leaf(leaf, exclude_c)
     for _, tc in ipairs(leaf.tabs) do
         if tc ~= exclude_c and tc.valid then
             local col = colors.get_client_color(tc)
-            if col and COLORS_BY_NAME[col.name] then used[col.name] = true end
+            if col then used[col.base or col.name] = true end
         end
     end
     for _, col in ipairs(COLORS) do
@@ -525,18 +559,22 @@ local function pick_color_for_leaf(leaf, exclude_c)
 end
 
 local function assign_color(leaf, c)
-    color_cache[c] = { pick_color_for_leaf(leaf, c) }
+    local picked = pick_color_for_leaf(leaf, c)
+    local hue = hue_for_template_name(picked.name)
+    local result = hue and color_from_hue(hue) or picked
+    if result ~= picked then result.base_hue = hue end
+    color_cache[c] = { result }
 end
 
 function colors.resolve_color_conflict(leaf, c)
     if not c.valid then return end
     local existing = colors.get_client_color(c)
     if not existing then assign_color(leaf, c); return end
-    if existing.from_icon then return end
+    if existing.from_icon or existing.manual then return end
     for _, tc in ipairs(leaf.tabs) do
         if tc ~= c and tc.valid then
             local col = colors.get_client_color(tc)
-            if col and col.name == existing.name then
+            if col and (col.base or col.name) == (existing.base or existing.name) then
                 assign_color(leaf, c)
                 return
             end
@@ -544,7 +582,6 @@ function colors.resolve_color_conflict(leaf, c)
     end
 end
 
-colors.COLORS          = COLORS
-colors.set_client_color = set_client_color
+colors.COLORS = COLORS
 
 return colors
