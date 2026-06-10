@@ -57,8 +57,29 @@ local FRAME_S = 1 / 60
 
 local frame_pending = {}  -- [screen] = true while a repaint is owed
 local frame_timer
+local pipe_clicks = 0     -- accumulated raw deltas awaiting dispatch
 
 local function flush_frames()
+    -- Dispatch accumulated raw-pipe deltas. mouse.current_client and
+    -- mouse.screen are synchronous X round-trips, so they must run here
+    -- (once per frame), never in the per-event handler.
+    if pipe_clicks ~= 0 then
+        local clicks = pipe_clicks
+        pipe_clicks = 0
+        if not mouse.current_client then
+            local s = mouse.screen
+            local t = s and s.selected_tag
+            if t then
+                local state = core.state(t)
+                local wa = s.workarea
+                local max_s = math.max(0, (state.canvas_w or wa.width) - wa.width)
+                state.scroll_target = math.max(0, math.min(max_s,
+                    (state.scroll_target or 0) + clicks * theme.SCROLL_STEP))
+                frame_pending[s] = true
+            end
+        end
+    end
+
     for s in pairs(frame_pending) do
         frame_pending[s] = nil
         local t = s.selected_tag
@@ -68,14 +89,13 @@ local function flush_frames()
             awful.layout.arrange(s)
         end
     end
-    if not next(frame_pending) and frame_timer then
+    if not next(frame_pending) and pipe_clicks == 0 and frame_timer then
         frame_timer:stop()
         frame_timer = nil
     end
 end
 
-local function request_frame(s)
-    frame_pending[s] = true
+local function request_frame_tick()
     if frame_timer then return end
     frame_timer = gears.timer {
         timeout   = FRAME_S,
@@ -83,6 +103,11 @@ local function request_frame(s)
         call_now  = false,
         callback  = flush_frames,
     }
+end
+
+local function request_frame(s)
+    frame_pending[s] = true
+    request_frame_tick()
 end
 
 -- instant skips the easing animation; the repaint is frame-coalesced so a
@@ -146,10 +171,10 @@ function scroll.start_pipe()
             if not scroll.pipe_active then return end
             local clicks = tonumber(line)
             if not clicks or clicks == 0 then return end
-            -- Over a client window the application owns scrolling.
-            if mouse.current_client then return end
-            local s = mouse.screen
-            if s then apply_delta(s, clicks * theme.SCROLL_STEP, true) end
+            -- Pure Lua only here — this runs per event at stream rate.
+            -- The frame flush decides where (and whether) to apply it.
+            pipe_clicks = pipe_clicks + clicks
+            request_frame_tick()
         end,
         exit = function() scroll.pipe_active = false end,
     })
