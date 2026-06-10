@@ -21,6 +21,7 @@ local core   = require("splitwm.core")
 local theme  = require("splitwm.theme")
 local colors = require("splitwm.colors")
 local client_icons = require("splitwm.client_icons")
+local focus  = require("splitwm.focus")
 local smush  = require("splitwm.smush")
 local ops    = require("splitwm.ops")
 local scroll = require("splitwm.scroll")
@@ -172,8 +173,32 @@ local function connect_client_signals()
             core.drop_pickup()
         end
         colors.release_client(c)
-        for _, state in pairs(core.tag_state) do
+        local keep_t, keep_state, keep_leaf
+        for t, state in pairs(core.tag_state) do
+            local leaf = tree.find_leaf_for_client(state.root, c)
+            if leaf and state.focused_leaf_id == leaf.id then
+                keep_t, keep_state, keep_leaf = t, state, leaf
+            end
             ops.unpin_client(state.root, c)
+        end
+        if not keep_leaf then return end
+
+        -- Keep focus inside the split the window was closed from: autofocus
+        -- picks the next client from global history, which may live in
+        -- another split and would drag focus (and the canvas) over there.
+        local nxt = keep_leaf.tabs[keep_leaf.active_tab]
+        if nxt and nxt.valid then
+            focus.force_now(nxt)
+            focus.after_arrange(nxt, keep_leaf.id)
+        else
+            -- The split is now empty; splits persist, so it stays focused.
+            gears.timer.delayed_call(function()
+                if not core.leaf(keep_state, keep_leaf.id) then return end
+                keep_state.focused_leaf_id = keep_leaf.id
+                if #keep_leaf.tabs == 0 then client.focus = nil end
+                local s = keep_t.screen and core.screen_of(keep_t.screen)
+                if s then awful.layout.arrange(s) end
+            end)
         end
     end)
 
