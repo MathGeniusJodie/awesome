@@ -59,7 +59,7 @@ local REMOTE_TAB_GROUP_GAP = -5
 
 -- Extra spacing added between tabs (on top of the shape overlap).
 -- Sized so adjacent tab icons clear each other now that tabs are icon-only.
-local TAB_GAP = -2
+local TAB_GAP = 0
 
 -- Vertical overlap between stacked icon pills in a horizontally-minimized
 -- split (was coupled to TAB_GAP when tabs still had inline close buttons).
