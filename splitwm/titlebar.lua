@@ -1033,7 +1033,7 @@ end
 -- Focus border drawn around the client area
 ---------------------------------------------------------------------------
 
-local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
+local function tb_build_border_widget(border_color, tb_h, bw, radius)
     local w = wibox.widget.base.make_widget()
     w._bc   = border_color
     w._tb_h = tb_h
@@ -1045,10 +1045,8 @@ local function tb_build_border_widget(border_color, tb_h, bw, radius, entry_ref)
         local half = self._bw / 2
         local x    = half
         local y    = self._tb_h - half
-        local cw   = entry_ref and entry_ref.border_client_w
-        local ch   = entry_ref and entry_ref.border_client_h
-        local wd   = cw and (cw + self._bw) or (width - self._bw)
-        local h    = ch and (ch + self._bw) or (height - self._tb_h)
+        local wd   = width - self._bw
+        local h    = height - self._tb_h
         local r    = radius or beautiful.splitwm_border_radius
         cr:new_sub_path()
         cr:arc(x + wd - r, y + r,     r, -math.pi / 2, 0)
@@ -1268,7 +1266,6 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
     entry.tb_h  = tb_h
     local wb    = entry.wb
     local scroll_x = state.scroll_x or 0
-    local border_ref_client = leaf.tabs[leaf.active_tab]
     local wa = s.workarea
     local vis_x = geo.x - scroll_x
     local off_screen = vis_x + geo.width <= wa.x or vis_x >= wa.x + wa.width
@@ -1278,27 +1275,6 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
         wb.y      = geo.y - gap
         wb.width  = geo.width
         wb.height = geo.height + gap
-    end
-
-    -- Geometry-only fingerprint: border size is only recomputed when geometry
-    -- or active client changes, NOT on focus changes from hover.
-    local geo_fp_parts = { leaf.active_tab, geo.width, geo.height }
-    for _, tc in ipairs(leaf.tabs) do
-        geo_fp_parts[#geo_fp_parts + 1] = tostring(tc.window)
-    end
-    local geo_fp = table.concat(geo_fp_parts, "\0")
-    if entry.geo_fp ~= geo_fp then
-        entry.geo_fp = geo_fp
-        entry.border_client_w = nil
-        entry.border_client_h = nil
-        if border_ref_client and border_ref_client.valid
-                and not border_ref_client.fullscreen then
-            local ag    = core.client_actual_geo[border_ref_client]
-            local exp_w = geo.width - bw * 2
-            local exp_h = geo.height + gap - bw - tb_h
-            if ag and ag.width  < exp_w - 1 then entry.border_client_w = ag.width end
-            if ag and ag.height < exp_h - 1 then entry.border_client_h = ag.height end
-        end
     end
 
     local fp = tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
@@ -1415,7 +1391,7 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
         and tb_build_border_widget(is_focused and theme.color_fg or nil,
             tb_h, bw, EMPTY_SPLIT_RADIUS)
         or tb_build_border_widget(is_focused and focus_color or nil,
-            tb_h, bw, nil, entry)
+            tb_h, bw, nil)
 
     local drag_pill
     if geo.v_bound_above then

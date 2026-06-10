@@ -177,12 +177,6 @@ local function connect_client_signals()
         for _, state in pairs(core.tag_state) do
             ops.unpin_client(state.root, c)
         end
-        core.client_actual_geo[c]  = nil
-        core.client_last_target[c] = nil
-    end)
-
-    client.connect_signal("property::geometry", function(c)
-        core.client_actual_geo[c] = c:geometry()
     end)
 
     local function refresh_client_icon(c, release_hue_slot)

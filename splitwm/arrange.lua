@@ -38,19 +38,7 @@ local function place_leaf_clients(s, state, leaf, geo, wa, gap, bw, tb_h)
             c.hidden = false
             c.border_width = 0
             if not c.fullscreen and not anim.is_active(s) then
-                local tgt  = theme.client_geo(geo, bw, gap, tb_h, scroll_x)
-                local ag   = core.client_actual_geo[c]
-                local last = core.client_last_target[c]
-                -- If the client snapped smaller due to size hints and the
-                -- target hasn't changed, don't fight it with re-geometry.
-                local skip = ag and last
-                    and (ag.width < tgt.width - 1 and ag.height < tgt.height - 1)
-                    and last.x == tgt.x and last.y == tgt.y
-                    and last.width == tgt.width and last.height == tgt.height
-                if not skip then
-                    c:geometry(tgt)
-                    core.client_last_target[c] = tgt
-                end
+                c:geometry(theme.client_geo(geo, bw, gap, tb_h, scroll_x))
             end
         else
             c.hidden = true
@@ -135,16 +123,11 @@ function M.update_ui(s)
         anim.start_split(s, t, pending.old_geo, pending.a_id, pending.b_id, pending.dir)
         return
     end
-    local cpending = anim.close_pending[s]
-    if cpending then
-        anim.close_pending[s] = nil
-        anim.start_close(s, t, cpending.old_geos, cpending.leaf_ids)
-        return
-    end
-    local mpending = anim.minimize_pending[s]
-    if mpending then
-        anim.minimize_pending[s] = nil
-        anim.start_minimize(s, t, mpending.old_geos, mpending.leaf_ids, mpending.min_leaf)
+    local rpending = anim.reflow_pending[s]
+    if rpending then
+        anim.reflow_pending[s] = nil
+        anim.start_reflow(s, t, rpending.old_geos, rpending.leaf_ids,
+            rpending.min_leaf, rpending.smush)
         return
     end
 

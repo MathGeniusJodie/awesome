@@ -416,7 +416,9 @@ function ops.close_leaf_with_anim(t, s, state, leaf_id)
                 height = geo.height,
             }
         end
-        anim.close_pending[s] = { old_geos = old_geos, leaf_ids = sibling_ids }
+        anim.reflow_pending[s] = {
+            old_geos = old_geos, leaf_ids = sibling_ids, smush = true,
+        }
     end
 end
 
@@ -456,7 +458,7 @@ function ops.split_action_callbacks(state, leaf_id, t, s)
             if #leaf_ids > 0 then
                 local min_leaf = is_minimizing and leaf or nil
                 if min_leaf then min_leaf.min_anim = true end
-                anim.minimize_pending[s] = {
+                anim.reflow_pending[s] = {
                     old_geos = old_geos, leaf_ids = leaf_ids, min_leaf = min_leaf,
                 }
             end

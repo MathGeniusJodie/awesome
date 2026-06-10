@@ -14,9 +14,8 @@ local smush = require("splitwm.smush")
 local animation = {}
 
 -- [screen] = pending descriptor, consumed by update_ui.
-animation.split_pending    = {}
-animation.close_pending    = {}
-animation.minimize_pending = {}
+animation.split_pending  = {}
+animation.reflow_pending = {}
 
 -- [screen] = { timer, min_leaf } while an animation runs.
 local active = {}
@@ -133,34 +132,11 @@ function animation.start_split(s, t, old_geo, a_id, b_id, dir)
     end)
 end
 
--- Animate the surviving leaves expanding into a closed split's space.
-function animation.start_close(s, t, old_geos, leaf_ids)
-    cancel(s)
-    local cached = core.geo[t]
-    if not cached then return end
-    local end_geos = {}
-    for _, id in ipairs(leaf_ids) do
-        local g = cached.geos[id]
-        if not g then return end
-        end_geos[id] = g
-    end
-    for _, id in ipairs(leaf_ids) do
-        if old_geos[id] then apply_leaf_geo(s, id, old_geos[id]) end
-    end
-    run(s, function(p)
-        for _, id in ipairs(leaf_ids) do
-            if old_geos[id] and end_geos[id] then
-                apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
-            end
-        end
-    end, nil, function()
-        smush.after_layout(s)
-    end)
-end
-
--- Animate all leaves to their post-minimize geometry. min_leaf is the leaf
--- being minimized (kept visible via its min_anim flag), nil when restoring.
-function animation.start_minimize(s, t, old_geos, leaf_ids, min_leaf)
+-- Animate existing leaves from old_geos to their current layout geometry.
+-- Used after closing a split (surviving leaves expand; smush re-runs after)
+-- and after minimize/restore (min_leaf, if any, is the leaf being minimized,
+-- kept visible during the animation via its min_anim flag).
+function animation.start_reflow(s, t, old_geos, leaf_ids, min_leaf, smush_after)
     cancel(s)
     local function abort()
         if min_leaf then min_leaf.min_anim = nil end
@@ -182,7 +158,7 @@ function animation.start_minimize(s, t, old_geos, leaf_ids, min_leaf)
                 apply_leaf_geo(s, id, lerp_geo(old_geos[id], end_geos[id], p))
             end
         end
-    end, min_leaf)
+    end, min_leaf, smush_after and function() smush.after_layout(s) end or nil)
 end
 
 return animation
