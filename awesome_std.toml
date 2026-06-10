@@ -2,6 +2,18 @@
 base = "lua51"
 name = "awesome_std"
 
+# AwesomeWM runs Lua 5.3+ where table.unpack exists.
+[[table.unpack.args]]
+type = "table"
+
+[[table.unpack.args]]
+type = "number"
+required = false
+
+[[table.unpack.args]]
+type = "number"
+required = false
+
 # AwesomeWM runs Lua 5.3+/LuaJIT where math.atan accepts (y, x).
 [[math.atan.args]]
 type = "number"

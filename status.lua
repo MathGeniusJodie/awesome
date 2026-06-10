@@ -148,7 +148,6 @@ function status.new_chip_widget()
         local cx = math.floor(width / 2)
         local by = height - ch
         local bx = cx - math.floor(cw / 2)
-        local cy = by + math.floor(ch / 2)
 
         cr:set_source_rgba(1, 1, 1, 1)
         cr:save()
@@ -197,7 +196,7 @@ local function make_circle_icon_btn_widget(size, icon_fn, cmd, icon_scale)
     icon.forced_width  = math.floor(size * icon_scale)
     icon.forced_height = math.floor(size * icon_scale)
 
-    function icon:fit(_, w, h) return self.forced_width, self.forced_height end
+    function icon:fit() return self.forced_width, self.forced_height end
 
     function icon:draw(_, cr, w, h)
         cr:set_source(gears.color(beautiful.splitwm_color_fg))

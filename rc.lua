@@ -14,7 +14,6 @@ pcall(require, "luarocks.loader")
 local gears     = require("gears")
 local awful     = require("awful")
 require("awful.autofocus")
-local wibox     = require("wibox")
 local beautiful = require("beautiful")
 local naughty   = require("naughty")
 local hotkeys_popup = require("awful.hotkeys_popup")
@@ -217,10 +216,12 @@ menu.setup({
 -- Layouts — splitwm is the default (and only one you need, really)
 ---------------------------------------------------------------------------
 
-awful.layout.layouts = {
-    splitwm.layout,
-    awful.layout.suit.floating,  -- fallback
-}
+tag.connect_signal("request::default_layouts", function()
+    awful.layout.append_default_layouts({
+        splitwm.layout,
+        awful.layout.suit.floating,  -- fallback
+    })
+end)
 
 ---------------------------------------------------------------------------
 -- Wibar
