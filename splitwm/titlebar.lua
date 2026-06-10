@@ -40,7 +40,7 @@ local MENU_CIRC_SIZE = 25
 local MENU_CIRC_GAP  = 4
 local MENU_CIRC_COLS = 3
 local MENU_CIRC_ROWS = 3
-local MENU_PAD_H     = 0
+local MENU_PAD_H     = 8
 local MENU_PAD_V     = 8
 local MENU_BW        = 2   -- border on left / right / bottom
 
@@ -52,18 +52,18 @@ local TAB_PAD_H = 22
 local TAB_CONTENT_V_PAD = 1
 
 -- Gap between the last tab and the "+" new-tab button.
-local PLUS_BTN_GAP = 54
+local PLUS_BTN_GAP = 30
 
 -- Gap between the "+" button and the dimmed tabs from other splits.
-local REMOTE_TAB_GROUP_GAP = -5
+local REMOTE_TAB_GROUP_GAP = -2
 
 -- Extra spacing added between tabs (on top of the shape overlap).
 -- Sized so adjacent tab icons clear each other now that tabs are icon-only.
-local TAB_GAP = 0
+local TAB_GAP = 6
 
 -- Vertical overlap between stacked icon pills in a horizontally-minimized
 -- split (was coupled to TAB_GAP when tabs still had inline close buttons).
-local PILL_STACK_GAP = -24
+local PILL_STACK_GAP = 4
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (content background).
