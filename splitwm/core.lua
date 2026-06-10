@@ -30,14 +30,6 @@ end
 -- core.tabbar[screen][leaf_id] = { wb = wibox, ... }.
 core.tabbar = {}
 
--- Smush (font-shrink) coordination between smush.lua and focus.lua.
-core.smush = {
-    running         = false,
-    restore_client  = nil,
-    restore_leaf_id = nil,
-    focus_client    = nil,
-}
-
 -- Set by arrange.lua at load time; lets animation.lua refresh the UI
 -- without a circular require.
 core.update_ui = nil

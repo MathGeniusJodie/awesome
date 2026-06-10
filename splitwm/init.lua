@@ -21,7 +21,6 @@ local core   = require("splitwm.core")
 local theme  = require("splitwm.theme")
 local colors = require("splitwm.colors")
 local client_icons = require("splitwm.client_icons")
-local focus  = require("splitwm.focus")
 local smush  = require("splitwm.smush")
 local ops    = require("splitwm.ops")
 local scroll = require("splitwm.scroll")
@@ -189,33 +188,9 @@ local function connect_client_signals()
     client.connect_signal("property::icon", function(c) refresh_client_icon(c, false) end)
 
     client.connect_signal("focus", function(c)
-        if core.smush.focus_client == c then return end
-        local guard = focus.guard
-        if guard and guard.client ~= c then
-            -- Something stole focus from a guarded request: steal it back.
-            local target, target_leaf_id = guard.client, guard.leaf_id
-            if target and target.valid then
-                gears.timer.delayed_call(function()
-                    if focus.guard and focus.guard.client == target
-                            and target.valid and client.focus ~= target then
-                        focus.force_now(target, target_leaf_id)
-                    end
-                end)
-            end
-            return
-        end
-        local leaf, state, tab_idx
-        if guard and guard.client == c and guard.leaf_id then
-            local _, guarded_state = core.client_state(c)
-            local guarded_leaf = core.leaf(guarded_state, guard.leaf_id)
-            local guarded_idx = core.tab_index(guarded_leaf, c)
-            if guarded_idx then
-                leaf, state, tab_idx = guarded_leaf, guarded_state, guarded_idx
-            end
-        end
-        if not leaf then leaf, state = core.client_leaf(c) end
+        local leaf, state = core.client_leaf(c)
         if not leaf then return end
-        tab_idx = tab_idx or core.tab_index(leaf, c)
+        local tab_idx = core.tab_index(leaf, c)
         if not tab_idx then return end
         local needs_arrange = false
         if leaf.active_tab ~= tab_idx then
@@ -225,10 +200,6 @@ local function connect_client_signals()
         if leaf.id ~= state.focused_leaf_id then
             state.focused_leaf_id = leaf.id
             needs_arrange = true
-        end
-        if core.smush.running then
-            core.smush.restore_client  = c
-            core.smush.restore_leaf_id = leaf.id
         end
         if needs_arrange then awful.layout.arrange(c.screen) end
         local t = c.first_tag
