@@ -44,10 +44,8 @@ local MENU_PAD_H     = 0
 local MENU_PAD_V     = 8
 local MENU_BW        = 2   -- border on left / right / bottom
 
--- Left/right padding inside each tab widget (drives close-button x-offset).
+-- Left/right padding inside each tab widget, symmetric around the icon.
 local TAB_PAD_H = 22
--- Extra right-side padding inside the tab, right of the close button.
-local TAB_PAD_H_R_EXTRA = 2
 
 -- Top/bottom padding inside each tab's content margin.
 -- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep in sync.
@@ -100,10 +98,10 @@ function M.init()
             - TAB_EAR * TAB_CA) * 2)
 end
 
--- Width of one tab slot including its negative overlap with the next tab.
+-- Width of one tab slot: the tab widget plus the layout spacing to the next
+-- tab (exact — widgets sit in a fixed.horizontal with that spacing).
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + TAB_PAD_H + TAB_PAD_H_R_EXTRA
-        + TAB_SPACING + TAB_GAP - 4
+    return TAB_PAD_H + icon_size + TAB_PAD_H + TAB_SPACING + TAB_GAP
 end
 
 local function tab_slot_x(tab_idx, icon_size)
@@ -471,24 +469,37 @@ end
 -- color picker (client-colored bg, side/bottom border).
 ---------------------------------------------------------------------------
 
-local close_popup = { wb = nil, client = nil, over = false }
+local close_popup = { wb = nil, client = nil, tab_rect = nil }
 
 local function hide_close_popup()
-    close_popup.client = nil
-    close_popup.over   = false
+    close_popup.client   = nil
+    close_popup.tab_rect = nil
     if close_popup.wb then close_popup.wb.visible = false end
 end
 
--- Hide shortly after the cursor leaves the tab, unless it moved into the
--- popup itself.
+local function point_in(r, mx, my)
+    return r and mx >= r.x and mx < r.x + r.width
+        and my >= r.y and my < r.y + r.height
+end
+
+-- Hide once the cursor has left both the source tab and the popup. Checked
+-- by position, not by enter/leave events: the tooltip appearing under the
+-- cursor fires spurious leave events that would flicker the popup.
 local function schedule_hide_close_popup()
     gears.timer.start_new(0.15, function()
-        if not close_popup.over then hide_close_popup() end
+        local cp = close_popup
+        if not (cp.wb and cp.wb.visible) then return false end
+        local m = mouse.coords()
+        if point_in(cp.wb:geometry(), m.x, m.y) or point_in(cp.tab_rect, m.x, m.y) then
+            schedule_hide_close_popup()
+        else
+            hide_close_popup()
+        end
         return false
     end)
 end
 
-local function show_close_popup(tc, x, y, w, bg_color, border_color)
+local function show_close_popup(tc, x, y, w, bg_color, border_color, tab_rect)
     local cp = close_popup
     if not cp.wb then
         cp.wb = wibox { ontop = true, visible = false, border_width = 0 }
@@ -510,12 +521,7 @@ local function show_close_popup(tc, x, y, w, bg_color, border_color)
             layout = wibox.layout.stack,
         }
         cp.wb:connect_signal("mouse::enter", function()
-            cp.over = true
             cp.wb.cursor = "hand2"
-        end)
-        cp.wb:connect_signal("mouse::leave", function()
-            cp.over = false
-            schedule_hide_close_popup()
         end)
         cp.wb:buttons(gears.table.join(awful.button({}, 1, function()
             local c = cp.client
@@ -523,7 +529,8 @@ local function show_close_popup(tc, x, y, w, bg_color, border_color)
             if c and c.valid then c:kill() end
         end)))
     end
-    cp.client = tc
+    cp.client   = tc
+    cp.tab_rect = tab_rect
     cp.border_w._bpat = gears.color(border_color)
     cp.border_w:emit_signal("widget::redraw_needed")
     cp.wb.bg = bg_color
@@ -533,6 +540,7 @@ local function show_close_popup(tc, x, y, w, bg_color, border_color)
     cp.wb.x       = x
     cp.wb.y       = y
     cp.wb.visible = true
+    schedule_hide_close_popup()
 end
 
 ---------------------------------------------------------------------------
@@ -704,7 +712,7 @@ local function build_tab_visual(tc, entry, ctx, tab_state)
         tab_draw,
         {
             icon_widget,
-            left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
+            left = TAB_PAD_H, right = TAB_PAD_H,
             top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
             widget = wibox.container.margin,
         },
@@ -845,16 +853,20 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- The ✕ lives in a hover popup under the active tab (no inline button).
     tab_widget:connect_signal("mouse::enter", function()
         if tab_state ~= "active" or drag.pickup.tag ~= "idle" then return end
+        if close_popup.client == tc and close_popup.wb and close_popup.wb.visible then
+            return
+        end
         local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
         if not g or leaf.minimized then return end
         local x = g.x - (ctx.state.scroll_x or 0)
             + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
+        local bar_top = g.y - gap
         local cc = colors.get_client_color(tc)
-        show_close_popup(tc, x, g.y - gap + ctx.tb_h, ctx.icon_size,
+        show_close_popup(tc, x, bar_top + ctx.tb_h, ctx.icon_size,
             cc and cc.dark or theme.color_bg,
-            cc and cc.light or theme.color_fg)
+            cc and cc.light or theme.color_fg,
+            { x = x, y = bar_top, width = ctx.icon_size, height = ctx.tb_h })
     end)
-    tab_widget:connect_signal("mouse::leave", schedule_hide_close_popup)
 
     tab_widget:buttons(gears.table.join(
         awful.button({}, 1, function()
