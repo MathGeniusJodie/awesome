@@ -141,7 +141,9 @@ M.TAB_CONTENT_V_PAD = TAB_CONTENT_V_PAD
 -- Tab bar cache and color-menu state
 ---------------------------------------------------------------------------
 
-local tab_color_menu_state = { wb = nil, poll = nil, poll_ready = false }
+local click_away = require("splitwm.click_away")
+
+local tab_color_menu_state = { wb = nil, watcher = nil }
 local local_tab_click_active = false
 
 -- Per-event dedup flag: set for the duration of the event that closed a
@@ -310,7 +312,7 @@ local function hide_tab_color_menu()
     local ms = tab_color_menu_state
     if not (ms.wb and ms.wb.visible) then return false end
     ms.wb.visible = false
-    if ms.poll and ms.poll.started then ms.poll:stop() end
+    if ms.watcher then ms.watcher.stop() end
     return true
 end
 
@@ -419,34 +421,18 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     wb.y = bar_bottom
     wb.visible = true
 
-    -- Poll for clicks outside the menu to dismiss it.
-    ms.poll_ready = false
-    if not ms.poll then
-        ms.poll = gears.timer {
-            timeout   = 0.05,
-            autostart = false,
-            callback  = function()
-                if not (wb and wb.visible) then
-                    ms.poll_ready = false; ms.poll:stop(); return
-                end
-                local m = mouse.coords()
-                local pressed = m.buttons[1] or m.buttons[3]
-                if not ms.poll_ready then
-                    if not pressed then ms.poll_ready = true end
-                    return
-                end
-                if pressed then
-                    local g = wb:geometry()
-                    if not (m.x >= g.x and m.x < g.x + g.width
-                            and m.y >= g.y and m.y < g.y + g.height) then
-                        hide_tab_color_menu()
-                    end
-                end
+    if not ms.watcher then
+        ms.watcher = click_away.new {
+            visible = function() return ms.wb and ms.wb.visible end,
+            inside  = function(m)
+                local g = ms.wb:geometry()
+                return m.x >= g.x and m.x < g.x + g.width
+                    and m.y >= g.y and m.y < g.y + g.height
             end,
+            dismiss = hide_tab_color_menu,
         }
     end
-    if ms.poll.started then ms.poll:stop() end
-    ms.poll:start()
+    ms.watcher.arm()
 end
 
 -- Closes the menu if open and returns true; returns false if already closed.
