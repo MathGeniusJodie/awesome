@@ -585,6 +585,49 @@ function colors.resolve_color_conflict(leaf, c)
     end
 end
 
+---------------------------------------------------------------------------
+-- Window-content sampling: average color of the top strip of a client's
+-- rendered window, so the active tab can blend into the app.
+---------------------------------------------------------------------------
+
+local window_top_cache = setmetatable({}, { __mode = "k" })
+
+local WINDOW_TOP_TTL_S    = 1  -- resample at most once per second
+local WINDOW_TOP_SAMPLE_Y = 3  -- px below the window's top edge
+
+-- Color (hex) of one pixel at the top-center of c's rendered content, or
+-- nil if the content is unavailable (hidden/unmapped clients have none).
+function colors.window_top_color(c)
+    if not c.valid or c.hidden then return nil end
+    local cache = window_top_cache[c]
+    local now = os.time()
+    if cache and now - cache.t <= WINDOW_TOP_TTL_S then return cache.hex end
+
+    local hex
+    local ok_lgi, lgi = pcall(require, "lgi")
+    local ok_bytes, bytes = pcall(require, "bytes")
+    local ok_gsurf, gsurface = pcall(require, "gears.surface")
+    local ok_content, content = pcall(function() return gsurface(c.content) end)
+    if ok_lgi and ok_bytes and ok_gsurf and ok_content and content then
+        local cairo = lgi.cairo
+        local sx = math.floor(c:geometry().width / 2)
+        local data = bytes.new(4)
+        local buf = cairo.ImageSurface.create_for_data(data,
+            cairo.Format.ARGB32, 1, 1, 4)
+        local cr = cairo.Context(buf)
+        if pcall(function()
+            cr:set_source_surface(content, -sx, -WINDOW_TOP_SAMPLE_Y)
+            cr:paint()
+        end) then
+            buf:flush()
+            -- Pixels are B, G, R, A on little-endian.
+            hex = string.format("#%02x%02x%02x", data[3], data[2], data[1])
+        end
+    end
+    window_top_cache[c] = { hex = hex, t = now }
+    return hex
+end
+
 colors.COLORS = COLORS
 
 -- Degrees per picker swatch / per-app dedup slot.

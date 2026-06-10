@@ -201,4 +201,20 @@ function M.start_drag_hover_poll()
     }
 end
 
+-- Active tabs tint to the live window-top color; refresh slowly so apps
+-- changing color while the WM is idle still propagate. The tab fingerprint
+-- short-circuits the update when nothing changed.
+gears.timer {
+    timeout   = 2,
+    autostart = true,
+    call_now  = false,
+    callback  = function()
+        for s in screen do
+            if core.active_state(s) and not anim.is_active(s) then
+                M.update_ui(s)
+            end
+        end
+    end,
+}
+
 return M

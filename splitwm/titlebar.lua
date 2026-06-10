@@ -598,6 +598,11 @@ local function tb_compute_fingerprint(leaf, state, geo, all_tabs_fp)
         geo and geo.height or 0,
         all_tabs_fp,
     }
+    -- The active tab's background tracks the window's top color.
+    local active_client = leaf.tabs[leaf.active_tab]
+    if active_client and active_client.valid then
+        parts[#parts + 1] = colors.window_top_color(active_client) or ""
+    end
     for _, tc in ipairs(leaf.tabs) do append_tab_fingerprint(parts, tc, true) end
     return table.concat(parts, "\0")
 end
@@ -641,7 +646,10 @@ end
 -- tab_state: "active" | "inactive" | "picked" | "remote".
 local function build_tab_visual(tc, entry, ctx, tab_state)
     local client_color = colors.get_client_color(tc)
+    -- The active tab takes on the window's own top color so it reads as
+    -- part of the app; inactive tabs keep their hue identity.
     local tab_bg = tab_state == "picked" and theme.color_fg
+        or (tab_state == "active" and colors.window_top_color(tc))
         or (client_color and client_color.dark)
         or (tab_state == "active" and theme.color_bg)
         or theme.color_btn_bg
