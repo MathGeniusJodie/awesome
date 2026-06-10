@@ -47,9 +47,10 @@ local MENU_BW        = 2   -- border on left / right / bottom
 -- Left/right padding inside each tab widget, symmetric around the icon.
 local TAB_PAD_H = 22
 
--- Top/bottom padding inside each tab's content margin.
--- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep in sync.
-local TAB_CONTENT_V_PAD = 1
+-- Top/bottom padding inside each tab's content margin. Sized together with
+-- theme.TAB_EXTRA_H so the icon (tb_h - 2 * TAB_CONTENT_V_PAD) keeps its
+-- size while the tab gains height.
+local TAB_CONTENT_V_PAD = 2
 
 -- Gap between the last tab and the "+" new-tab button.
 local PLUS_BTN_GAP = 28
@@ -94,7 +95,7 @@ local TAB_SPACING
 
 function M.init()
     TAB_SPACING = -math.floor(
-        (tab_cx(math.max(theme.TITLEBAR_HEIGHT, beautiful.splitwm_gap or 0))
+        (tab_cx(theme.tb_h(beautiful.splitwm_gap or 0))
             - TAB_EAR * TAB_CA) * 2)
 end
 

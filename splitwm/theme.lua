@@ -57,10 +57,14 @@ function theme.focus_border_width()
     return beautiful.splitwm_focus_border_width
 end
 
+-- Extra tab-bar height beyond the gap, giving icons breathing room inside
+-- the tab shape without shrinking them.
+theme.TAB_EXTRA_H = 2
+
 -- Effective tab bar height: grows to match the gap so the bar never
 -- disappears into it.
 function theme.tb_h(gap)
-    return math.max(theme.TITLEBAR_HEIGHT, gap)
+    return math.max(theme.TITLEBAR_HEIGHT, gap) + theme.TAB_EXTRA_H
 end
 
 -- Geometry of the client area inside a leaf, accounting for border,
