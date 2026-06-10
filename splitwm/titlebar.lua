@@ -678,13 +678,12 @@ local function poll_first_sample(tc, tries)
 end
 
 local function build_tab_visual(tc, entry, ctx, tab_state)
-    -- Tabs take on the window's own top color so they read as part of the
-    -- app. Only the active (visible) tab can be sampled live; the others
-    -- keep the color their window had when last seen, refreshed on focus.
-    -- With no sampled color at all, no tab shape is drawn — just the icon.
+    -- Only the active tab gets a tab shape, colored from its window's own
+    -- top pixel (cached fallback avoids flashes right after a switch).
+    -- Inactive and remote tabs are bare icons; picked tabs stay white.
     local tab_bg = tab_state == "picked" and theme.color_fg
-        or (tab_state == "active" and colors.window_top_color(tc))
-        or colors.window_top_color_cached(tc)
+        or (tab_state == "active"
+            and (colors.window_top_color(tc) or colors.window_top_color_cached(tc)))
     if tab_state == "active" and not tab_bg and tc.valid then
         poll_first_sample(tc, 12)
     end

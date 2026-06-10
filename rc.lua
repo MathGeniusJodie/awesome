@@ -69,7 +69,7 @@ beautiful.splitwm_handle_color   = "#ffffff55"  -- drag handle pill (vertical ha
 
 -- Splitwm layout
 beautiful.splitwm_gap              = 40 -- minimum 32
-beautiful.splitwm_focus_border_width = 2
+beautiful.splitwm_focus_border_width = 3
 beautiful.splitwm_border_radius    = 2
 beautiful.splitwm_empty_radius     = 14
 beautiful.splitwm_btn_font         = "monospace bold 14px"
