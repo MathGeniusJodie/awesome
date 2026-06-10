@@ -330,10 +330,11 @@ local function hide_tab_color_menu()
     return true
 end
 
-local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_color, tab_w)
+-- tab_mid is the screen-x midpoint of the tab; the menu centers on it.
+local function show_tab_color_menu(tc, s, tab_mid, bar_bottom, bg_color, border_color)
     local ms        = tab_color_menu_state
     local content_w = MENU_CIRC_COLS * MENU_CIRC_SIZE + (MENU_CIRC_COLS - 1) * MENU_CIRC_GAP
-    local menu_w    = tab_w or (MENU_BW * 2 + MENU_PAD_H * 2 + content_w)
+    local menu_w    = MENU_BW * 2 + MENU_PAD_H * 2 + content_w
     local menu_h    = MENU_PAD_V * 2 + MENU_CIRC_ROWS * MENU_CIRC_SIZE
         + (MENU_CIRC_ROWS - 1) * MENU_CIRC_GAP + MENU_BW
 
@@ -345,14 +346,17 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     wb.height = menu_h
     wb.bg     = bg_color
 
-    -- Circle widgets are created once and reused; selection + handlers are
-    -- refreshed each time the menu opens.
+    -- Circle widgets are created once and reused. The swatches are hue
+    -- OFFSETS from this client's own color: the first is "no change", each
+    -- next one nudges the hue a step further around the wheel — so colors
+    -- and selection are recomputed for the hovered client on every open.
     local current = colors.get_client_color(tc)
+    local cur_offset_deg = current
+        and math.floor(math.deg(current.offset or 0) + 0.5) % 360 or 0
     if not ms.circs then
         ms.circs = {}
-        for i, col in ipairs(colors.COLORS) do
+        for i = 1, MENU_CIRC_COLS * MENU_CIRC_ROWS do
             local circ = wibox.widget {
-                bg                 = col.light,
                 shape              = gears.shape.circle,
                 shape_border_color = theme.color_transparent,
                 shape_border_width = MENU_BW,
@@ -365,16 +369,15 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
             ms.circs[i] = circ
         end
     end
-    for i, col in ipairs(colors.COLORS) do
-        local circ = ms.circs[i]
-        local selected = current and not current.from_icon
-            and (current.base or current.name) == col.name
-        circ.shape_border_color = selected
+    for i, circ in ipairs(ms.circs) do
+        local offset_deg = (i - 1) * colors.HUE_STEP_DEGREES
+        local preview = colors.client_color_for_offset(tc, offset_deg)
+        circ.bg = preview and preview.light or theme.color_fg
+        circ.shape_border_color = (offset_deg % 360) == cur_offset_deg
             and theme.color_fg or theme.color_transparent
-        local col_name = col.name
         circ:buttons(gears.table.join(awful.button({}, 1, function()
             if tc.valid then
-                colors.set_client_palette_color(tc, col_name)
+                colors.set_client_hue_offset(tc, offset_deg)
                 hide_tab_color_menu()
                 awful.layout.arrange(s)
             end
@@ -422,7 +425,8 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
     end
 
     local sg = s.geometry
-    wb.x = math.max(sg.x, math.min(sg.x + sg.width - menu_w, tab_x))
+    wb.x = math.max(sg.x, math.min(sg.x + sg.width - menu_w,
+        math.floor(tab_mid - menu_w / 2)))
     wb.y = bar_bottom
     wb.visible = true
 
@@ -831,6 +835,10 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     -- The ✕ lives in a hover popup under the active tab (no inline button).
     tab_widget:connect_signal("mouse::enter", function()
         if tab_state ~= "active" or drag.pickup.tag ~= "idle" then return end
+        -- Don't fight the color picker for the space under the tab.
+        if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
+            return
+        end
         if close_popup.client == tc and close_popup.wb and close_popup.wb.visible then
             return
         end
@@ -872,11 +880,12 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
                 hide_tab_color_menu(); return
             end
-            local tab_x = g.x - (ctx.state.scroll_x or 0)
-                + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
+            local tab_mid = g.x - (ctx.state.scroll_x or 0)
+                + tab_slot_x(tab_idx, ctx.icon_size)
+                + (ctx.icon_size + 2 * TAB_PAD_H) / 2
             local bar_bottom = g.y - gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
-            show_tab_color_menu(tc, ctx.s, tab_x, bar_bottom,
+            show_tab_color_menu(tc, ctx.s, tab_mid, bar_bottom,
                 cc and cc.dark or theme.color_bg,
                 cc and cc.light or theme.color_fg)
         end)

@@ -520,6 +520,7 @@ function colors.get_client_color(c)
         result = color_from_hue(rotate_hue(base_hue, offset))
         if result then
             result.base_hue      = base_hue
+            result.offset        = offset
             result.manual        = manual_deg ~= nil
             result.from_icon     = manual_deg == nil and avg ~= nil
             result.icon_rotation = avg and offset or 0
@@ -531,17 +532,19 @@ function colors.get_client_color(c)
     return result
 end
 
--- Apply a palette swatch: stored as the hue offset that rotates the
--- client's base hue onto the swatch hue.
-function colors.set_client_palette_color(c, name)
+-- Apply a manual hue offset (degrees) from the client's base hue.
+function colors.set_client_hue_offset(c, degrees)
     if not c.valid then return end
-    local target = hue_for_template_name(name)
-    local cur = colors.get_client_color(c)
-    if not target or not cur or not cur.base_hue then return end
-    local offset = (target - cur.base_hue) % TAU
     c:set_xproperty("splitwm_manual_hue_offset",
-        string.format("%.2f", math.deg(offset)))
+        string.format("%.2f", degrees % 360))
     colors.clear_client_color_cache(c)
+end
+
+-- Preview color this client would get at a given offset (picker swatches).
+function colors.client_color_for_offset(c, degrees)
+    local cur = colors.get_client_color(c)
+    if not cur or not cur.base_hue then return cur end
+    return color_from_hue(rotate_hue(cur.base_hue, math.rad(degrees)))
 end
 
 local function pick_color_for_leaf(leaf, exclude_c)
@@ -583,5 +586,8 @@ function colors.resolve_color_conflict(leaf, c)
 end
 
 colors.COLORS = COLORS
+
+-- Degrees per picker swatch / per-app dedup slot.
+colors.HUE_STEP_DEGREES = HUE_SLOT_DEGREES
 
 return colors
