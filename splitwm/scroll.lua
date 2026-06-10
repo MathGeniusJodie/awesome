@@ -44,8 +44,49 @@ local function start_anim(s, tag)
     active[s] = { timer = tim }
 end
 
--- instant skips the easing animation: trackpad event streams arrive densely
--- enough that applying each small step directly reads as smooth scrolling.
+---------------------------------------------------------------------------
+-- Frame-coalesced instant scrolling
+--
+-- Trackpad streams deliver events faster than a full arrange can run, so
+-- repainting per event builds a backlog and the canvas lags ever further
+-- behind. Instead, each event only updates scroll_target (cheap); one
+-- repaint timer applies the latest target at most once per frame.
+---------------------------------------------------------------------------
+
+local FRAME_S = 1 / 60
+
+local frame_pending = {}  -- [screen] = true while a repaint is owed
+local frame_timer
+
+local function flush_frames()
+    for s in pairs(frame_pending) do
+        frame_pending[s] = nil
+        local t = s.selected_tag
+        local state = t and core.tag_state[t]
+        if state and state.scroll_x ~= state.scroll_target then
+            state.scroll_x = state.scroll_target
+            awful.layout.arrange(s)
+        end
+    end
+    if not next(frame_pending) and frame_timer then
+        frame_timer:stop()
+        frame_timer = nil
+    end
+end
+
+local function request_frame(s)
+    frame_pending[s] = true
+    if frame_timer then return end
+    frame_timer = gears.timer {
+        timeout   = FRAME_S,
+        autostart = true,
+        call_now  = false,
+        callback  = flush_frames,
+    }
+end
+
+-- instant skips the easing animation; the repaint is frame-coalesced so a
+-- dense event stream never queues up arranges.
 function scroll.scroll_to(s, tag, target_x, instant)
     local state    = core.state(tag)
     local wa       = s.workarea
@@ -55,8 +96,7 @@ function scroll.scroll_to(s, tag, target_x, instant)
     if instant then
         local a = active[s]
         if a then a.timer:stop(); active[s] = nil end
-        state.scroll_x = state.scroll_target
-        awful.layout.arrange(s)
+        request_frame(s)
         return
     end
     start_anim(s, tag)
