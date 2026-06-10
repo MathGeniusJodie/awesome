@@ -44,20 +44,32 @@ local function start_anim(s, tag)
     active[s] = { timer = tim }
 end
 
-function scroll.scroll_to(s, tag, target_x)
+-- instant skips the easing animation: trackpad event streams arrive densely
+-- enough that applying each small step directly reads as smooth scrolling.
+function scroll.scroll_to(s, tag, target_x, instant)
     local state    = core.state(tag)
     local wa       = s.workarea
     local canvas_w = state.canvas_w or wa.width
     local max_s    = math.max(0, canvas_w - wa.width)
     state.scroll_target = math.max(0, math.min(max_s, target_x))
+    if instant then
+        local a = active[s]
+        if a then a.timer:stop(); active[s] = nil end
+        state.scroll_x = state.scroll_target
+        awful.layout.arrange(s)
+        return
+    end
     start_anim(s, tag)
 end
 
-function scroll.scroll_delta(s, delta_x)
+function scroll.scroll_delta(s, delta_x, instant)
     local t = s and s.selected_tag
     if not t then return end
     local state = core.state(t)
-    scroll.scroll_to(s, t, (state.scroll_x or 0) + delta_x)
+    -- Accumulate from the target, not the current position, so rapid events
+    -- don't lose distance to an in-flight animation.
+    scroll.scroll_to(s, t, (state.scroll_target or state.scroll_x or 0) + delta_x,
+        instant)
 end
 
 -- Scroll so the focused split sits inside the viewport (with one gap margin).

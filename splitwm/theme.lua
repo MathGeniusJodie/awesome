@@ -27,8 +27,13 @@ theme.SPLIT_RATIO = 0.618
 -- Ratio delta per grow/shrink keypress.
 theme.RESIZE_STEP = 0.05
 
--- Pixels per discrete horizontal scroll event.
+-- Pixels per discrete horizontal scroll event (mouse wheel: one animated
+-- step per click).
 theme.SCROLL_STEP = 100
+
+-- Pixels per trackpad scroll event. Trackpads emit buttons 6/7 as a dense
+-- stream, so small instant steps read as smooth scrolling.
+theme.SCROLL_STEP_SMOOTH = 20
 
 -- Width thresholds below which clients get font-shrink (smush) shortcuts.
 theme.DEFAULT_SMUSH_WIDTH_THRESHOLD      = 900

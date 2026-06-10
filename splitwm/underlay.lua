@@ -22,13 +22,14 @@ local underlay = {}
 local underlay_cache = {}
 
 local function scroll_buttons(s)
-    -- Horizontal scroll via 2-finger trackpad (buttons 6/7) or Shift+wheel (4/5).
-    local function by(delta)
-        return function() scroll.scroll_delta(s, delta) end
+    -- Horizontal scroll: trackpad (buttons 6/7) streams small instant steps
+    -- for smooth scrolling; Shift+wheel (4/5) gets big animated clicks.
+    local function by(delta, instant)
+        return function() scroll.scroll_delta(s, delta, instant) end
     end
     return gears.table.join(
-        awful.button({}, 6, by(-theme.SCROLL_STEP)),
-        awful.button({}, 7, by(theme.SCROLL_STEP)),
+        awful.button({}, 6, by(-theme.SCROLL_STEP_SMOOTH, true)),
+        awful.button({}, 7, by(theme.SCROLL_STEP_SMOOTH, true)),
         awful.button({ "Shift" }, 4, by(-theme.SCROLL_STEP)),
         awful.button({ "Shift" }, 5, by(theme.SCROLL_STEP))
     )

@@ -235,7 +235,9 @@ beautiful.fg_focus       = "#ffffff"
 status.setup({
     splitwm     = splitwm,
     hunger_mod  = hunger_mod,
-    do_scroll   = function(s, delta_x) splitwm.scroll_delta(s, delta_x) end,
+    do_scroll   = function(s, delta_x, instant)
+        splitwm.scroll_delta(s, delta_x, instant)
+    end,
 })
 
 awful.screen.connect_for_each_screen(function(s)

@@ -801,13 +801,18 @@ function status.setup_screen(s)
         wibox.container.margin(status.new_power_widget(lock_w), 0, 0, 2, 0),
         wibox.container.margin(status.new_lock_widget(lock_w),  0, 0, 2, 0),
     }
-    -- Horizontal scroll on the status bar (2-finger trackpad or Shift+wheel).
-    local SCROLL_STEP = 100
+    -- Horizontal scroll on the status bar: trackpad (6/7) streams small
+    -- instant steps; Shift+wheel (4/5) gets big animated clicks.
+    local SCROLL_STEP        = 100
+    local SCROLL_STEP_SMOOTH = 20
+    local function scroll_by(delta, instant)
+        return function() if _do_scroll then _do_scroll(s, delta, instant) end end
+    end
     s.mywibox:buttons(gears.table.join(
-        awful.button({}, 6,        function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
-        awful.button({}, 7,        function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end),
-        awful.button({"Shift"}, 4, function() if _do_scroll then _do_scroll(s, -SCROLL_STEP) end end),
-        awful.button({"Shift"}, 5, function() if _do_scroll then _do_scroll(s,  SCROLL_STEP) end end)
+        awful.button({}, 6,        scroll_by(-SCROLL_STEP_SMOOTH, true)),
+        awful.button({}, 7,        scroll_by(SCROLL_STEP_SMOOTH, true)),
+        awful.button({"Shift"}, 4, scroll_by(-SCROLL_STEP)),
+        awful.button({"Shift"}, 5, scroll_by(SCROLL_STEP))
     ))
 
     -- Keep mypower_wibox nil so nothing breaks if rc.lua references it.
