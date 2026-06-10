@@ -49,10 +49,6 @@ local TAB_PAD_H = 22
 -- Extra right-side padding inside the tab, right of the close button.
 local TAB_PAD_H_R_EXTRA = 2
 
--- Spacing between the app icon and the close button inside a tab.
--- Must match the `spacing` value in the tab content row widget.
-local ICON_CLOSE_GAP = 0
-
 -- Top/bottom padding inside each tab's content margin.
 -- icon_size is derived as tb_h - 2 * TAB_CONTENT_V_PAD, so keep in sync.
 local TAB_CONTENT_V_PAD = 1
@@ -65,10 +61,6 @@ local REMOTE_TAB_GROUP_GAP = -5
 
 -- Extra spacing added between tabs (on top of the shape overlap).
 local TAB_GAP = -24
-
--- The active tab is drawn above its neighbors; leave extra room after it so
--- its right ear does not cover the next tab's icon.
-local ACTIVE_TAB_AFTER_GAP = 26
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (content background).
@@ -105,31 +97,28 @@ end
 
 -- Width of one tab slot including its negative overlap with the next tab.
 local function tab_step(icon_size)
-    return TAB_PAD_H + icon_size + ICON_CLOSE_GAP + theme.BTN_SIZE
-        + TAB_PAD_H + TAB_PAD_H_R_EXTRA + TAB_SPACING + TAB_GAP - 4
+    return TAB_PAD_H + icon_size + TAB_PAD_H + TAB_PAD_H_R_EXTRA
+        + TAB_SPACING + TAB_GAP - 4
 end
 
-local function tab_slot_x(tab_idx, active_tab, icon_size)
-    local x = (tab_idx - 1) * tab_step(icon_size)
-    if active_tab and tab_idx > active_tab then x = x + ACTIVE_TAB_AFTER_GAP end
-    return x
+local function tab_slot_x(tab_idx, icon_size)
+    return (tab_idx - 1) * tab_step(icon_size)
 end
 
-local function tab_content_bounds(tab_idx, active_tab, icon_size)
-    local x1 = tab_slot_x(tab_idx, active_tab, icon_size) + TAB_PAD_H
-    local x2 = x1 + icon_size + ICON_CLOSE_GAP + theme.BTN_SIZE - 4
-    return x1, x2
+local function tab_content_bounds(tab_idx, icon_size)
+    local x1 = tab_slot_x(tab_idx, icon_size) + TAB_PAD_H
+    return x1, x1 + icon_size
 end
 
-local function tab_content_hit(x, tab_idx, active_tab, icon_size)
-    local x1, x2 = tab_content_bounds(tab_idx, active_tab, icon_size)
+local function tab_content_hit(x, tab_idx, icon_size)
+    local x1, x2 = tab_content_bounds(tab_idx, icon_size)
     return x >= x1 and x < x2
 end
 
-local function tab_index_at(x, active_tab, n_tabs, icon_size)
+local function tab_index_at(x, n_tabs, icon_size)
     if n_tabs <= 0 then return nil end
     for i = 1, n_tabs do
-        if tab_content_hit(x, i, active_tab, icon_size) then return i end
+        if tab_content_hit(x, i, icon_size) then return i end
     end
     return nil
 end
@@ -318,6 +307,23 @@ end
 -- Tab color picker popup menu
 ---------------------------------------------------------------------------
 
+-- Border drawn on left/right/bottom only — the top edge meets the tab bar.
+-- Shared by the color picker and the hover close popup.
+local function make_side_border_widget()
+    local w = wibox.widget.base.make_widget()
+    function w:draw(_, cr, ww, hh)
+        if not self._bpat then return end
+        cr:set_source(self._bpat)
+        cr:set_line_width(MENU_BW)
+        local o = MENU_BW / 2
+        cr:move_to(o, 0) cr:line_to(o, hh) cr:stroke()
+        cr:move_to(ww - o, 0) cr:line_to(ww - o, hh) cr:stroke()
+        cr:move_to(0, hh - o) cr:line_to(ww, hh - o) cr:stroke()
+    end
+    function w:fit(_, ww, hh) return ww, hh end
+    return w
+end
+
 local function hide_tab_color_menu()
     local ms = tab_color_menu_state
     if not (ms.wb and ms.wb.visible) then return false end
@@ -377,18 +383,7 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
 
     -- Border widget created once; source color updated each open.
     if not ms.border_w then
-        local bw = wibox.widget.base.make_widget()
-        function bw:draw(_, cr, w, h)
-            if not self._bpat then return end
-            cr:set_source(self._bpat)
-            cr:set_line_width(MENU_BW)
-            local o = MENU_BW / 2
-            cr:move_to(o, 0) cr:line_to(o, h) cr:stroke()
-            cr:move_to(w - o, 0) cr:line_to(w - o, h) cr:stroke()
-            cr:move_to(0, h - o) cr:line_to(w, h - o) cr:stroke()
-        end
-        function bw:fit(_, w, h) return w, h end
-        ms.border_w = bw
+        ms.border_w = make_side_border_widget()
     end
     ms.border_w._bpat = gears.color(border_color)
     ms.border_w:emit_signal("widget::redraw_needed")
@@ -464,6 +459,75 @@ local function event_close_menu_if_open()
         mark_menu_closed(); return true
     end
     return false
+end
+
+---------------------------------------------------------------------------
+-- Hover close popup — ✕ shown under the active tab, styled like the
+-- color picker (client-colored bg, side/bottom border).
+---------------------------------------------------------------------------
+
+local close_popup = { wb = nil, client = nil, over = false }
+
+local function hide_close_popup()
+    close_popup.client = nil
+    close_popup.over   = false
+    if close_popup.wb then close_popup.wb.visible = false end
+end
+
+-- Hide shortly after the cursor leaves the tab, unless it moved into the
+-- popup itself.
+local function schedule_hide_close_popup()
+    gears.timer.start_new(0.15, function()
+        if not close_popup.over then hide_close_popup() end
+        return false
+    end)
+end
+
+local function show_close_popup(tc, x, y, w, bg_color, border_color)
+    local cp = close_popup
+    if not cp.wb then
+        cp.wb = wibox { ontop = true, visible = false, border_width = 0 }
+        cp.border_w = make_side_border_widget()
+        cp.label = wibox.widget {
+            text   = "✕",
+            align  = "center",
+            valign = "center",
+            font   = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
+            widget = wibox.widget.textbox,
+        }
+        cp.wb:setup {
+            cp.border_w,
+            {
+                cp.label,
+                left = MENU_BW, right = MENU_BW, bottom = MENU_BW,
+                widget = wibox.container.margin,
+            },
+            layout = wibox.layout.stack,
+        }
+        cp.wb:connect_signal("mouse::enter", function()
+            cp.over = true
+            cp.wb.cursor = "hand2"
+        end)
+        cp.wb:connect_signal("mouse::leave", function()
+            cp.over = false
+            schedule_hide_close_popup()
+        end)
+        cp.wb:buttons(gears.table.join(awful.button({}, 1, function()
+            local c = cp.client
+            hide_close_popup()
+            if c and c.valid then c:kill() end
+        end)))
+    end
+    cp.client = tc
+    cp.border_w._bpat = gears.color(border_color)
+    cp.border_w:emit_signal("widget::redraw_needed")
+    cp.wb.bg = bg_color
+    cp.wb.fg = theme.color_fg
+    cp.wb.width   = w
+    cp.wb.height  = theme.BTN_SIZE + MENU_BW
+    cp.wb.x       = x
+    cp.wb.y       = y
+    cp.wb.visible = true
 end
 
 ---------------------------------------------------------------------------
@@ -630,25 +694,11 @@ local function build_tab_visual(tc, entry, ctx, tab_state)
         valign = "center",
         widget = wibox.container.place,
     }
-    -- The ✕ is only visible on the active tab; otherwise it's an invisible
-    -- spacer that keeps every tab the same width.
-    local close_btn = wibox.widget {
-        {
-            text = "✕", align = "center", font = ctx.tab_btn_font,
-            widget = wibox.widget.textbox,
-        },
-        fg           = tab_state == "active" and theme.color_fg or theme.color_transparent,
-        forced_width = theme.BTN_SIZE - 4,
-        widget       = wibox.container.background,
-    }
 
     local tab_widget = wibox.widget {
         tab_draw,
         {
-            {
-                icon_widget, close_btn, spacing = ICON_CLOSE_GAP,
-                layout = wibox.layout.fixed.horizontal,
-            },
+            icon_widget,
             left = TAB_PAD_H, right = TAB_PAD_H + TAB_PAD_H_R_EXTRA,
             top = TAB_CONTENT_V_PAD, bottom = TAB_CONTENT_V_PAD,
             widget = wibox.container.margin,
@@ -680,20 +730,9 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     local tab_state = get_tab_state(tab_idx, leaf, tc)
     local gap       = theme.gap()
 
-    -- Returns true if (mx, my) is over the close button of this tab.
-    local function in_close_btn(mx, my, g)
-        local sx  = ctx.state.scroll_x or 0
-        local cx1 = g.x - sx + tab_slot_x(tab_idx, leaf.active_tab, ctx.icon_size)
-            + TAB_PAD_H + ctx.icon_size + ICON_CLOSE_GAP
-        return tab_state == "active"
-            and mx >= cx1 and mx < cx1 + theme.BTN_SIZE - 4
-            and my >= g.y - gap
-            and my < g.y - gap + ctx.tb_h
-    end
-
     local function in_tab_content(mx, my, g)
         local sx = ctx.state.scroll_x or 0
-        return tab_content_hit(mx - (g.x - sx), tab_idx, leaf.active_tab, ctx.icon_size)
+        return tab_content_hit(mx - (g.x - sx), tab_idx, ctx.icon_size)
             and my >= g.y - gap
             and my < g.y - gap + ctx.tb_h
     end
@@ -711,13 +750,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
         local mx, my = m.x, m.y
         local sx     = ctx.state.scroll_x or 0
         local cached = core.geo[ctx.t]
-        -- Released over the close button of the originating tab: close it.
-        local og = cached and cached.geos[leaf.id]
-        if og and in_close_btn(mx, my, og) then
-            core.drop_pickup()
-            tc:kill()
-            return false
-        end
         if cached then
             for _, drop_leaf in ipairs(tree.collect_leaves(ctx.state.root)) do
                 local lid = drop_leaf.id
@@ -730,8 +762,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
                         awful.layout.arrange(ctx.s)
                     elseif my < g.y then
                         -- Same leaf, in tab bar: reorder tabs by drop position.
-                        local target = tab_index_at(mx - gx, leaf.active_tab,
-                            #leaf.tabs, ctx.icon_size)
+                        local target = tab_index_at(mx - gx, #leaf.tabs, ctx.icon_size)
                         if not target then
                             core.drop_pickup()
                             awful.layout.arrange(ctx.s)
@@ -789,6 +820,7 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
 
     -- Begin a tab drag: pick up immediately, grab after the event batch.
     local function start_tab_drag()
+        hide_close_popup()
         drag.pickup  = core.pickup_client(tc)
         shown_picked = false
         gears.timer.delayed_call(function()
@@ -804,6 +836,20 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
     end
 
     local tab_widget = build_tab_visual(tc, entry, ctx, tab_state)
+
+    -- The ✕ lives in a hover popup under the active tab (no inline button).
+    tab_widget:connect_signal("mouse::enter", function()
+        if tab_state ~= "active" or drag.pickup.tag ~= "idle" then return end
+        local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
+        if not g or leaf.minimized then return end
+        local x = g.x - (ctx.state.scroll_x or 0)
+            + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
+        local cc = colors.get_client_color(tc)
+        show_close_popup(tc, x, g.y - gap + ctx.tb_h, ctx.icon_size,
+            cc and cc.dark or theme.color_bg,
+            cc and cc.light or theme.color_fg)
+    end)
+    tab_widget:connect_signal("mouse::leave", schedule_hide_close_popup)
 
     tab_widget:buttons(gears.table.join(
         awful.button({}, 1, function()
@@ -832,17 +878,17 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             gears.timer.delayed_call(function() local_tab_click_active = false end)
             local sw = api()
             if sw.on_menu_close then sw.on_menu_close() end
+            hide_close_popup()
             if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
                 hide_tab_color_menu(); return
             end
             local tab_x = g.x - (ctx.state.scroll_x or 0)
-                + select(1, tab_content_bounds(tab_idx, leaf.active_tab, ctx.icon_size))
+                + select(1, tab_content_bounds(tab_idx, ctx.icon_size))
             local bar_bottom = g.y - gap + ctx.tb_h
             local cc = colors.get_client_color(tc)
             show_tab_color_menu(tc, ctx.s, tab_x, bar_bottom,
                 cc and cc.dark or theme.color_bg,
-                cc and cc.light or theme.color_fg,
-                ctx.icon_size + ICON_CLOSE_GAP + theme.BTN_SIZE - 4)
+                cc and cc.light or theme.color_fg)
         end)
     ))
 
@@ -987,23 +1033,13 @@ local function tb_split_tab_layers(tab_widgets, active_tab, n_tabs, entry)
         function sp:draw() end
         pool[#pool + 1] = sp
     end
-    if not entry._active_tab_margin then
-        entry._active_tab_margin = wibox.container.margin()
-        entry._active_tab_margin.right = ACTIVE_TAB_AFTER_GAP
-    end
-
     local behind, above = {}, {}
     for i, tw in ipairs(tab_widgets) do
         local sp = pool[i]
-        local render_tw = tw
-        if i == active_tab and active_tab < n_tabs then
-            entry._active_tab_margin:set_widget(tw)
-            render_tw = entry._active_tab_margin
-        end
-        sp._ref = render_tw
+        sp._ref = tw
         if i == active_tab or i > n_tabs then
             table.insert(behind, sp)
-            table.insert(above, render_tw)
+            table.insert(above, tw)
         else
             table.insert(behind, tw)
             table.insert(above, sp)
@@ -1210,7 +1246,6 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
         tb_h         = tb_h,
         tb_bar_h     = tb_h,
         icon_size    = tb_h - 2 * TAB_CONTENT_V_PAD,
-        tab_btn_font = beautiful.splitwm_tab_btn_font or "monospace bold 18px",
         simple_tabs  = leaf.minimized and not leaf.min_anim
             and par_dir_min ~= tree.DIR_H,
     }
@@ -1479,6 +1514,10 @@ end
 
 function M.update(s, t, state, geos, leaves)
     if not core.tabbar[s] then core.tabbar[s] = {} end
+
+    if close_popup.client and not close_popup.client.valid then
+        hide_close_popup()
+    end
 
     local all_tabs_fp = tb_compute_all_tabs_fingerprint(leaves)
     local alive = {}

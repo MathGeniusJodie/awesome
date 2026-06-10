@@ -177,8 +177,7 @@ local function hover_poll_tick()
                 local gx = g and g.x - sx
                 if g and mx >= gx and mx < gx + g.width
                         and my >= g.y - gap and my < g.y - gap + tb_h then
-                    local tab_idx = tb.tab_index_at(mx - gx, leaf.active_tab,
-                        #leaf.tabs, icon_sz)
+                    local tab_idx = tb.tab_index_at(mx - gx, #leaf.tabs, icon_sz)
                     if tab_idx and tab_idx ~= leaf.active_tab and leaf.tabs[tab_idx] then
                         leaf.active_tab = tab_idx
                         state.focused_leaf_id = leaf.id
