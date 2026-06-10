@@ -53,13 +53,33 @@ end
 -- repaint timer applies the latest target at most once per frame.
 ---------------------------------------------------------------------------
 
+local GLib = require("lgi").GLib
+
 local FRAME_S = 1 / 60
 
 local frame_pending = {}  -- [screen] = true while a repaint is owed
-local frame_timer
+local flush_scheduled = false
 local pipe_clicks = 0     -- accumulated raw deltas awaiting dispatch
 
-local function flush_frames()
+local flush_frames
+
+-- One-shot chain instead of a fixed-rate timer: the next flush is only
+-- scheduled after the previous one has fully landed, so 60fps is a cap —
+-- when a frame takes longer than 1/60s, the rate drops instead of frames
+-- queueing up behind a slow X server.
+local function schedule_flush(delay)
+    if flush_scheduled then return end
+    flush_scheduled = true
+    gears.timer.start_new(math.max(delay or FRAME_S, 0.001), function()
+        flush_scheduled = false
+        flush_frames()
+        return false
+    end)
+end
+
+flush_frames = function()
+    local t0 = GLib.get_monotonic_time()
+
     -- Dispatch accumulated raw-pipe deltas. mouse.current_client and
     -- mouse.screen are synchronous X round-trips, so they must run here
     -- (once per frame), never in the per-event handler.
@@ -89,25 +109,24 @@ local function flush_frames()
             awful.layout.arrange(s)
         end
     end
-    if not next(frame_pending) and pipe_clicks == 0 and frame_timer then
-        frame_timer:stop()
-        frame_timer = nil
-    end
-end
 
-local function request_frame_tick()
-    if frame_timer then return end
-    frame_timer = gears.timer {
-        timeout   = FRAME_S,
-        autostart = true,
-        call_now  = false,
-        callback  = flush_frames,
-    }
+    -- awful.layout.arrange defers the real layout work to the end of this
+    -- main-loop iteration; this delayed_call runs after it. The mouse query
+    -- is a synchronous round-trip, so returning from it means the X server
+    -- has consumed everything this frame issued — only then is the next
+    -- flush scheduled, paced by how long the frame actually took.
+    gears.timer.delayed_call(function()
+        mouse.coords()
+        if next(frame_pending) or pipe_clicks ~= 0 then
+            local elapsed = (GLib.get_monotonic_time() - t0) / 1e6
+            schedule_flush(FRAME_S - elapsed)
+        end
+    end)
 end
 
 local function request_frame(s)
     frame_pending[s] = true
-    request_frame_tick()
+    schedule_flush(0)
 end
 
 -- instant skips the easing animation; the repaint is frame-coalesced so a
@@ -174,7 +193,7 @@ function scroll.start_pipe()
             -- Pure Lua only here — this runs per event at stream rate.
             -- The frame flush decides where (and whether) to apply it.
             pipe_clicks = pipe_clicks + clicks
-            request_frame_tick()
+            schedule_flush(0)
         end,
         exit = function() scroll.pipe_active = false end,
     })
