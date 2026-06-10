@@ -136,11 +136,6 @@ M.TAB_CONTENT_V_PAD = TAB_CONTENT_V_PAD
 local click_away = require("splitwm.click_away")
 
 local tab_color_menu_state = { wb = nil, watcher = nil }
-local local_tab_click_active = false
-
--- Per-event dedup flag: set for the duration of the event that closed a
--- menu, so multiple handlers in one event batch don't each re-trigger.
-local menu_was_open_this_event = false
 
 ---------------------------------------------------------------------------
 -- Tab shape — exported so rc.lua wibar capsules can match the tab profile
@@ -441,27 +436,6 @@ local function show_tab_color_menu(tc, s, tab_x, bar_bottom, bg_color, border_co
         }
     end
     ms.watcher.arm()
-end
-
--- Closes the menu if open and returns true; returns false if already closed.
--- Deduplicates within a single event: multiple handlers firing for the same
--- click all check this, but only the first actually closes.
-local function mark_menu_closed()
-    menu_was_open_this_event = true
-    gears.timer.delayed_call(function() menu_was_open_this_event = false end)
-end
-
-local function event_close_menu_if_open()
-    local sw = api()
-    if sw.menu_just_toggled and sw.menu_just_toggled() then return false end
-    if menu_was_open_this_event then return true end
-    if hide_tab_color_menu() then
-        mark_menu_closed(); return true
-    end
-    if sw.on_menu_close and sw.on_menu_close() then
-        mark_menu_closed(); return true
-    end
-    return false
 end
 
 ---------------------------------------------------------------------------
@@ -876,8 +850,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local mc = mouse.coords()
             local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
             if not (g and in_tab_content(mc.x, mc.y, g)) then return end
-            local_tab_click_active = true
-            gears.timer.delayed_call(function() local_tab_click_active = false end)
             if drag.pickup.tag == "split" and drag.pickup.split_id ~= leaf.id then
                 ops.handle_split_pickup(ctx.state, leaf.id, ctx.s); return
             end
@@ -894,10 +866,6 @@ local function tb_build_tab_widget(leaf, tc, tab_idx, entry, ctx)
             local mc = mouse.coords()
             local g = core.geo[ctx.t] and core.geo[ctx.t].geos[leaf.id]
             if not (g and in_tab_content(mc.x, mc.y, g)) then return end
-            local_tab_click_active = true
-            gears.timer.delayed_call(function() local_tab_click_active = false end)
-            local sw = api()
-            if sw.on_menu_close then sw.on_menu_close() end
             hide_close_popup()
             if tab_color_menu_state.wb and tab_color_menu_state.wb.visible then
                 hide_tab_color_menu(); return
@@ -1298,34 +1266,15 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
     })
 
     local remote_widgets = {}
-    local pending_remote_click = nil
-    local function queue_remote_click(remote_idx, remote_client)
-        if local_tab_click_active then return end
-        if not remote_client.valid then return end
-        if pending_remote_click then
-            if remote_idx > pending_remote_click.idx then
-                pending_remote_click.idx = remote_idx
-                pending_remote_click.client = remote_client
-            end
-            return
-        end
-        pending_remote_click = { idx = remote_idx, client = remote_client }
-        gears.timer.delayed_call(function()
-            local item = pending_remote_click
-            pending_remote_click = nil
-            if not (item and item.client and item.client.valid) then return end
-            ops.move_client_to_leaf_id(ctx.t, leaf.id, item.client, { screen = ctx.s })
-        end)
-    end
-
     for _, other_leaf in ipairs(leaves) do
         if other_leaf.id ~= leaf.id then
             for _, tc in ipairs(other_leaf.tabs) do
                 local remote_client = tc
-                local remote_idx = #remote_widgets + 1
-                remote_widgets[remote_idx] =
+                remote_widgets[#remote_widgets + 1] =
                     tb_build_remote_tab_widget(remote_client, entry, ctx, function()
-                        queue_remote_click(remote_idx, remote_client)
+                        if not remote_client.valid then return end
+                        ops.move_client_to_leaf_id(ctx.t, leaf.id, remote_client,
+                            { screen = ctx.s })
                     end)
             end
         end
@@ -1386,7 +1335,7 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
             if not entry.pill_dragging then entry.pill_bg.bg = theme.color_transparent end
         end)
         drag_pill:buttons(gears.table.join(awful.button({}, 1, function()
-            if event_close_menu_if_open() then return end
+            hide_tab_color_menu()
             run_v_drag(s, function() return v_bound_above end,
                 function()
                     entry.pill_dragging = true
@@ -1411,7 +1360,7 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
                 awful.layout.arrange(ctx.s)
                 return
             end
-            if event_close_menu_if_open() then return end
+            hide_tab_color_menu()
             focus_leaf(ctx.t, leaf.id)
             awful.layout.arrange(ctx.s)
         end)))

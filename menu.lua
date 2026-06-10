@@ -180,27 +180,10 @@ function menu.setup(opts)
         dismiss = function() app_menu:hide() end,
     }
 
-    local menu_just_toggled = false
-
-    splitwm.menu_just_toggled = function()
-        return menu_just_toggled
-    end
-
     splitwm.on_menu_request = function()
-        menu_just_toggled = true
-        gears.timer.delayed_call(function() menu_just_toggled = false end)
         build_menu()
         app_menu:toggle()
         menu_watcher.arm()
-    end
-
-    splitwm.on_menu_close = function()
-        if app_menu.wibox and app_menu.wibox.visible then
-            app_menu:hide()
-            pcall(function() mousegrabber.stop() end)
-            return true
-        end
-        return false
     end
 end
 
