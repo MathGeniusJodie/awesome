@@ -593,7 +593,7 @@ end
 local window_top_cache = setmetatable({}, { __mode = "k" })
 
 local WINDOW_TOP_TTL_S    = 1  -- resample at most once per second
-local WINDOW_TOP_SAMPLE_Y = 3  -- px below the window's top edge
+local WINDOW_TOP_SAMPLE_Y = 0  -- the very top row of the window
 
 -- Color (hex) of one pixel at the top-center of c's rendered content, or
 -- nil if the content is unavailable (hidden/unmapped clients have none).
@@ -626,6 +626,13 @@ function colors.window_top_color(c)
     end
     window_top_cache[c] = { hex = hex, t = now }
     return hex
+end
+
+-- Last sampled top color without refreshing. Unfocused tabs use this so
+-- they keep the color their window had when it was last visible.
+function colors.window_top_color_cached(c)
+    local cache = window_top_cache[c]
+    return cache and cache.hex or nil
 end
 
 colors.COLORS = COLORS

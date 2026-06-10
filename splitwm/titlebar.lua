@@ -646,12 +646,13 @@ end
 -- tab_state: "active" | "inactive" | "picked" | "remote".
 local function build_tab_visual(tc, entry, ctx, tab_state)
     local client_color = colors.get_client_color(tc)
-    -- The active tab takes on the window's own top color so it reads as
-    -- part of the app; inactive tabs keep their hue identity.
+    -- Tabs take on the window's own top color so they read as part of the
+    -- app. Only the active (visible) tab can be sampled live; the others
+    -- keep the color their window had when last seen, refreshed on focus.
     local tab_bg = tab_state == "picked" and theme.color_fg
         or (tab_state == "active" and colors.window_top_color(tc))
+        or colors.window_top_color_cached(tc)
         or (client_color and client_color.dark)
-        or (tab_state == "active" and theme.color_bg)
         or theme.color_btn_bg
     local tab_bg_pat    = gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
