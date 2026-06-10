@@ -1378,35 +1378,23 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
     end
 
     if leaf.minimized and par_dir_min == tree.DIR_H and not leaf.min_anim then
-        -- Horizontal squeeze: vertical pill of tab icons.
-        local function build_h_min_tab_icon(tc, i)
+        -- Horizontal squeeze: vertical stack of bare tab icons (their hue
+        -- already encodes the tab color, so no pill background needed).
+        local function build_h_min_tab_icon(tc)
             local icon_sz = ctx.icon_size - 2
-            local tstate = get_tab_state(i, leaf, tc)
-            local client_color = colors.get_client_color(tc)
-            local tab_bg = (client_color and client_color.dark)
-                or (tstate == "active" and theme.color_bg)
-                or theme.color_btn_bg
-            local pill_sz = icon_sz + 2
-            local r       = math.floor(pill_sz / 2)
             return wibox.widget {
-                {
-                    make_tab_icon(tc, icon_sz),
-                    halign = "center", valign = "center",
-                    widget = wibox.container.place,
-                },
-                bg            = tab_bg,
-                shape         = function(cr, w, h)
-                    gears.shape.rounded_rect(cr, w, h, r)
-                end,
-                forced_width  = pill_sz,
-                forced_height = pill_sz,
-                widget        = wibox.container.background,
+                make_tab_icon(tc, icon_sz),
+                halign        = "center",
+                valign        = "center",
+                forced_width  = icon_sz + 2,
+                forced_height = icon_sz + 2,
+                widget        = wibox.container.place,
             }
         end
 
         local pill_contents = {}
-        for i, tc in ipairs(leaf.tabs) do
-            pill_contents[#pill_contents + 1] = build_h_min_tab_icon(tc, i)
+        for _, tc in ipairs(leaf.tabs) do
+            pill_contents[#pill_contents + 1] = build_h_min_tab_icon(tc)
         end
 
         local vstack = {
