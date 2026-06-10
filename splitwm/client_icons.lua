@@ -105,21 +105,20 @@ local function has_live_client_icon(c)
     return ok_sizes and type(sizes) == "table" and #sizes > 0
 end
 
-local function live_client_icon_widget(c, size)
+-- Returns the live-icon widget at its natural (aspect-fitted) size; callers
+-- wanting a fixed square box wrap it in centered_box.
+local function live_client_icon_widget(c)
     if not has_live_client_icon(c) then return nil end
 
     local ok_awful, awful = pcall(require, "awful")
     if not ok_awful then return nil end
 
-    local icon = awful.widget.clienticon(c)
-    icon.forced_width = size
-    icon.forced_height = size
-    return icon
+    return awful.widget.clienticon(c)
 end
 
 local function shown_client_icon_surface(c, size)
     local target_size = math.max(1, math.floor((size or 64) + 0.5))
-    local icon = live_client_icon_widget(c, target_size)
+    local icon = live_client_icon_widget(c)
     if not icon then return nil end
 
     local ok_wibox, wibox = pcall(require, "wibox")
@@ -156,93 +155,32 @@ function M.icon_surface(icon, size)
     return class_icon_surface(icon) or coerce_surface(icon)
 end
 
-local centered_cache = setmetatable({}, { __mode = "k" })
-
-local function is_surface(v)
-    local ok_lgi, lgi = pcall(require, "lgi")
-    local ok, result = pcall(function()
-        return ok_lgi and lgi.cairo.Surface:is_type_of(v)
-    end)
-    return ok and result
-end
-
--- Renders an icon onto a square size×size surface with its visible (alpha)
--- bounding box shifted to the center. Many icon sources draw left-aligned or
--- carry lopsided transparent padding, which reads as uneven spacing in the
--- tab bar. Accepts a client, path, or cairo surface; returns nil on failure.
-function M.centered_icon_surface(icon, size)
-    if not icon then return nil end
-    local cached = centered_cache[icon]
-    if cached and cached.size == size then return cached.out end
-
-    local ok_lgi, lgi = pcall(require, "lgi")
-    local ok_bytes, bytes = pcall(require, "bytes")
-    if not (ok_lgi and ok_bytes) then return nil end
-    local cairo = lgi.cairo
-
-    local src = is_surface(icon) and icon or M.icon_surface(icon, size)
-    if not src then return nil end
-    local ok_dims, sw, sh = pcall(function()
-        return src:get_width(), src:get_height()
-    end)
-    if not ok_dims or not sw or sw <= 0 or sh <= 0 then return nil end
-
-    -- Draw the source scaled-to-fit into a buffer we can inspect.
-    local ok_stride, stride = pcall(cairo.Format.stride_for_width,
-        cairo.Format.ARGB32, size)
-    stride = ok_stride and stride and stride > 0 and stride or size * 4
-    local data = bytes.new(stride * size)
-    local buf = cairo.ImageSurface.create_for_data(data, cairo.Format.ARGB32,
-        size, size, stride)
-    local cr = cairo.Context(buf)
-    local scale = math.min(size / sw, size / sh)
-    cr:scale(scale, scale)
-    if not pcall(function() cr:set_source_surface(src, 0, 0) end) then
-        return nil
-    end
-    cr:paint()
-    buf:flush()
-
-    -- Alpha bounding box (pixels are B, G, R, A on little-endian).
-    local minx, maxx, miny, maxy = size, -1, size, -1
-    for y = 0, size - 1 do
-        local row = y * stride
-        for x = 0, size - 1 do
-            if data[row + x * 4 + 4] > 8 then
-                if x < minx then minx = x end
-                if x > maxx then maxx = x end
-                if y < miny then miny = y end
-                if y > maxy then maxy = y end
-            end
-        end
-    end
-    if maxx < 0 then return nil end
-
-    local dx = math.floor((size - 1 - maxx - minx) / 2 + 0.5)
-    local dy = math.floor((size - 1 - maxy - miny) / 2 + 0.5)
-    local out = buf
-    if dx ~= 0 or dy ~= 0 then
-        out = cairo.ImageSurface.create(cairo.Format.ARGB32, size, size)
-        local ocr = cairo.Context(out)
-        ocr:set_source_surface(buf, dx, dy)
-        ocr:paint()
-    end
-    -- `data` must outlive the buffer surface; keep it in the cache entry.
-    centered_cache[icon] = { size = size, out = out, data = data, buf = buf }
-    return out
+-- Imageboxes and clienticon widgets draw at their box origin, so an icon
+-- whose scaled image is narrower than the box ends up left-aligned. Let the
+-- inner widget report its natural fitted size and center it in a fixed
+-- size×size place container instead of forcing the size on the widget.
+local function centered_box(inner, size)
+    local ok_wibox, wibox = pcall(require, "wibox")
+    if not ok_wibox then return nil end
+    return wibox.widget {
+        inner,
+        halign        = "center",
+        valign        = "center",
+        forced_width  = size,
+        forced_height = size,
+        widget        = wibox.container.place,
+    }
 end
 
 local function image_widget(image, size)
     local ok_wibox, wibox = pcall(require, "wibox")
     if not ok_wibox then return nil end
 
-    return wibox.widget {
-        image         = image,
-        forced_width  = size,
-        forced_height = size,
-        resize        = true,
-        widget        = wibox.widget.imagebox,
-    }
+    return centered_box(wibox.widget {
+        image  = image,
+        resize = true,
+        widget = wibox.widget.imagebox,
+    }, size)
 end
 
 function M.client_icon_widget(c, size, image)
@@ -250,8 +188,8 @@ function M.client_icon_widget(c, size, image)
         return image_widget(image, size)
     end
 
-    local live_icon = live_client_icon_widget(c, size)
-    if live_icon then return live_icon end
+    local live_icon = live_client_icon_widget(c)
+    if live_icon then return centered_box(live_icon, size) end
 
     local class_icon = M.prepare_client_icon(c)
     if class_icon then
