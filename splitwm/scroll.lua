@@ -60,17 +60,20 @@ local FRAME_S = 1 / 60
 local frame_pending = {}  -- [screen] = true while a repaint is owed
 local flush_scheduled = false
 local pipe_clicks = 0     -- accumulated raw deltas awaiting dispatch
+local last_flush_t = 0    -- monotonic µs of the last flush start
 
 local flush_frames
 
 -- One-shot chain instead of a fixed-rate timer: the next flush is only
--- scheduled after the previous one has fully landed, so 60fps is a cap —
--- when a frame takes longer than 1/60s, the rate drops instead of frames
--- queueing up behind a slow X server.
-local function schedule_flush(delay)
+-- scheduled once the previous one has fully landed, and never sooner than
+-- one frame after the last flush started. 60fps is a hard cap — when a
+-- frame takes longer than 1/60s the rate drops instead of frames queueing
+-- up behind a slow X server.
+local function schedule_flush()
     if flush_scheduled then return end
     flush_scheduled = true
-    gears.timer.start_new(math.max(delay or FRAME_S, 0.001), function()
+    local since = (GLib.get_monotonic_time() - last_flush_t) / 1e6
+    gears.timer.start_new(math.max(FRAME_S - since, 0.001), function()
         flush_scheduled = false
         flush_frames()
         return false
@@ -79,6 +82,7 @@ end
 
 flush_frames = function()
     local t0 = GLib.get_monotonic_time()
+    last_flush_t = t0
 
     -- Dispatch accumulated raw-pipe deltas. mouse.current_client and
     -- mouse.screen are synchronous X round-trips, so they must run here
@@ -117,16 +121,25 @@ flush_frames = function()
     -- flush scheduled, paced by how long the frame actually took.
     gears.timer.delayed_call(function()
         mouse.coords()
+        local elapsed = (GLib.get_monotonic_time() - t0) / 1e6
+        local b = scroll._bench
+        if b then
+            b.n     = b.n + 1
+            b.total = b.total + elapsed
+            b.max   = math.max(b.max, elapsed)
+        end
         if next(frame_pending) or pipe_clicks ~= 0 then
-            local elapsed = (GLib.get_monotonic_time() - t0) / 1e6
-            schedule_flush(FRAME_S - elapsed)
+            schedule_flush()
         end
     end)
 end
 
+-- Frame-cost accounting, reset/read by benchmarks: { n, total (s), max (s) }.
+scroll._bench = nil
+
 local function request_frame(s)
     frame_pending[s] = true
-    schedule_flush(0)
+    schedule_flush()
 end
 
 -- instant skips the easing animation; the repaint is frame-coalesced so a
@@ -193,7 +206,7 @@ function scroll.start_pipe()
             -- Pure Lua only here — this runs per event at stream rate.
             -- The frame flush decides where (and whether) to apply it.
             pipe_clicks = pipe_clicks + clicks
-            schedule_flush(0)
+            schedule_flush()
         end,
         exit = function() scroll.pipe_active = false end,
     })
