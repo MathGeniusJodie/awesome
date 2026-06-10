@@ -221,9 +221,19 @@ local function run_v_drag(s, get_b, on_start, on_stop)
             moved = true
             local b = get_b()
             if not b then if on_stop then on_stop() end; return false end
+            -- Resize the two neighbors of this gap; combined height constant.
             local igap = b.parent_gap or 0
-            b.branch.ratio = math.max(0.1, math.min(0.9,
-                (m.y - b.parent_y - math.floor(igap / 2)) / (b.parent_h - igap)))
+            local rs = 0
+            for _, r in ipairs(b.branch.ratios) do rs = rs + r end
+            if rs <= 0 then rs = 1 end
+            local abs_top   = b.branch.ratios[b.top_idx]     / rs * b.usable
+            local abs_bot   = b.branch.ratios[b.top_idx + 1] / rs * b.usable
+            local combined  = abs_top + abs_bot
+            local min_h     = math.min(theme.MIN_SPLIT_H, combined / 2)
+            local new_top   = math.max(min_h, math.min(combined - min_h,
+                m.y - b.top_y - math.floor(igap / 2)))
+            b.branch.ratios[b.top_idx]     = new_top / b.usable * rs
+            b.branch.ratios[b.top_idx + 1] = (combined - new_top) / b.usable * rs
             awful.layout.arrange(s)
             return true
         end, "sb_v_double_arrow")

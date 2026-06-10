@@ -245,26 +245,23 @@ end
 -- Splitting and closing
 ---------------------------------------------------------------------------
 
--- Replace `leaf` in the tree by branch/flattened children keeping its tabs in
--- child_a. Returns (a_id, b_id) or nil.
+-- Replace `leaf` in the tree by a branch (or flatten into a same-direction
+-- parent branch), keeping its tabs in child_a.
 local function split_node(state, leaf, direction, child_a, child_b)
-    if direction == tree.DIR_H then
-        local parent, idx = tree.find_parent(state.root, leaf)
-        if parent and parent.direction == tree.DIR_H then
-            -- Flatten: insert into the existing horizontal branch.
-            local old_r = parent.ratios[idx]
-            parent.ratios[idx] = old_r * theme.SPLIT_RATIO
-            table.insert(parent.ratios, idx + 1, old_r * (1 - theme.SPLIT_RATIO))
-            parent.children[idx] = child_a
-            table.insert(parent.children, idx + 1, child_b)
-            return
-        end
+    local parent, idx = tree.find_parent(state.root, leaf)
+    if parent and parent.direction == direction then
+        -- Flatten: insert into the existing same-direction branch.
+        local old_r = parent.ratios[idx]
+        parent.ratios[idx] = old_r * theme.SPLIT_RATIO
+        table.insert(parent.ratios, idx + 1, old_r * (1 - theme.SPLIT_RATIO))
+        parent.children[idx] = child_a
+        table.insert(parent.children, idx + 1, child_b)
+        return
     end
     local branch = tree.make_branch(direction, theme.SPLIT_RATIO, child_a, child_b)
     if leaf == state.root then
         state.root = branch
     else
-        local parent, idx = tree.find_parent(state.root, leaf)
         parent.children[idx] = branch
     end
 end
@@ -309,7 +306,7 @@ function ops.close_leaf(t, leaf_id)
     if dest.active_tab == 0 and #dest.tabs > 0 then dest.active_tab = 1 end
 
     local focused_id = state.focused_leaf_id
-    if parent.direction == tree.DIR_H and #parent.children > 2 then
+    if #parent.children > 2 then
         -- N-ary: remove this child and redistribute its ratio share.
         local removed_ratio = parent.ratios[idx]
         table.remove(parent.children, idx)
@@ -332,7 +329,7 @@ function ops.close_leaf(t, leaf_id)
         local fallback = tree.collect_leaves(parent.children[fallback_idx])[1]
         state.focused_leaf_id = keep and keep.id or fallback.id
     else
-        -- Binary (or DIR_V): collapse the parent; sibling takes its place.
+        -- Binary: collapse the parent; the sibling takes its place.
         local sibling = parent.children[idx == 1 and 2 or 1]
         local keep = tree.find_leaf_by_id(sibling, focused_id)
         if parent == state.root then
@@ -471,39 +468,21 @@ end
 -- Resizing
 ---------------------------------------------------------------------------
 
+-- Grow/shrink the focused leaf against its adjacent sibling.
 function ops.resize_focused(t, delta)
     local state = core.state(t)
     local leaf = core.focused_leaf(state)
     if not leaf then return false end
     local parent, idx = tree.find_parent(state.root, leaf)
     if not parent then return false end
-    if parent.direction == tree.DIR_H then
-        -- N-ary: adjust this child and the adjacent one.
-        local N = #parent.children
-        local other = idx < N and idx + 1 or idx - 1
-        local min_r = 0.01
-        local cur       = parent.ratios[idx]   or (1 / N)
-        local cur_other = parent.ratios[other] or (1 / N)
-        local new_cur   = math.max(min_r, cur + delta)
-        parent.ratios[idx]   = new_cur
-        parent.ratios[other] = math.max(min_r, cur_other - (new_cur - cur))
-    else
-        -- DIR_V: binary, single ratio; clamp so neither side collapses.
-        local new_ratio = idx == 1 and parent.ratio + delta or parent.ratio - delta
-        local min_r, max_r = 0.1, 0.9
-        local cached = core.geo[t]
-        if cached then
-            local l1 = tree.collect_leaves(parent.children[1])[1]
-            local l2 = tree.collect_leaves(parent.children[2])[1]
-            local g1 = l1 and cached.geos[l1.id]
-            local g2 = l2 and cached.geos[l2.id]
-            if g1 and g2 then
-                min_r = theme.MIN_SPLIT_H / (g1.height + g2.height + theme.gap())
-                max_r = 1 - min_r
-            end
-        end
-        parent.ratio = math.max(min_r, math.min(max_r, new_ratio))
-    end
+    local N = #parent.children
+    local other = idx < N and idx + 1 or idx - 1
+    local min_r = 0.01
+    local cur       = parent.ratios[idx]   or (1 / N)
+    local cur_other = parent.ratios[other] or (1 / N)
+    local new_cur   = math.max(min_r, cur + delta)
+    parent.ratios[idx]   = new_cur
+    parent.ratios[other] = math.max(min_r, cur_other - (new_cur - cur))
     return true
 end
 

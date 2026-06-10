@@ -22,25 +22,16 @@ function tree.make_leaf()
     return { kind = "leaf", id = gen_id(), tabs = {}, active_tab = 0 }
 end
 
--- DIR_H: n-ary branch; ratios = {r, 1-r} initially.
--- DIR_V: binary branch with a single ratio.
+-- All branches are n-ary with a ratios list; ratio is the share of the
+-- first child ({r, 1-r} initially).
 function tree.make_branch(direction, ratio, child_a, child_b)
     local r = ratio or 0.5
-    if direction == tree.DIR_H then
-        return {
-            kind      = "branch",
-            direction = direction,
-            children  = { child_a, child_b },
-            ratios    = { r, 1 - r },
-        }
-    else
-        return {
-            kind      = "branch",
-            direction = direction,
-            ratio     = r,
-            children  = { child_a, child_b },
-        }
-    end
+    return {
+        kind      = "branch",
+        direction = direction,
+        children  = { child_a, child_b },
+        ratios    = { r, 1 - r },
+    }
 end
 
 ---------------------------------------------------------------------------
@@ -102,6 +93,43 @@ end
 -- Geometry computation
 ---------------------------------------------------------------------------
 
+-- Split `usable` px between N children along one axis: minimized leaves get
+-- min_sz each, the rest is shared by ratio, the last normal child absorbs
+-- rounding. Returns the array of child sizes.
+local function child_sizes(node, usable, min_sz)
+    local N = #node.children
+    local function is_min(i)
+        return node.children[i].kind == "leaf" and node.children[i].minimized
+    end
+
+    local min_total, ratio_sum, last_normal = 0, 0, nil
+    for i = 1, N do
+        if is_min(i) then
+            min_total = min_total + min_sz
+        else
+            ratio_sum = ratio_sum + node.ratios[i]
+            last_normal = i
+        end
+    end
+    if ratio_sum <= 0 then ratio_sum = 1 end
+    local usable_normal = math.max(0, usable - min_total)
+
+    local sizes, allocated = {}, 0
+    for i = 1, N do
+        if is_min(i) then
+            sizes[i] = min_sz
+        elseif i ~= last_normal then
+            local sz = math.max(1, math.floor(usable_normal * node.ratios[i] / ratio_sum))
+            sizes[i] = sz
+            allocated = allocated + sz
+        end
+    end
+    if last_normal then
+        sizes[last_normal] = math.max(1, usable_normal - allocated)
+    end
+    return sizes
+end
+
 local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_above, tb_h)
     if node.kind == "leaf" then
         if geos then
@@ -112,52 +140,17 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
         end
         return
     end
-    local dir, inner = node.direction, gap
-    if dir == tree.DIR_H then
-        -- N-ary: N children, N-1 inner gaps.
-        local N      = #node.children
+
+    local inner = gap
+    local N     = #node.children
+
+    if node.direction == tree.DIR_H then
         local usable = math.max(0, w - inner * (N - 1))
-        -- Reserve fixed space for minimized leaves; distribute rest by ratio.
-        local min_sz     = gap
-        local min_total  = 0
-        for i = 1, N do
-            if node.children[i].kind == "leaf" and node.children[i].minimized then
-                min_total = min_total + min_sz
-            end
-        end
-        local usable_normal = math.max(0, usable - min_total)
-        local ratio_sum = 0
-        for i = 1, N do
-            if not (node.children[i].kind == "leaf" and node.children[i].minimized) then
-                ratio_sum = ratio_sum + node.ratios[i]
-            end
-        end
-        if ratio_sum <= 0 then ratio_sum = 1 end
-        -- Find last non-minimized child (absorbs rounding remainder).
-        local last_normal = nil
-        for i = 1, N do
-            if not (node.children[i].kind == "leaf" and node.children[i].minimized) then
-                last_normal = i
-            end
-        end
-        local child_ws = {}
-        local normal_allocated = 0
-        for i = 1, N do
-            if node.children[i].kind == "leaf" and node.children[i].minimized then
-                child_ws[i] = min_sz
-            elseif i ~= last_normal then
-                local cw = math.max(1, math.floor(usable_normal * node.ratios[i] / ratio_sum))
-                child_ws[i] = cw
-                normal_allocated = normal_allocated + cw
-            end
-        end
-        if last_normal then
-            child_ws[last_normal] = math.max(1, usable_normal - normal_allocated)
-        end
-        -- Emit bounds entries and recurse.
+        -- Minimized leaves collapse to one gap width.
+        local sizes = child_sizes(node, usable, gap)
         local cx = x
         for i = 1, N do
-            local cw = child_ws[i]
+            local cw = sizes[i]
             if bounds and i < N then
                 table.insert(bounds, {
                     branch    = node,
@@ -166,43 +159,52 @@ local function compute_tree_inner(node, x, y, w, h, gap, geos, bounds, v_bound_a
                     pos       = cx + cw + math.floor(inner / 2),
                     left_x    = cx,
                     left_w    = cw,
-                    right_w   = child_ws[i + 1],
+                    right_w   = sizes[i + 1],
                     usable    = usable,
                     start     = y, span = h,
                     parent_x  = x, parent_w = w, parent_gap = inner,
                 })
             end
-            compute_tree_inner(node.children[i], cx, y, cw, h, gap, geos, bounds, v_bound_above, tb_h)
+            compute_tree_inner(node.children[i], cx, y, cw, h, gap,
+                geos, bounds, v_bound_above, tb_h)
             cx = cx + cw + inner
         end
     else
-        -- DIR_V: minimized child gets a slot just tall enough for the titlebar (no leftover gap).
-        local usable = h - inner
-        local min_sz  = math.max(0, (tb_h or gap) - inner)
-        local c1_min  = node.children[1].kind == "leaf" and node.children[1].minimized
-        local c2_min  = node.children[2].kind == "leaf" and node.children[2].minimized
-        local h1
-        if c1_min and not c2_min then
-            h1 = min_sz
-        elseif c2_min and not c1_min then
-            h1 = math.max(0, usable - min_sz)
-        else
-            h1 = math.floor(usable * node.ratio)
+        local usable = math.max(0, h - inner * (N - 1))
+        -- Minimized leaves get a slot just tall enough for the tab bar.
+        local min_sz = math.max(0, (tb_h or gap) - inner)
+        local sizes = child_sizes(node, usable, min_sz)
+        local cy = y
+        for i = 1, N do
+            local ch = sizes[i]
+            -- The bound above child i (nil for the first child, which
+            -- inherits whatever bound is above this branch).
+            local bnd = v_bound_above
+            if bounds and i > 1 then
+                bnd = {
+                    branch     = node,
+                    dir        = tree.DIR_V,
+                    top_idx    = i - 1,
+                    pos        = cy - math.ceil(inner / 2),
+                    top_y      = cy - inner - sizes[i - 1],
+                    top_h      = sizes[i - 1],
+                    bottom_h   = ch,
+                    usable     = usable,
+                    start      = x, span = w,
+                    parent_gap = inner,
+                }
+                table.insert(bounds, bnd)
+            end
+            compute_tree_inner(node.children[i], x, cy, w, ch, gap,
+                geos, bounds, bnd, tb_h)
+            cy = cy + ch + inner
         end
-        h1 = math.max(0, math.min(usable, h1))
-        local bnd
-        if bounds then
-            bnd = { branch = node, dir = tree.DIR_V, pos = y + h1 + math.floor(inner / 2),
-                start = x, span = w, parent_y = y, parent_h = h, parent_gap = inner }
-            table.insert(bounds, bnd)
-        end
-        compute_tree_inner(node.children[1], x, y,          w, h1,        gap, geos, bounds, v_bound_above, tb_h)
-        compute_tree_inner(node.children[2], x, y+h1+inner, w, usable-h1, gap, geos, bounds, bnd,          tb_h)
     end
 end
 
 function tree.compute_tree(node, x, y, w, h, gap, geos, bounds, tb_h)
-    compute_tree_inner(node, x+gap, y+gap, w-2*gap, h-2*gap, gap, geos, bounds, nil, tb_h)
+    compute_tree_inner(node, x + gap, y + gap, w - 2 * gap, h - 2 * gap,
+        gap, geos, bounds, nil, tb_h)
 end
 
 -- Given leaves and canvas geos, find the nearest leaf to screen point (mx, my)
@@ -215,15 +217,17 @@ function tree.find_gap_drop_target(leaves, geos, scroll_x, mx, my, gap)
         local g = geos[lid]
         if g then
             local gx = g.x - scroll_x
-            local dx = mx < gx and (gx - mx) or (mx >= gx + g.width and (mx - gx - g.width) or 0)
-            local dy = my < g.y - gap and (g.y - gap - my) or (my >= g.y + g.height and (my - g.y - g.height) or 0)
+            local dx = mx < gx and (gx - mx)
+                or (mx >= gx + g.width and (mx - gx - g.width) or 0)
+            local dy = my < g.y - gap and (g.y - gap - my)
+                or (my >= g.y + g.height and (my - g.y - g.height) or 0)
             local dist = dx + dy
             if dist < best_dist then best_dist = dist; best_lid = lid end
         end
     end
     if not best_lid then return nil end
-    local g   = geos[best_lid]
-    local gx  = g.x - scroll_x
+    local g    = geos[best_lid]
+    local gx   = g.x - scroll_x
     local dx_l = math.max(0, gx - mx)
     local dx_r = math.max(0, mx - (gx + g.width))
     local dy_t = math.max(0, (g.y - gap) - my)
