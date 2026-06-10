@@ -291,6 +291,8 @@ function splitwm.setup()
     awesome.connect_signal("startup", function()
         for s in screen do awful.layout.arrange(s) end
     end)
+
+    scroll.start_pipe()
 end
 
 return splitwm

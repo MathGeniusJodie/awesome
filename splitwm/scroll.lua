@@ -62,7 +62,7 @@ function scroll.scroll_to(s, tag, target_x, instant)
     start_anim(s, tag)
 end
 
-function scroll.scroll_delta(s, delta_x, instant)
+local function apply_delta(s, delta_x, instant)
     local t = s and s.selected_tag
     if not t then return end
     local state = core.state(t)
@@ -70,6 +70,49 @@ function scroll.scroll_delta(s, delta_x, instant)
     -- don't lose distance to an in-flight animation.
     scroll.scroll_to(s, t, (state.scroll_target or state.scroll_x or 0) + delta_x,
         instant)
+end
+
+function scroll.scroll_delta(s, delta_x, instant)
+    -- While the raw-delta pipe is running it owns trackpad scrolling; the
+    -- emulated button-6/7 events (instant steps) would double-scroll.
+    if instant and scroll.pipe_active then return end
+    apply_delta(s, delta_x, instant)
+end
+
+---------------------------------------------------------------------------
+-- Raw smooth-scroll pipe
+--
+-- X only delivers quantized wheel clicks to awesome, so splitwm/scrollpipe
+-- (a small XInput2 helper) streams the raw horizontal scroll deltas of every
+-- pointer device as wheel-click fractions. Each delta pans the canvas
+-- directly — pixel-smooth trackpad scrolling.
+---------------------------------------------------------------------------
+
+scroll.pipe_active = false
+
+local PIPE_HELPER = gears.filesystem.get_configuration_dir() .. "splitwm/scrollpipe"
+
+function scroll.start_pipe()
+    if not gears.filesystem.file_executable(PIPE_HELPER) then return end
+    awful.spawn.with_line_callback(PIPE_HELPER, {
+        stdout = function(line)
+            local n = line:match("^# devices (%d+)")
+            if n then
+                -- Fall back to button-6/7 steps when no device has a
+                -- horizontal scroll axis (e.g. under Xephyr).
+                scroll.pipe_active = tonumber(n) > 0
+                return
+            end
+            if not scroll.pipe_active then return end
+            local clicks = tonumber(line)
+            if not clicks or clicks == 0 then return end
+            -- Over a client window the application owns scrolling.
+            if mouse.current_client then return end
+            local s = mouse.screen
+            if s then apply_delta(s, clicks * theme.SCROLL_STEP, true) end
+        end,
+        exit = function() scroll.pipe_active = false end,
+    })
 end
 
 -- Scroll so the focused split sits inside the viewport (with one gap margin).
