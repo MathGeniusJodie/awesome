@@ -60,7 +60,12 @@ local PLUS_BTN_GAP = 54
 local REMOTE_TAB_GROUP_GAP = -5
 
 -- Extra spacing added between tabs (on top of the shape overlap).
-local TAB_GAP = -24
+-- Sized so adjacent tab icons clear each other now that tabs are icon-only.
+local TAB_GAP = -2
+
+-- Vertical overlap between stacked icon pills in a horizontally-minimized
+-- split (was coupled to TAB_GAP when tabs still had inline close buttons).
+local PILL_STACK_GAP = -24
 
 -- Corner radius for the focus-border widget on empty (no-tab) leaves.
 -- Distinct from beautiful.splitwm_empty_radius (content background).
@@ -1430,7 +1435,7 @@ local function update_leaf(s, t, state, geos, leaves, leaf, all_tabs_fp)
         end
 
         local vstack = {
-            spacing = TAB_GAP,
+            spacing = PILL_STACK_GAP,
             layout = wibox.layout.fixed.vertical,
             table.unpack(pill_contents),
         }
