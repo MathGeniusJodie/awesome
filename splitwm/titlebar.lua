@@ -645,21 +645,20 @@ end
 -- background, app icon, close-button slot, and tooltip wiring.
 -- tab_state: "active" | "inactive" | "picked" | "remote".
 local function build_tab_visual(tc, entry, ctx, tab_state)
-    local client_color = colors.get_client_color(tc)
     -- Tabs take on the window's own top color so they read as part of the
     -- app. Only the active (visible) tab can be sampled live; the others
     -- keep the color their window had when last seen, refreshed on focus.
+    -- With no sampled color at all, no tab shape is drawn — just the icon.
     local tab_bg = tab_state == "picked" and theme.color_fg
         or (tab_state == "active" and colors.window_top_color(tc))
         or colors.window_top_color_cached(tc)
-        or (client_color and client_color.dark)
-        or theme.color_btn_bg
-    local tab_bg_pat    = gears.color(tab_bg)
+    local tab_bg_pat    = tab_bg and gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
     local outlined = tab_state == "active" or tab_state == "picked"
 
     local tab_draw = wibox.widget.base.make_widget()
     function tab_draw:draw(_, cr, w2, h2)
+        if not tab_bg_pat then return end
         local h = h2 - 1  -- 1px room at top so the border stroke isn't clipped
         cr:translate(0, 1)
         if ctx.simple_tabs and tab_state ~= "remote" then
