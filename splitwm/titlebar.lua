@@ -52,10 +52,10 @@ local TAB_PAD_H = 22
 local TAB_CONTENT_V_PAD = 1
 
 -- Gap between the last tab and the "+" new-tab button.
-local PLUS_BTN_GAP = 30
+local PLUS_BTN_GAP = 28
 
 -- Gap between the "+" button and the dimmed tabs from other splits.
-local REMOTE_TAB_GROUP_GAP = -2
+local REMOTE_TAB_GROUP_GAP = 0
 
 -- Extra spacing added between tabs (on top of the shape overlap).
 -- Sized so adjacent tab icons clear each other now that tabs are icon-only.
