@@ -645,6 +645,30 @@ end
 -- Builds the tab visual used by both local and remote tabs: shaped
 -- background, app icon, close-button slot, and tooltip wiring.
 -- tab_state: "active" | "inactive" | "picked" | "remote".
+-- Quick poll while a freshly shown window has no sampled color yet: keep
+-- nudging update_ui (whose fingerprint path samples the active client)
+-- until the first color lands, then drop back to the slow 1s/2s cadence.
+local first_sample_poll = setmetatable({}, { __mode = "k" })
+
+local function poll_first_sample(tc, tries)
+    if first_sample_poll[tc] then return end
+    first_sample_poll[tc] = true
+    local function tick(remaining)
+        gears.timer.start_new(0.25, function()
+            if not tc.valid then return false end
+            local found = colors.window_top_color_cached(tc) ~= nil
+            if tc.screen and core.update_ui then core.update_ui(tc.screen) end
+            if not found and remaining > 1 then
+                tick(remaining - 1)
+            else
+                first_sample_poll[tc] = nil
+            end
+            return false
+        end)
+    end
+    tick(tries)
+end
+
 local function build_tab_visual(tc, entry, ctx, tab_state)
     -- Tabs take on the window's own top color so they read as part of the
     -- app. Only the active (visible) tab can be sampled live; the others
@@ -653,6 +677,9 @@ local function build_tab_visual(tc, entry, ctx, tab_state)
     local tab_bg = tab_state == "picked" and theme.color_fg
         or (tab_state == "active" and colors.window_top_color(tc))
         or colors.window_top_color_cached(tc)
+    if tab_state == "active" and not tab_bg and tc.valid then
+        poll_first_sample(tc, 12)
+    end
     local tab_bg_pat    = tab_bg and gears.color(tab_bg)
     local widget_bc_pat = gears.color(ctx.widget_bc)
     local outlined = tab_state == "active" or tab_state == "picked"

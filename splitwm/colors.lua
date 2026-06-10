@@ -592,8 +592,9 @@ end
 
 local window_top_cache = setmetatable({}, { __mode = "k" })
 
-local WINDOW_TOP_TTL_S    = 1  -- resample at most once per second
-local WINDOW_TOP_SAMPLE_Y = 0  -- the very top row of the window
+local WINDOW_TOP_TTL_US      = 1000000  -- resample at most once per second
+local WINDOW_TOP_FAST_TTL_US = 150000   -- retry fast until a color is known
+local WINDOW_TOP_SAMPLE_Y    = 0        -- the very top row of the window
 
 -- Without a compositor, X stores no content for obscured windows: sampling
 -- a covered or freshly-unhidden window reads black garbage. Only the
@@ -614,8 +615,10 @@ end
 function colors.window_top_color(c)
     if not c.valid or c.hidden then return nil end
     local cache = window_top_cache[c]
-    local now = os.time()
-    if cache and now - cache.t <= WINDOW_TOP_TTL_S then return cache.hex end
+    local now = ok_glib and GLib.get_monotonic_time() or os.time() * 1e6
+    local ttl = (cache and cache.hex) and WINDOW_TOP_TTL_US
+        or WINDOW_TOP_FAST_TTL_US
+    if cache and now - cache.t <= ttl then return cache.hex end
 
     -- Sample only the settled, focused client (see FOCUS_SETTLE_US).
     local fs = focus_since[c]
