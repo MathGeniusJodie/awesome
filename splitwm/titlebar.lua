@@ -515,7 +515,9 @@ local function show_close_popup(tc, x, y, w, bg_color, border_color, tab_rect)
             cp.border_w,
             {
                 cp.label,
-                left = MENU_BW, right = MENU_BW, bottom = MENU_BW,
+                -- Extra bottom inset: the box has a border below but not
+                -- above, so plain centering reads visually low.
+                left = MENU_BW, right = MENU_BW, bottom = MENU_BW + 4,
                 widget = wibox.container.margin,
             },
             layout = wibox.layout.stack,
