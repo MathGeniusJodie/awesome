@@ -156,6 +156,82 @@ function M.icon_surface(icon, size)
     return class_icon_surface(icon) or coerce_surface(icon)
 end
 
+local centered_cache = setmetatable({}, { __mode = "k" })
+
+local function is_surface(v)
+    local ok_lgi, lgi = pcall(require, "lgi")
+    local ok, result = pcall(function()
+        return ok_lgi and lgi.cairo.Surface:is_type_of(v)
+    end)
+    return ok and result
+end
+
+-- Renders an icon onto a square size×size surface with its visible (alpha)
+-- bounding box shifted to the center. Many icon sources draw left-aligned or
+-- carry lopsided transparent padding, which reads as uneven spacing in the
+-- tab bar. Accepts a client, path, or cairo surface; returns nil on failure.
+function M.centered_icon_surface(icon, size)
+    if not icon then return nil end
+    local cached = centered_cache[icon]
+    if cached and cached.size == size then return cached.out end
+
+    local ok_lgi, lgi = pcall(require, "lgi")
+    local ok_bytes, bytes = pcall(require, "bytes")
+    if not (ok_lgi and ok_bytes) then return nil end
+    local cairo = lgi.cairo
+
+    local src = is_surface(icon) and icon or M.icon_surface(icon, size)
+    if not src then return nil end
+    local ok_dims, sw, sh = pcall(function()
+        return src:get_width(), src:get_height()
+    end)
+    if not ok_dims or not sw or sw <= 0 or sh <= 0 then return nil end
+
+    -- Draw the source scaled-to-fit into a buffer we can inspect.
+    local ok_stride, stride = pcall(cairo.Format.stride_for_width,
+        cairo.Format.ARGB32, size)
+    stride = ok_stride and stride and stride > 0 and stride or size * 4
+    local data = bytes.new(stride * size)
+    local buf = cairo.ImageSurface.create_for_data(data, cairo.Format.ARGB32,
+        size, size, stride)
+    local cr = cairo.Context(buf)
+    local scale = math.min(size / sw, size / sh)
+    cr:scale(scale, scale)
+    if not pcall(function() cr:set_source_surface(src, 0, 0) end) then
+        return nil
+    end
+    cr:paint()
+    buf:flush()
+
+    -- Alpha bounding box (pixels are B, G, R, A on little-endian).
+    local minx, maxx, miny, maxy = size, -1, size, -1
+    for y = 0, size - 1 do
+        local row = y * stride
+        for x = 0, size - 1 do
+            if data[row + x * 4 + 4] > 8 then
+                if x < minx then minx = x end
+                if x > maxx then maxx = x end
+                if y < miny then miny = y end
+                if y > maxy then maxy = y end
+            end
+        end
+    end
+    if maxx < 0 then return nil end
+
+    local dx = math.floor((size - 1 - maxx - minx) / 2 + 0.5)
+    local dy = math.floor((size - 1 - maxy - miny) / 2 + 0.5)
+    local out = buf
+    if dx ~= 0 or dy ~= 0 then
+        out = cairo.ImageSurface.create(cairo.Format.ARGB32, size, size)
+        local ocr = cairo.Context(out)
+        ocr:set_source_surface(buf, dx, dy)
+        ocr:paint()
+    end
+    -- `data` must outlive the buffer surface; keep it in the cache entry.
+    centered_cache[icon] = { size = size, out = out, data = data, buf = buf }
+    return out
+end
+
 local function image_widget(image, size)
     local ok_wibox, wibox = pcall(require, "wibox")
     if not ok_wibox then return nil end
