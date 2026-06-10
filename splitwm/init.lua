@@ -241,6 +241,13 @@ local function connect_client_signals()
                 scroll.ensure_in_view(c.screen, t)
             end)
         end
+        -- Refresh the tab bar shortly after focus settles so the active
+        -- tab picks up the window's sampled color without waiting for the
+        -- slow background tick.
+        gears.timer.start_new(0.45, function()
+            if c.valid and c.screen then arrange.update_ui(c.screen) end
+            return false
+        end)
     end)
 
     client.connect_signal("property::fullscreen", function(c)

@@ -595,6 +595,20 @@ local window_top_cache = setmetatable({}, { __mode = "k" })
 local WINDOW_TOP_TTL_S    = 1  -- resample at most once per second
 local WINDOW_TOP_SAMPLE_Y = 0  -- the very top row of the window
 
+-- Without a compositor, X stores no content for obscured windows: sampling
+-- a covered or freshly-unhidden window reads black garbage. Only the
+-- focused (raised) client is sampled, and only once it has had time to
+-- repaint after gaining focus.
+local FOCUS_SETTLE_US = 300000
+
+local focus_since = setmetatable({}, { __mode = "k" })
+local ok_glib, GLib = pcall(function() return require("lgi").GLib end)
+if ok_glib then
+    client.connect_signal("focus", function(c)
+        focus_since[c] = GLib.get_monotonic_time()
+    end)
+end
+
 -- Color (hex) of one pixel at the top-center of c's rendered content, or
 -- nil if the content is unavailable (hidden/unmapped clients have none).
 function colors.window_top_color(c)
@@ -602,6 +616,13 @@ function colors.window_top_color(c)
     local cache = window_top_cache[c]
     local now = os.time()
     if cache and now - cache.t <= WINDOW_TOP_TTL_S then return cache.hex end
+
+    -- Sample only the settled, focused client (see FOCUS_SETTLE_US).
+    local fs = focus_since[c]
+    if not ok_glib or client.focus ~= c or not fs
+            or GLib.get_monotonic_time() - fs < FOCUS_SETTLE_US then
+        return cache and cache.hex or nil
+    end
 
     local hex
     local ok_lgi, lgi = pcall(require, "lgi")
