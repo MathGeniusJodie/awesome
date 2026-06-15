@@ -155,12 +155,12 @@ function status.new_chip_widget()
 
         -- 3 vertical gauges inside body, 1px gap between them
         -- Inner area matches battery fill inset: 2px from each edge
-        local pad = 3
+        local pad = 2
         local gap = 1
         local n   = 3
         local gh  = ch - pad * 2
         local gw  = math.floor((cw - pad * 2 - gap * (n - 1)) / n)
-        local gy  = by + pad
+        local gy  = by + pad -1
 
         local gauges = {
             { pct = self.cpu,  r = 1,   g = 1,   b = 1   },
