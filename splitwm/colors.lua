@@ -174,10 +174,13 @@ end
 function colors.average_icon_color(icon, opts)
     opts = opts or {}
 
-    local data, stride, width, height = render_icon_to_argb32_data(icon, opts.max_size or 64)
+    local data, stride, width, height, surface = render_icon_to_argb32_data(icon, opts.max_size or 64)
     if not data then
         return nil
     end
+    -- We only need the pixel data; release the cairo surface's native memory
+    -- now rather than waiting for the Lua GC (which undercounts it).
+    if surface then pcall(function() surface:finish() end) end
 
     local alpha_threshold = opts.alpha_threshold or 0
     local sum_r, sum_g, sum_b, sum_weight = 0, 0, 0, 0
@@ -647,6 +650,13 @@ function colors.window_top_color(c)
             -- Pixels are B, G, R, A on little-endian.
             hex = string.format("#%02x%02x%02x", data[3], data[2], data[1])
         end
+        -- c.content renders the ENTIRE window into a fresh cairo surface
+        -- (megabytes of native memory) on every call. The Lua GC only sees
+        -- the tiny wrapper and rarely collects, so without an explicit
+        -- finish these pixmaps accumulate into a multi-GB leak. Release the
+        -- native resources immediately now that we have the pixel we need.
+        pcall(function() buf:finish() end)
+        pcall(function() content:finish() end)
     end
     -- Sampling fails transiently around visibility changes (the window may
     -- not be rendered yet right after a tab switch). Never let a failed
