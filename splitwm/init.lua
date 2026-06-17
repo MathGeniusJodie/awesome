@@ -42,6 +42,10 @@ splitwm.tab_shape = tb.tab_shape
 
 splitwm.set_wallpaper = underlay.set_wallpaper
 
+-- Proxy in the underlay's statusbar layer (used by status.lua to render the
+-- bottom bar on the background layer instead of in a separate ontop wibox).
+splitwm.statusbar_proxy = underlay.statusbar_proxy
+
 ---------------------------------------------------------------------------
 -- Public split/tab API (used by rc.lua keybindings and menu.lua)
 ---------------------------------------------------------------------------

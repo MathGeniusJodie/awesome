@@ -751,18 +751,23 @@ function status.setup_screen(s)
     local status_clock_capsule = status.new_status_clock_capsule(
         0, CAPSULE_HEIGHT, ICON_BOTTOM_PAD, _splitwm.tab_shape)
 
+    -- Lock and power buttons side-by-side at bottom-right corner.
+    local lock_w     = 26
+    local btn_gap    = 2
+    local total_w    = lock_w * 2 + btn_gap
+    local edge_margin = 2
+
+    -- The bottom bar renders on the underlay's statusbar layer (the background
+    -- layer) rather than in its own ontop wibox, so it sits alongside leaf
+    -- chrome and drag handles. proxies behave like wiboxes (x/y/width/height/
+    -- visible in screen coords, :setup, :buttons).
     local sg = beautiful.splitwm_gap
-    s.mywibox = wibox({
-        x       = s.geometry.x + sg,
-        y       = s.geometry.y + s.geometry.height - wibar_height,
-        width   = s.geometry.width - sg * 2,
-        height  = wibar_height,
-        bg      = "#00000000",
-        ontop   = true,
-        screen  = s,
-        visible = true,
-        type    = "dock",
-    })
+    s.mywibox = _splitwm.statusbar_proxy(s)
+    s.mywibox.x      = s.geometry.x + sg
+    s.mywibox.y      = s.geometry.y + s.geometry.height - wibar_height
+    -- Shrink so the bar doesn't extend under the lock/power buttons.
+    s.mywibox.width  = s.geometry.width - sg - total_w - edge_margin
+    s.mywibox.height = wibar_height
     s.mywibox:setup {
         layout = wibox.layout.align.horizontal,
         { -- Left
@@ -777,24 +782,11 @@ function status.setup_screen(s)
         },
     }
 
-    -- Lock and power buttons side-by-side at bottom-right corner.
-    local lock_w     = 26
-    local btn_gap    = 2
-    local total_w    = lock_w * 2 + btn_gap
-    local edge_margin = 2
-    -- Shrink the status wibox so it doesn't extend under the lock/power buttons.
-    s.mywibox.width = s.geometry.width - sg - total_w - edge_margin
-    s.mylock_wibox = wibox({
-        x       = s.geometry.x + s.geometry.width - total_w - edge_margin,
-        y       = s.geometry.y + s.geometry.height - lock_w - edge_margin,
-        width   = total_w,
-        height  = lock_w,
-        bg      = "#00000000",
-        ontop   = true,
-        screen  = s,
-        visible = true,
-        type    = "dock",
-    })
+    s.mylock_wibox = _splitwm.statusbar_proxy(s)
+    s.mylock_wibox.x      = s.geometry.x + s.geometry.width - total_w - edge_margin
+    s.mylock_wibox.y      = s.geometry.y + s.geometry.height - lock_w - edge_margin
+    s.mylock_wibox.width  = total_w
+    s.mylock_wibox.height = lock_w
     s.mylock_wibox:setup {
         layout  = wibox.layout.fixed.horizontal,
         spacing = btn_gap,

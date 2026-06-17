@@ -66,9 +66,10 @@ end
 
 function underlay.get_or_create(s)
     if underlay_cache[s] then return underlay_cache[s] end
-    local wallpaper_w  = make_wallpaper_widget()
-    local chrome_layer = wibox.layout.manual()
-    local handle_layer = wibox.layout.manual()
+    local wallpaper_w    = make_wallpaper_widget()
+    local chrome_layer   = wibox.layout.manual()
+    local statusbar_layer = wibox.layout.manual()
+    local handle_layer   = wibox.layout.manual()
     local wb = wibox {
         screen  = s,
         x       = s.geometry.x,
@@ -79,14 +80,15 @@ function underlay.get_or_create(s)
         visible = true,
         type    = "desktop",
     }
-    wb:setup { wallpaper_w, chrome_layer, handle_layer, layout = wibox.layout.stack }
+    wb:setup { wallpaper_w, chrome_layer, statusbar_layer, handle_layer, layout = wibox.layout.stack }
     wb:buttons(scroll_buttons(s))
 
     local entry = {
-        wb           = wb,
-        chrome_layer = chrome_layer,
-        handle_layer = handle_layer,
-        wallpaper_w  = wallpaper_w,
+        wb              = wb,
+        chrome_layer    = chrome_layer,
+        statusbar_layer = statusbar_layer,
+        handle_layer    = handle_layer,
+        wallpaper_w     = wallpaper_w,
     }
     underlay_cache[s] = entry
     return entry
@@ -151,6 +153,14 @@ function underlay.make_wb_proxy(layer, s)
         end,
     })
     return proxy
+end
+
+-- A wb-proxy living in the underlay's statusbar layer, so the bottom status
+-- bar renders on the background layer alongside leaf chrome and handles instead
+-- of in its own ontop wibox.
+function underlay.statusbar_proxy(s)
+    local u = underlay.get_or_create(s)
+    return underlay.make_wb_proxy(u.statusbar_layer, s)
 end
 
 function underlay.set_wallpaper(s, ws)
